@@ -7,23 +7,17 @@
   "public": true,
   "cleanUrls": true,
   "trailingSlash": false,
+  "env": {
+    "REACT_APP_API_URL": "http://localhost:5000/api",
+    "REACT_APP_ENV": "development"
+  },
   "rewrites": [
     {
       "source": "/api/:path*",
       "destination": "https://your-backend.up.railway.app/api/:path*"
     }
   ],
-  "redirects": [],
   "headers": [
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=0, must-revalidate"
-        }
-      ]
-    },
     {
       "source": "/(.*)",
       "headers": [
@@ -38,30 +32,8 @@
         {
           "key": "X-XSS-Protection",
           "value": "1; mode=block"
-        },
-        {
-          "key": "Referrer-Policy",
-          "value": "strict-origin-when-cross-origin"
         }
       ]
     }
-  ],
-  "env": [
-    {
-      "key": "REACT_APP_API_URL",
-      "value": "https://your-backend.up.railway.app/api",
-      "target": ["production"]
-    },
-    {
-      "key": "REACT_APP_ENV",
-      "value": "production",
-      "target": ["production"]
-    }
-  ],
-  "regions": ["iad1", "sfo1", "lhr1", "syd1"],
-  "functions": {
-    "api/**": {
-      "maxDuration": 30
-    }
-  }
+  ]
 }
