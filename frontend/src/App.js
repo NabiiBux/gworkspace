@@ -618,7 +618,7 @@ const CheckoutModal = ({ items }) => {
         totalPrice: item.monthlyPrice * item.quantity,
       }));
 
-      const totalAmount = orderItems.reduce((sum, item) => sum + item.totalPrice, 0);
+      /*const totalAmount = orderItems.reduce((sum, item) => sum + item.totalPrice, 0);*/
 
       const response = await axios.post(`${API_URL}/orders`, {
         items: orderItems,
