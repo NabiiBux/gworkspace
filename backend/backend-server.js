@@ -193,6 +193,7 @@ const WorkspaceOrderSchema = new mongoose.Schema(
       default: 'pending',
     },
     domainVerified: { type: Boolean, default: false },
+    txtRecord: String,
     voiceEligible: { type: Boolean, default: true }, // one Voice sub per domain (Stage 2)
   },
   { timestamps: true }
@@ -540,6 +541,61 @@ app.get('/api/workspace-orders', authenticateCustomer, async (req, res) => {
   try {
     const orders = await WorkspaceOrder.find({ customerId: req.customerId }).sort({ createdAt: -1 });
     res.json(orders);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get one workspace order (for the verification screen)
+app.get('/api/workspace-orders/:id', authenticateCustomer, async (req, res) => {
+  try {
+    const order = await WorkspaceOrder.findOne({ _id: req.params.id, customerId: req.customerId });
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    res.json(order);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get (or create) the domain verification TXT record for an order
+app.get('/api/workspace-orders/:id/verification', authenticateCustomer, async (req, res) => {
+  try {
+    const order = await WorkspaceOrder.findOne({ _id: req.params.id, customerId: req.customerId });
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (!order.txtRecord) {
+      // Generate a verification token (placeholder format until Stage 2c wires real Google verification)
+      order.txtRecord = `google-site-verification=${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+      order.status = 'domain_verification';
+      await order.save();
+    }
+    res.json({
+      domain: order.organization?.domain,
+      txtRecord: order.txtRecord,
+      verified: order.domainVerified,
+      status: order.status,
+      steps: [
+        'Open admin.google.com and start setup for your domain',
+        'Add the TXT record below to your domain DNS (at your registrar)',
+        'Wait for DNS to propagate (can take minutes to a few hours)',
+        'Verify the domain in the Google Admin console',
+        'Come back here and mark it verified',
+      ],
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Mark the domain verified (customer confirms after verifying at admin.google.com)
+// NOTE: In Stage 2c this will actually CHECK with Google. For now it records the customer's confirmation.
+app.post('/api/workspace-orders/:id/verify', authenticateCustomer, async (req, res) => {
+  try {
+    const order = await WorkspaceOrder.findOne({ _id: req.params.id, customerId: req.customerId });
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    order.domainVerified = true;
+    order.status = 'provisioned'; // becomes real provisioning trigger in Stage 2c
+    await order.save();
+    res.json({ success: true, domainVerified: true, status: order.status });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -1279,6 +1279,9 @@ function WorkspaceOrderFlow() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [orderDone, setOrderDone] = useState(null);
+  const [verification, setVerification] = useState(null);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyMsg, setVerifyMsg] = useState('');
   const [mapsReady, setMapsReady] = useState(false);
   const streetInputRef = useRef(null);
   const autocompleteRef = useRef(null);
@@ -1413,9 +1416,40 @@ function WorkspaceOrderFlow() {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       setOrderDone(res.data); setStep(4);
+      // Fetch the domain verification TXT record for this order
+      try {
+        const vres = await axios.get(`${API_URL}/workspace-orders/${res.data.id}/verification`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        setVerification(vres.data);
+      } catch (_) { /* verification fetch is non-blocking */ }
     } catch (e) {
       setSubmitError(e?.response?.data?.error || 'Could not place the order. Please check your details and try again.');
     } finally { setSubmitting(false); }
+  };
+
+  const confirmVerify = async () => {
+    if (!orderDone?.id) return;
+    setVerifying(true); setVerifyMsg('');
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API_URL}/workspace-orders/${orderDone.id}/verify`, {}, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.data.domainVerified) {
+        setVerification((v) => ({ ...(v || {}), verified: true, status: res.data.status }));
+        setVerifyMsg('Domain marked as verified. You can now add Google Voice.');
+      }
+    } catch (e) {
+      setVerifyMsg(e?.response?.data?.error || 'Could not mark as verified. Try again.');
+    } finally { setVerifying(false); }
+  };
+
+  const copyTxt = () => {
+    if (verification?.txtRecord && navigator.clipboard) {
+      navigator.clipboard.writeText(verification.txtRecord);
+      setVerifyMsg('TXT record copied to clipboard.');
+    }
   };
 
   return (
@@ -1572,18 +1606,60 @@ function WorkspaceOrderFlow() {
       )}
 
       {step === 4 && orderDone && (
-        <section className="wof-card wof-done">
-          <div className="wof-check">✓</div>
-          <h3>Order placed</h3>
-          <p>Your Google Workspace order for <strong>{form.domain}</strong> has been received.</p>
-          {orderDone.orderNumber && <p className="wof-muted">Order number: {orderDone.orderNumber}</p>}
-          <div className="wof-next">
-            <h4>Next steps</h4>
-            <ol>
-              <li>Open <a href="https://admin.google.com" target="_blank" rel="noreferrer">admin.google.com</a> in a new tab and verify your domain.</li>
-              <li>Come back here to add a Google Voice subscription (one per domain).</li>
-            </ol>
+        <section className="wof-card">
+          <div className="wof-done">
+            <div className="wof-check">✓</div>
+            <h3>Order placed</h3>
+            <p>Your Google Workspace order for <strong>{form.domain}</strong> has been received.</p>
+            {orderDone.orderNumber && <p className="wof-muted">Order number: {orderDone.orderNumber}</p>}
           </div>
+
+          {!verification?.verified && (
+            <div className="wof-verify">
+              <h4>Step 1 — Verify your domain</h4>
+              <p className="wof-muted">
+                To activate Workspace on <strong>{form.domain}</strong>, prove you own the domain.
+              </p>
+              <ol className="wof-verify-steps">
+                <li>Open <a href="https://admin.google.com" target="_blank" rel="noreferrer">admin.google.com</a> in a new tab.</li>
+                <li>Add this TXT record to your domain's DNS at your registrar:</li>
+              </ol>
+
+              {verification?.txtRecord ? (
+                <div className="wof-txt">
+                  <code>{verification.txtRecord}</code>
+                  <button type="button" className="wof-btn ghost" onClick={copyTxt}>Copy</button>
+                </div>
+              ) : (
+                <div className="wof-muted">Preparing your verification record…</div>
+              )}
+
+              <ol className="wof-verify-steps" start="3">
+                <li>Wait for DNS to update (minutes to a few hours).</li>
+                <li>Verify the domain inside the Google Admin console.</li>
+                <li>Return here and confirm below.</li>
+              </ol>
+
+              {verifyMsg && <div className="wof-verify-msg">{verifyMsg}</div>}
+
+              <div className="wof-actions">
+                <button type="button" className="wof-btn primary" onClick={confirmVerify} disabled={verifying}>
+                  {verifying ? 'Confirming…' : "I've verified my domain"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {verification?.verified && (
+            <div className="wof-verified-ok">
+              <div className="wof-verify-badge">✓ Domain verified</div>
+              <p className="wof-muted">{form.domain} is verified.</p>
+              <div className="wof-next">
+                <h4>Next step</h4>
+                <p>Add a Google Voice subscription for this domain (one per domain). We'll set this up next.</p>
+              </div>
+            </div>
+          )}
         </section>
       )}
     </div>
@@ -1652,6 +1728,15 @@ const wofStyles = `
 .wof-autocomplete-mount gmp-place-autocomplete{width:100%}
 .wof-autocomplete-mount input{height:42px;border:1px solid #d8dbe6;border-radius:10px;padding:0 12px;font-size:14px;width:100%}
 .wof-picked{margin-top:6px;font-size:13px;color:#16a34a}
+.wof-verify{margin-top:22px;border-top:1px solid #e7e9f0;padding-top:20px}
+.wof-verify h4{margin:0 0 8px}
+.wof-verify-steps{margin:10px 0;padding-left:20px;color:#5b6075;font-size:14px;line-height:1.7}
+.wof-verify-steps a{color:#2563eb}
+.wof-txt{display:flex;gap:8px;align-items:center;background:#f8f9fc;border:1px solid #e7e9f0;border-radius:10px;padding:10px 12px;margin:8px 0}
+.wof-txt code{flex:1;font-size:12px;word-break:break-all;color:#1a1a2e}
+.wof-verify-msg{margin:10px 0;font-size:13px;color:#2563eb;background:#f5f8ff;border-radius:8px;padding:8px 12px}
+.wof-verified-ok{margin-top:22px;border-top:1px solid #e7e9f0;padding-top:20px;text-align:center}
+.wof-verify-badge{display:inline-block;background:#dcfce7;color:#166534;font-weight:600;padding:8px 16px;border-radius:999px;margin-bottom:8px}
 `;
 
 
