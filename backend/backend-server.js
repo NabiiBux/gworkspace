@@ -28,6 +28,14 @@ mongoose.connect(process.env.MONGODB_URI, {
   useUnifiedTopology: true,
 });
 
+mongoose.connection.once('open', () => {
+  console.log('✅ MongoDB connected');
+  seedPlans();
+});
+mongoose.connection.on('error', (err) => {
+  console.error('MongoDB connection error:', err.message);
+});
+
 // ==================== SCHEMAS ====================
 
 // Customer Schema
@@ -133,6 +141,104 @@ const Subscription = mongoose.model('Subscription', SubscriptionSchema);
 const User = mongoose.model('User', UserSchema);
 const Invoice = mongoose.model('Invoice', InvoiceSchema);
 const Domain = mongoose.model('Domain', DomainSchema);
+
+// ==================== STAGE 1: EDITABLE PLANS + WORKSPACE ORDERS ====================
+
+// Plan Schema — prices stored in DB so they are editable without code changes
+const PlanSchema = new mongoose.Schema(
+  {
+    planId: { type: String, required: true, unique: true }, // e.g. 'starter'
+    category: { type: String, enum: ['workspace', 'voice', 'addon'], required: true },
+    name: { type: String, required: true },
+    monthlyPrice: { type: Number, required: true }, // your selling price /user/mo
+    features: [String],
+    active: { type: Boolean, default: true },
+    sortOrder: { type: Number, default: 0 },
+  },
+  { timestamps: true }
+);
+const Plan = mongoose.model('Plan', PlanSchema);
+
+// Workspace Order Schema — customer-facing order intake (USA only)
+const WorkspaceOrderSchema = new mongoose.Schema(
+  {
+    customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
+    orderNumber: { type: String, unique: true },
+    type: { type: String, default: 'workspace' },
+    plan: { id: String, name: String, monthlyPrice: Number },
+    seats: Number,
+    monthlyTotal: Number,
+    organization: {
+      name: String,
+      domain: String,
+      desiredAdminUsername: String,
+      tempPassword: String,
+      country: { type: String, default: 'US' },
+      streetAddress: String,
+      streetAddress2: String,
+      city: String,
+      state: String,
+      zip: String,
+    },
+    contact: {
+      firstName: String,
+      lastName: String,
+      email: String,
+      alternateEmail: String,
+      phone: String,
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'domain_verification', 'provisioned', 'cancelled'],
+      default: 'pending',
+    },
+    domainVerified: { type: Boolean, default: false },
+    voiceEligible: { type: Boolean, default: true }, // one Voice sub per domain (Stage 2)
+  },
+  { timestamps: true }
+);
+const WorkspaceOrder = mongoose.model('WorkspaceOrder', WorkspaceOrderSchema);
+
+// Seed placeholder plans once (won't overwrite later edits)
+async function seedPlans() {
+  try {
+    const count = await Plan.countDocuments();
+    if (count > 0) return;
+    await Plan.insertMany([
+      {
+        planId: 'starter', category: 'workspace', name: 'Business Starter', monthlyPrice: 7.20, sortOrder: 1,
+        features: ['30 GB pooled storage', 'Custom business email', 'Meet (100 participants)', 'Security & management controls']
+      },
+      {
+        planId: 'standard', category: 'workspace', name: 'Business Standard', monthlyPrice: 14.40, sortOrder: 2,
+        features: ['2 TB pooled storage', 'Custom business email', 'Meet (150 participants) + recording', 'eSignature in Docs']
+      },
+      {
+        planId: 'plus', category: 'workspace', name: 'Business Plus', monthlyPrice: 21.60, sortOrder: 3,
+        features: ['5 TB pooled storage', 'Enhanced security & Vault', 'Meet (500 participants) + attendance', 'Advanced endpoint management']
+      },
+      {
+        planId: 'frontline', category: 'workspace', name: 'Frontline Starter', monthlyPrice: 6.00, sortOrder: 4,
+        features: ['Business email', 'Shared device support', 'Meet (100 participants)', 'For frontline workers']
+      },
+      {
+        planId: 'voice-starter', category: 'voice', name: 'Voice Starter', monthlyPrice: 12.00, sortOrder: 1,
+        features: ['1 user / domain region', 'Voicemail & SMS', 'Call forwarding']
+      },
+      {
+        planId: 'voice-standard', category: 'voice', name: 'Voice Standard', monthlyPrice: 24.00, sortOrder: 2,
+        features: ['Unlimited US regions', 'Multi-level auto attendant', 'Ring groups']
+      },
+      {
+        planId: 'voice-premier', category: 'voice', name: 'Voice Premier', monthlyPrice: 36.00, sortOrder: 3,
+        features: ['Unlimited international', 'Advanced reporting', 'Desk phone support']
+      },
+    ]);
+    console.log('✅ Seeded placeholder plans');
+  } catch (e) {
+    console.error('Plan seed error:', e.message);
+  }
+}
 
 // ==================== EMAIL SERVICE ====================
 const transporter = nodemailer.createTransport({
@@ -353,54 +459,90 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// PRODUCTS & PRICING
-app.get('/api/products', (req, res) => {
-  const products = {
-    workspace: [
-      {
-        id: 'starter',
-        name: 'Business Starter',
-        monthlyPrice: 6,
-        features: ['30GB Storage', 'Gmail', 'Calendar', 'Meet (100 participants)'],
-      },
-      {
-        id: 'standard',
-        name: 'Business Standard',
-        monthlyPrice: 12,
-        features: ['2TB Storage', 'Gmail', 'Calendar', 'Meet (150 participants)', 'Advanced Security'],
-      },
-      {
-        id: 'plus',
-        name: 'Business Plus',
-        monthlyPrice: 18,
-        features: ['5TB Storage', 'Gmail', 'Calendar', 'Meet (500 participants)', 'Advanced Security', 'Vault'],
-      },
-    ],
-    voice: [
-      {
-        id: 'voice-starter',
-        name: 'Google Voice (Per User)',
-        monthlyPrice: 10,
-        features: ['Voicemail', 'Call Recording', 'SMS', 'Forwarding'],
-      },
-    ],
-    addons: [
-      {
-        id: 'advanced-security',
-        name: 'Advanced Security Add-on',
-        monthlyPrice: 10,
-        description: 'Additional security features',
-      },
-      {
-        id: 'vault',
-        name: 'Google Vault Add-on',
-        monthlyPrice: 10,
-        description: 'Email and Drive retention',
-      },
-    ],
-  };
+// PRODUCTS & PRICING (DB-backed, editable via /api/admin/plans)
+app.get('/api/products', async (req, res) => {
+  try {
+    const plans = await Plan.find({ active: true }).sort({ category: 1, sortOrder: 1 });
+    const shape = (cat) =>
+      plans
+        .filter((p) => p.category === cat)
+        .map((p) => ({ id: p.planId, name: p.name, monthlyPrice: p.monthlyPrice, features: p.features }));
+    res.json({ workspace: shape('workspace'), voice: shape('voice'), addons: shape('addon') });
+  } catch (error) {
+    res.status(500).json({ error: 'Could not load products' });
+  }
+});
 
-  res.json(products);
+// ADMIN: manage plans/prices
+app.get('/api/admin/plans', async (req, res) => {
+  try {
+    const plans = await Plan.find().sort({ category: 1, sortOrder: 1 });
+    res.json(plans);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/plans', async (req, res) => {
+  try {
+    const plan = await Plan.create(req.body);
+    res.json(plan);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.put('/api/admin/plans/:id', async (req, res) => {
+  try {
+    const plan = await Plan.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!plan) return res.status(404).json({ error: 'Plan not found' });
+    res.json(plan);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/admin/plans/:id', async (req, res) => {
+  try {
+    await Plan.findByIdAndDelete(req.params.id);
+    res.json({ deleted: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// WORKSPACE ORDERS (Stage 1 customer order intake)
+app.post('/api/workspace-orders', authenticateCustomer, async (req, res) => {
+  try {
+    const body = req.body || {};
+    if (!body.organization?.domain || !body.plan?.id || !body.seats) {
+      return res.status(400).json({ error: 'Missing required order fields' });
+    }
+    const orderNumber = `WS-${Date.now()}`;
+    const order = await WorkspaceOrder.create({
+      customerId: req.customerId,
+      orderNumber,
+      type: 'workspace',
+      plan: body.plan,
+      seats: body.seats,
+      monthlyTotal: body.monthlyTotal,
+      organization: body.organization,
+      contact: body.contact,
+      status: 'pending',
+    });
+    res.json({ orderNumber: order.orderNumber, id: order._id, status: order.status });
+  } catch (error) {
+    res.status(500).json({ error: 'Could not create order' });
+  }
+});
+
+app.get('/api/workspace-orders', authenticateCustomer, async (req, res) => {
+  try {
+    const orders = await WorkspaceOrder.find({ customerId: req.customerId }).sort({ createdAt: -1 });
+    res.json(orders);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // ORDER MANAGEMENT
