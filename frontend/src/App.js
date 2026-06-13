@@ -1302,45 +1302,70 @@ function WorkspaceOrderFlow() {
     }
     const script = document.createElement('script');
     script.id = 'gmaps-places-script';
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&loading=async&v=weekly`;
     script.async = true;
     script.defer = true;
     script.onload = () => setMapsReady(true);
     document.body.appendChild(script);
   }, []);
 
-  // Bind Places Autocomplete to the street field when we reach step 2 and maps is ready
+  // Mount the NEW PlaceAutocompleteElement when on step 2 and maps is ready
   useEffect(() => {
     if (step !== 2 || !mapsReady || !streetInputRef.current) return;
-    if (autocompleteRef.current) return; // already bound
-    const ac = new window.google.maps.places.Autocomplete(streetInputRef.current, {
-      types: ['address'],
-      componentRestrictions: { country: 'us' },
-      fields: ['address_components', 'formatted_address'],
-    });
-    autocompleteRef.current = ac;
-    ac.addListener('place_changed', () => {
-      const place = ac.getPlace();
-      if (!place || !place.address_components) return;
-      const comps = place.address_components;
-      const get = (type) => comps.find((c) => c.types.includes(type));
-      const streetNumber = get('street_number')?.long_name || '';
-      const route = get('route')?.long_name || '';
-      const city =
-        get('locality')?.long_name ||
-        get('sublocality')?.long_name ||
-        get('postal_town')?.long_name || '';
-      const stateShort = get('administrative_area_level_1')?.short_name || '';
-      const zip = get('postal_code')?.long_name || '';
-      const street = `${streetNumber} ${route}`.trim();
-      setForm((f) => ({
-        ...f,
-        streetAddress: street || f.streetAddress,
-        city,
-        state: stateShort,
-        zip,
-      }));
-    });
+    if (autocompleteRef.current) return; // already mounted
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const { PlaceAutocompleteElement } = await window.google.maps.importLibrary('places');
+        if (cancelled) return;
+
+        const el = new PlaceAutocompleteElement({
+          componentRestrictions: { country: 'us' },
+        });
+        el.style.width = '100%';
+        autocompleteRef.current = el;
+
+        // Mount it into our container
+        const container = streetInputRef.current;
+        container.innerHTML = '';
+        container.appendChild(el);
+
+        el.addEventListener('gmp-select', async (event) => {
+          try {
+            const place = event.placePrediction.toPlace();
+            await place.fetchFields({
+              fields: ['addressComponents', 'formattedAddress'],
+            });
+            const comps = place.addressComponents || [];
+            const get = (type) =>
+              comps.find((c) => (c.types || []).includes(type));
+            const streetNumber = get('street_number')?.longText || '';
+            const route = get('route')?.longText || '';
+            const city =
+              get('locality')?.longText ||
+              get('sublocality')?.longText ||
+              get('postal_town')?.longText || '';
+            const stateShort = get('administrative_area_level_1')?.shortText || '';
+            const zip = get('postal_code')?.longText || '';
+            const street = `${streetNumber} ${route}`.trim();
+            setForm((f) => ({
+              ...f,
+              streetAddress: street || f.streetAddress,
+              city,
+              state: stateShort,
+              zip,
+            }));
+          } catch (err) {
+            console.error('Place select error:', err);
+          }
+        });
+      } catch (err) {
+        console.error('Autocomplete init error:', err);
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, [step, mapsReady]);
 
   const selectedPlan = plans?.find((p) => p.id === selectedPlanId);
@@ -1462,14 +1487,15 @@ function WorkspaceOrderFlow() {
           <div className="wof-field"><label>Country *</label><input value="United States" disabled /></div>
           <div className="wof-field">
             <label>Street address *</label>
-            <input
-              ref={streetInputRef}
-              value={form.streetAddress}
-              onChange={set('streetAddress')}
-              placeholder="Start typing your address…"
-              autoComplete="off"
-            />
+            <div ref={streetInputRef} className="wof-autocomplete-mount">
+              {!MAPS_KEY && (
+                <input value={form.streetAddress} onChange={set('streetAddress')} placeholder="Enter your street address" />
+              )}
+            </div>
             <small>{MAPS_KEY ? 'Start typing and pick your address from the list.' : 'Address suggestions unavailable — enter manually.'}</small>
+            {form.streetAddress && (
+              <div className="wof-picked">Selected: {form.streetAddress}</div>
+            )}
           </div>
           <div className="wof-field"><label>Street address line 2</label>
             <input value={form.streetAddress2} onChange={set('streetAddress2')} placeholder="Suite 400 (optional)" /></div>
@@ -1613,6 +1639,10 @@ const wofStyles = `
 .wof-next a{color:#2563eb}
 .pac-container{z-index:100000!important;border-radius:10px;margin-top:2px;box-shadow:0 6px 24px rgba(16,24,40,.18);font-family:inherit}
 .pac-item{padding:8px 12px;cursor:pointer}
+.wof-autocomplete-mount{width:100%}
+.wof-autocomplete-mount gmp-place-autocomplete{width:100%}
+.wof-autocomplete-mount input{height:42px;border:1px solid #d8dbe6;border-radius:10px;padding:0 12px;font-size:14px;width:100%}
+.wof-picked{margin-top:6px;font-size:13px;color:#16a34a}
 `;
 
 
