@@ -11,6 +11,15 @@ import './App.css';
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 const MAPS_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '';
 
+// ====== EDIT THIS: allowed countries for the address autocomplete ======
+// Use lowercase 2-letter country codes. Examples:
+//   ['us']            -> United States only
+//   ['us', 'ca']      -> United States + Canada
+//   ['us', 'gb', 'au']-> US + United Kingdom + Australia
+// Full list of codes: https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2
+const ALLOWED_COUNTRIES = ['us'];
+// =======================================================================
+
 // Auth Context
 const AuthContext = createContext();
 
@@ -1321,7 +1330,7 @@ function WorkspaceOrderFlow() {
         if (cancelled) return;
 
         const el = new PlaceAutocompleteElement({
-          componentRestrictions: { country: 'us' },
+          componentRestrictions: { country: ALLOWED_COUNTRIES },
         });
         el.style.width = '100%';
         autocompleteRef.current = el;
