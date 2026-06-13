@@ -3,27 +3,25 @@
  * Complete React Application
  */
 
-import React, { useState, useEffect, useContext, createContext } from "react";
-import axios from "axios";
-import "./App.css";
+import React, { useState, useEffect, useContext, createContext, useRef } from 'react';
+import axios from 'axios';
+import './App.css';
 
 // API Config
-const API_URL = process.env.REACT_APP_API_URL || "https://gworkspace-production.up.railway.app/api";
-const MAPS_KEY =
-  process.env.REACT_APP_GOOGLE_MAPS_API_KEY ||
-  "AIzaSyBHlDoxHwgDkm-ZU3_B0Qed0zjS13vcaPw";
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const MAPS_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '';
 
 // Auth Context
 const AuthContext = createContext();
 
 const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem("token"));
+  const [token, setToken] = useState(localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (token) {
-      axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       // Verify token is still valid
     }
     setLoading(false);
@@ -32,15 +30,15 @@ const AuthProvider = ({ children }) => {
   const login = (email, token, userData) => {
     setToken(token);
     setUser(userData);
-    localStorage.setItem("token", token);
-    axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+    localStorage.setItem('token', token);
+    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
   };
 
   const logout = () => {
     setToken(null);
     setUser(null);
-    localStorage.removeItem("token");
-    delete axios.defaults.headers.common["Authorization"];
+    localStorage.removeItem('token');
+    delete axios.defaults.headers.common['Authorization'];
   };
 
   return (
@@ -55,38 +53,38 @@ const useAuth = () => useContext(AuthContext);
 // ==================== LOGIN PAGE ====================
 const LoginPage = () => {
   const { login } = useAuth();
-  const [activeTab, setActiveTab] = useState("login");
+  const [activeTab, setActiveTab] = useState('login');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState('');
 
   // Login Form
   const [loginForm, setLoginForm] = useState({
-    businessEmail: "",
-    password: "",
+    businessEmail: '',
+    password: '',
   });
 
   // Register Form
   const [registerForm, setRegisterForm] = useState({
-    companyName: "",
-    businessEmail: "",
-    password: "",
-    phone: "",
-    country: "",
-    address: "",
-    taxId: "",
+    companyName: '',
+    businessEmail: '',
+    password: '',
+    phone: '',
+    country: '',
+    address: '',
+    taxId: '',
   });
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setError("");
+    setError('');
 
     try {
       const response = await axios.post(`${API_URL}/auth/login`, loginForm);
       const { token, customer } = response.data;
       login(customer.businessEmail, token, customer);
     } catch (err) {
-      setError(err.response?.data?.error || "Login failed");
+      setError(err.response?.data?.error || 'Login failed');
     } finally {
       setLoading(false);
     }
@@ -95,17 +93,14 @@ const LoginPage = () => {
   const handleRegister = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setError("");
+    setError('');
 
     try {
-      const response = await axios.post(
-        `${API_URL}/auth/register`,
-        registerForm,
-      );
+      const response = await axios.post(`${API_URL}/auth/register`, registerForm);
       const { token, customer } = response.data;
       login(customer.businessEmail, token, customer);
     } catch (err) {
-      setError(err.response?.data?.error || "Registration failed");
+      setError(err.response?.data?.error || 'Registration failed');
     } finally {
       setLoading(false);
     }
@@ -121,14 +116,14 @@ const LoginPage = () => {
 
         <div className="auth-tabs">
           <button
-            className={`tab ${activeTab === "login" ? "active" : ""}`}
-            onClick={() => setActiveTab("login")}
+            className={`tab ${activeTab === 'login' ? 'active' : ''}`}
+            onClick={() => setActiveTab('login')}
           >
             Login
           </button>
           <button
-            className={`tab ${activeTab === "register" ? "active" : ""}`}
-            onClick={() => setActiveTab("register")}
+            className={`tab ${activeTab === 'register' ? 'active' : ''}`}
+            onClick={() => setActiveTab('register')}
           >
             Register
           </button>
@@ -136,7 +131,7 @@ const LoginPage = () => {
 
         {error && <div className="error-message">{error}</div>}
 
-        {activeTab === "login" && (
+        {activeTab === 'login' && (
           <form onSubmit={handleLogin} className="auth-form">
             <div className="form-group">
               <label>Business Email</label>
@@ -164,17 +159,13 @@ const LoginPage = () => {
               />
             </div>
 
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={loading}
-            >
-              {loading ? "Logging in..." : "Login"}
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? 'Logging in...' : 'Login'}
             </button>
           </form>
         )}
 
-        {activeTab === "register" && (
+        {activeTab === 'register' && (
           <form onSubmit={handleRegister} className="auth-form">
             <div className="form-row">
               <div className="form-group">
@@ -275,12 +266,8 @@ const LoginPage = () => {
               />
             </div>
 
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={loading}
-            >
-              {loading ? "Creating Account..." : "Create Account"}
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? 'Creating Account...' : 'Create Account'}
             </button>
           </form>
         )}
@@ -292,7 +279,7 @@ const LoginPage = () => {
 // ==================== DASHBOARD ====================
 const Dashboard = () => {
   const { user, logout } = useAuth();
-  const [activeSection, setActiveSection] = useState("overview");
+  const [activeSection, setActiveSection] = useState('overview');
   const [stats, setStats] = useState(null);
 
   useEffect(() => {
@@ -304,7 +291,7 @@ const Dashboard = () => {
       const response = await axios.get(`${API_URL}/dashboard`);
       setStats(response.data);
     } catch (error) {
-      console.error("Error fetching dashboard:", error);
+      console.error('Error fetching dashboard:', error);
     }
   };
 
@@ -319,64 +306,64 @@ const Dashboard = () => {
         <ul className="sidebar-menu">
           <li>
             <button
-              className={`menu-item ${activeSection === "overview" ? "active" : ""}`}
-              onClick={() => setActiveSection("overview")}
+              className={`menu-item ${activeSection === 'overview' ? 'active' : ''}`}
+              onClick={() => setActiveSection('overview')}
             >
               📈 Overview
             </button>
           </li>
           <li>
             <button
-              className={`menu-item ${activeSection === "order-workspace" ? "active" : ""}`}
-              onClick={() => setActiveSection("order-workspace")}
+              className={`menu-item ${activeSection === 'order-workspace' ? 'active' : ''}`}
+              onClick={() => setActiveSection('order-workspace')}
             >
               ✨ Order Workspace
             </button>
           </li>
           <li>
             <button
-              className={`menu-item ${activeSection === "products" ? "active" : ""}`}
-              onClick={() => setActiveSection("products")}
+              className={`menu-item ${activeSection === 'products' ? 'active' : ''}`}
+              onClick={() => setActiveSection('products')}
             >
               📦 Products
             </button>
           </li>
           <li>
             <button
-              className={`menu-item ${activeSection === "orders" ? "active" : ""}`}
-              onClick={() => setActiveSection("orders")}
+              className={`menu-item ${activeSection === 'orders' ? 'active' : ''}`}
+              onClick={() => setActiveSection('orders')}
             >
               🛒 Orders
             </button>
           </li>
           <li>
             <button
-              className={`menu-item ${activeSection === "subscriptions" ? "active" : ""}`}
-              onClick={() => setActiveSection("subscriptions")}
+              className={`menu-item ${activeSection === 'subscriptions' ? 'active' : ''}`}
+              onClick={() => setActiveSection('subscriptions')}
             >
               🔄 Subscriptions
             </button>
           </li>
           <li>
             <button
-              className={`menu-item ${activeSection === "users" ? "active" : ""}`}
-              onClick={() => setActiveSection("users")}
+              className={`menu-item ${activeSection === 'users' ? 'active' : ''}`}
+              onClick={() => setActiveSection('users')}
             >
               👥 Users
             </button>
           </li>
           <li>
             <button
-              className={`menu-item ${activeSection === "invoices" ? "active" : ""}`}
-              onClick={() => setActiveSection("invoices")}
+              className={`menu-item ${activeSection === 'invoices' ? 'active' : ''}`}
+              onClick={() => setActiveSection('invoices')}
             >
               📄 Invoices
             </button>
           </li>
           <li>
             <button
-              className={`menu-item ${activeSection === "domains" ? "active" : ""}`}
-              onClick={() => setActiveSection("domains")}
+              className={`menu-item ${activeSection === 'domains' ? 'active' : ''}`}
+              onClick={() => setActiveSection('domains')}
             >
               🌐 Domains
             </button>
@@ -389,14 +376,14 @@ const Dashboard = () => {
       </nav>
 
       <main className="dashboard-content">
-        {activeSection === "overview" && <OverviewSection stats={stats} />}
-        {activeSection === "order-workspace" && <WorkspaceOrderFlow />}
-        {activeSection === "products" && <ProductsSection />}
-        {activeSection === "orders" && <OrdersSection />}
-        {activeSection === "subscriptions" && <SubscriptionsSection />}
-        {activeSection === "users" && <UsersSection />}
-        {activeSection === "invoices" && <InvoicesSection />}
-        {activeSection === "domains" && <DomainsSection />}
+        {activeSection === 'overview' && <OverviewSection stats={stats} />}
+        {activeSection === 'order-workspace' && <WorkspaceOrderFlow />}
+        {activeSection === 'products' && <ProductsSection />}
+        {activeSection === 'orders' && <OrdersSection />}
+        {activeSection === 'subscriptions' && <SubscriptionsSection />}
+        {activeSection === 'users' && <UsersSection />}
+        {activeSection === 'invoices' && <InvoicesSection />}
+        {activeSection === 'domains' && <DomainsSection />}
       </main>
     </div>
   );
@@ -460,9 +447,7 @@ const OverviewSection = ({ stats }) => {
                 <td>{new Date(order.createdAt).toLocaleDateString()}</td>
                 <td>${order.totalAmount.toFixed(2)}</td>
                 <td>
-                  <span className={`status ${order.status}`}>
-                    {order.status}
-                  </span>
+                  <span className={`status ${order.status}`}>{order.status}</span>
                 </td>
               </tr>
             ))}
@@ -487,7 +472,7 @@ const ProductsSection = () => {
       const response = await axios.get(`${API_URL}/products`);
       setProducts(response.data);
     } catch (error) {
-      console.error("Error fetching products:", error);
+      console.error('Error fetching products:', error);
     }
   };
 
@@ -529,7 +514,7 @@ const ProductsSection = () => {
                 </ul>
                 <button
                   className="btn btn-primary"
-                  onClick={() => addToCart(product, "workspace")}
+                  onClick={() => addToCart(product, 'workspace')}
                 >
                   Add to Cart
                 </button>
@@ -550,7 +535,7 @@ const ProductsSection = () => {
                 </ul>
                 <button
                   className="btn btn-primary"
-                  onClick={() => addToCart(product, "voice")}
+                  onClick={() => addToCart(product, 'voice')}
                 >
                   Add to Cart
                 </button>
@@ -567,7 +552,7 @@ const ProductsSection = () => {
                 <p className="description">{product.description}</p>
                 <button
                   className="btn btn-primary"
-                  onClick={() => addToCart(product, "addon")}
+                  onClick={() => addToCart(product, 'addon')}
                 >
                   Add to Cart
                 </button>
@@ -593,9 +578,7 @@ const ProductsSection = () => {
                       type="number"
                       min="1"
                       value={item.quantity}
-                      onChange={(e) =>
-                        updateQuantity(idx, parseInt(e.target.value))
-                      }
+                      onChange={(e) => updateQuantity(idx, parseInt(e.target.value))}
                     />
                     <button
                       className="btn-remove"
@@ -611,10 +594,7 @@ const ProductsSection = () => {
                 <p className="total">
                   Total: $
                   {selectedProducts
-                    .reduce(
-                      (sum, item) => sum + item.monthlyPrice * item.quantity,
-                      0,
-                    )
+                    .reduce((sum, item) => sum + item.monthlyPrice * item.quantity, 0)
                     .toFixed(2)}
                   /month
                 </p>
@@ -631,13 +611,13 @@ const ProductsSection = () => {
 // ==================== CHECKOUT MODAL ====================
 const CheckoutModal = ({ items }) => {
   const [showModal, setShowModal] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState("stripe");
+  const [paymentMethod, setPaymentMethod] = useState('stripe');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState('');
 
   const handleCheckout = async () => {
     setLoading(true);
-    setError("");
+    setError('');
 
     try {
       const orderItems = items.map((item) => ({
@@ -648,23 +628,18 @@ const CheckoutModal = ({ items }) => {
         totalPrice: item.monthlyPrice * item.quantity,
       }));
 
-      const totalAmount = orderItems.reduce(
-        (sum, item) => sum + item.totalPrice,
-        0,
-      );
+      const totalAmount = orderItems.reduce((sum, item) => sum + item.totalPrice, 0);
 
       const response = await axios.post(`${API_URL}/orders`, {
         items: orderItems,
         paymentMethod,
       });
 
-      alert(
-        `Order placed successfully! Order #${response.data.order.orderNumber}`,
-      );
+      alert(`Order placed successfully! Order #${response.data.order.orderNumber}`);
       setShowModal(false);
       window.location.reload();
     } catch (err) {
-      setError(err.response?.data?.error || "Checkout failed");
+      setError(err.response?.data?.error || 'Checkout failed');
     } finally {
       setLoading(false);
     }
@@ -675,7 +650,7 @@ const CheckoutModal = ({ items }) => {
       <button
         className="btn btn-primary"
         onClick={() => setShowModal(true)}
-        style={{ width: "100%" }}
+        style={{ width: '100%' }}
       >
         Proceed to Checkout
       </button>
@@ -704,7 +679,7 @@ const CheckoutModal = ({ items }) => {
                 onClick={handleCheckout}
                 disabled={loading}
               >
-                {loading ? "Processing..." : "Complete Order"}
+                {loading ? 'Processing...' : 'Complete Order'}
               </button>
               <button
                 className="btn btn-secondary"
@@ -734,7 +709,7 @@ const OrdersSection = () => {
       const response = await axios.get(`${API_URL}/orders`);
       setOrders(response.data);
     } catch (error) {
-      console.error("Error fetching orders:", error);
+      console.error('Error fetching orders:', error);
     } finally {
       setLoading(false);
     }
@@ -773,9 +748,7 @@ const OrdersSection = () => {
                   </span>
                 </td>
                 <td>
-                  <span className={`status ${order.status}`}>
-                    {order.status}
-                  </span>
+                  <span className={`status ${order.status}`}>{order.status}</span>
                 </td>
               </tr>
             ))}
@@ -800,7 +773,7 @@ const SubscriptionsSection = () => {
       const response = await axios.get(`${API_URL}/subscriptions`);
       setSubscriptions(response.data);
     } catch (error) {
-      console.error("Error fetching subscriptions:", error);
+      console.error('Error fetching subscriptions:', error);
     } finally {
       setLoading(false);
     }
@@ -810,9 +783,9 @@ const SubscriptionsSection = () => {
     try {
       await axios.patch(`${API_URL}/subscriptions/${id}`, { seats: newSeats });
       fetchSubscriptions();
-      alert("Subscription updated!");
+      alert('Subscription updated!');
     } catch (error) {
-      alert("Failed to update subscription");
+      alert('Failed to update subscription');
     }
   };
 
@@ -844,7 +817,7 @@ const SubscriptionsSection = () => {
                   <strong>Price:</strong> ${sub.monthlyPrice}/month
                 </p>
                 <p>
-                  <strong>Next Billing:</strong>{" "}
+                  <strong>Next Billing:</strong>{' '}
                   {new Date(sub.nextBillingDate).toLocaleDateString()}
                 </p>
               </div>
@@ -854,9 +827,7 @@ const SubscriptionsSection = () => {
                   type="number"
                   min="1"
                   value={sub.seats}
-                  onChange={(e) =>
-                    updateSeats(sub._id, parseInt(e.target.value))
-                  }
+                  onChange={(e) => updateSeats(sub._id, parseInt(e.target.value))}
                   className="input-small"
                 />
                 <button className="btn btn-primary">Update Seats</button>
@@ -875,11 +846,11 @@ const UsersSection = () => {
   const [loading, setLoading] = useState(true);
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUser, setNewUser] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    voiceNumber: "",
-    forwardingNumber: "",
+    firstName: '',
+    lastName: '',
+    email: '',
+    voiceNumber: '',
+    forwardingNumber: '',
   });
 
   useEffect(() => {
@@ -891,7 +862,7 @@ const UsersSection = () => {
       const response = await axios.get(`${API_URL}/users`);
       setUsers(response.data);
     } catch (error) {
-      console.error("Error fetching users:", error);
+      console.error('Error fetching users:', error);
     } finally {
       setLoading(false);
     }
@@ -902,28 +873,28 @@ const UsersSection = () => {
     try {
       await axios.post(`${API_URL}/users`, newUser);
       setNewUser({
-        firstName: "",
-        lastName: "",
-        email: "",
-        voiceNumber: "",
-        forwardingNumber: "",
+        firstName: '',
+        lastName: '',
+        email: '',
+        voiceNumber: '',
+        forwardingNumber: '',
       });
       setShowAddUser(false);
       fetchUsers();
-      alert("User created successfully!");
+      alert('User created successfully!');
     } catch (error) {
-      alert("Failed to create user");
+      alert('Failed to create user');
     }
   };
 
   const handleDeleteUser = async (id) => {
-    if (window.confirm("Are you sure?")) {
+    if (window.confirm('Are you sure?')) {
       try {
         await axios.delete(`${API_URL}/users/${id}`);
         fetchUsers();
-        alert("User disabled!");
+        alert('User disabled!');
       } catch (error) {
-        alert("Failed to delete user");
+        alert('Failed to delete user');
       }
     }
   };
@@ -1052,7 +1023,7 @@ const UsersSection = () => {
                 <td>
                   <span className={`status ${user.status}`}>{user.status}</span>
                 </td>
-                <td>{user.voiceNumber || "-"}</td>
+                <td>{user.voiceNumber || '-'}</td>
                 <td>
                   <button
                     className="btn-remove"
@@ -1084,7 +1055,7 @@ const InvoicesSection = () => {
       const response = await axios.get(`${API_URL}/invoices`);
       setInvoices(response.data);
     } catch (error) {
-      console.error("Error fetching invoices:", error);
+      console.error('Error fetching invoices:', error);
     } finally {
       setLoading(false);
     }
@@ -1139,7 +1110,7 @@ const DomainsSection = () => {
   const [domains, setDomains] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddDomain, setShowAddDomain] = useState(false);
-  const [newDomain, setNewDomain] = useState("");
+  const [newDomain, setNewDomain] = useState('');
 
   useEffect(() => {
     fetchDomains();
@@ -1150,7 +1121,7 @@ const DomainsSection = () => {
       const response = await axios.get(`${API_URL}/domains`);
       setDomains(response.data);
     } catch (error) {
-      console.error("Error fetching domains:", error);
+      console.error('Error fetching domains:', error);
     } finally {
       setLoading(false);
     }
@@ -1160,12 +1131,12 @@ const DomainsSection = () => {
     e.preventDefault();
     try {
       await axios.post(`${API_URL}/domains`, { domainName: newDomain });
-      setNewDomain("");
+      setNewDomain('');
       setShowAddDomain(false);
       fetchDomains();
-      alert("Domain added! Follow the verification steps.");
+      alert('Domain added! Follow the verification steps.');
     } catch (error) {
-      alert("Failed to add domain");
+      alert('Failed to add domain');
     }
   };
 
@@ -1173,9 +1144,9 @@ const DomainsSection = () => {
     try {
       await axios.post(`${API_URL}/domains/${id}/verify`);
       fetchDomains();
-      alert("Domain verified!");
+      alert('Domain verified!');
     } catch (error) {
-      alert("Verification failed. Please check DNS records.");
+      alert('Verification failed. Please check DNS records.');
     }
   };
 
@@ -1185,10 +1156,7 @@ const DomainsSection = () => {
     <div className="section">
       <div className="section-header">
         <h2>🌐 Domains</h2>
-        <button
-          className="btn btn-primary"
-          onClick={() => setShowAddDomain(true)}
-        >
+        <button className="btn btn-primary" onClick={() => setShowAddDomain(true)}>
           + Add Domain
         </button>
       </div>
@@ -1234,9 +1202,9 @@ const DomainsSection = () => {
             <div key={domain._id} className="domain-card">
               <h4>{domain.domainName}</h4>
               <p>
-                Status:{" "}
-                <span className={domain.verified ? "verified" : "pending"}>
-                  {domain.verified ? "✓ Verified" : "⏳ Pending"}
+                Status:{' '}
+                <span className={domain.verified ? 'verified' : 'pending'}>
+                  {domain.verified ? '✓ Verified' : '⏳ Pending'}
                 </span>
               </p>
 
@@ -1275,87 +1243,36 @@ function App() {
 
 // ==================== STAGE 1: WORKSPACE ORDER FLOW ====================
 const US_STATES = [
-  ["AL", "Alabama"],
-  ["AK", "Alaska"],
-  ["AZ", "Arizona"],
-  ["AR", "Arkansas"],
-  ["CA", "California"],
-  ["CO", "Colorado"],
-  ["CT", "Connecticut"],
-  ["DE", "Delaware"],
-  ["FL", "Florida"],
-  ["GA", "Georgia"],
-  ["HI", "Hawaii"],
-  ["ID", "Idaho"],
-  ["IL", "Illinois"],
-  ["IN", "Indiana"],
-  ["IA", "Iowa"],
-  ["KS", "Kansas"],
-  ["KY", "Kentucky"],
-  ["LA", "Louisiana"],
-  ["ME", "Maine"],
-  ["MD", "Maryland"],
-  ["MA", "Massachusetts"],
-  ["MI", "Michigan"],
-  ["MN", "Minnesota"],
-  ["MS", "Mississippi"],
-  ["MO", "Missouri"],
-  ["MT", "Montana"],
-  ["NE", "Nebraska"],
-  ["NV", "Nevada"],
-  ["NH", "New Hampshire"],
-  ["NJ", "New Jersey"],
-  ["NM", "New Mexico"],
-  ["NY", "New York"],
-  ["NC", "North Carolina"],
-  ["ND", "North Dakota"],
-  ["OH", "Ohio"],
-  ["OK", "Oklahoma"],
-  ["OR", "Oregon"],
-  ["PA", "Pennsylvania"],
-  ["RI", "Rhode Island"],
-  ["SC", "South Carolina"],
-  ["SD", "South Dakota"],
-  ["TN", "Tennessee"],
-  ["TX", "Texas"],
-  ["UT", "Utah"],
-  ["VT", "Vermont"],
-  ["VA", "Virginia"],
-  ["WA", "Washington"],
-  ["WV", "West Virginia"],
-  ["WI", "Wisconsin"],
-  ["WY", "Wyoming"],
-  ["DC", "District of Columbia"],
+  ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'],
+  ['CO', 'Colorado'], ['CT', 'Connecticut'], ['DE', 'Delaware'], ['FL', 'Florida'], ['GA', 'Georgia'],
+  ['HI', 'Hawaii'], ['ID', 'Idaho'], ['IL', 'Illinois'], ['IN', 'Indiana'], ['IA', 'Iowa'],
+  ['KS', 'Kansas'], ['KY', 'Kentucky'], ['LA', 'Louisiana'], ['ME', 'Maine'], ['MD', 'Maryland'],
+  ['MA', 'Massachusetts'], ['MI', 'Michigan'], ['MN', 'Minnesota'], ['MS', 'Mississippi'], ['MO', 'Missouri'],
+  ['MT', 'Montana'], ['NE', 'Nebraska'], ['NV', 'Nevada'], ['NH', 'New Hampshire'], ['NJ', 'New Jersey'],
+  ['NM', 'New Mexico'], ['NY', 'New York'], ['NC', 'North Carolina'], ['ND', 'North Dakota'], ['OH', 'Ohio'],
+  ['OK', 'Oklahoma'], ['OR', 'Oregon'], ['PA', 'Pennsylvania'], ['RI', 'Rhode Island'], ['SC', 'South Carolina'],
+  ['SD', 'South Dakota'], ['TN', 'Tennessee'], ['TX', 'Texas'], ['UT', 'Utah'], ['VT', 'Vermont'],
+  ['VA', 'Virginia'], ['WA', 'Washington'], ['WV', 'West Virginia'], ['WI', 'Wisconsin'], ['WY', 'Wyoming'],
+  ['DC', 'District of Columbia'],
 ];
 
 function WorkspaceOrderFlow() {
   const [step, setStep] = useState(1);
   const [plans, setPlans] = useState(null);
-  const [plansError, setPlansError] = useState("");
-  const [selectedPlanId, setSelectedPlanId] = useState("");
+  const [plansError, setPlansError] = useState('');
+  const [selectedPlanId, setSelectedPlanId] = useState('');
   const [seats, setSeats] = useState(1);
   const [form, setForm] = useState({
-    organizationName: "",
-    domain: "",
-    desiredAdminUsername: "",
-    tempPassword: "",
-    country: "United States",
-    streetAddress: "",
-    streetAddress2: "",
-    city: "",
-    state: "",
-    zip: "",
-    firstName: "",
-    lastName: "",
-    email: "",
-    alternateEmail: "",
-    phone: "",
+    organizationName: '', domain: '', desiredAdminUsername: '', tempPassword: '',
+    country: 'United States', streetAddress: '', streetAddress2: '', city: '', state: '', zip: '',
+    firstName: '', lastName: '', email: '', alternateEmail: '', phone: '',
   });
-  const [zipLoading, setZipLoading] = useState(false);
-  const [zipMsg, setZipMsg] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState("");
+  const [submitError, setSubmitError] = useState('');
   const [orderDone, setOrderDone] = useState(null);
+  const [mapsReady, setMapsReady] = useState(false);
+  const streetInputRef = useRef(null);
+  const autocompleteRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -1366,114 +1283,105 @@ function WorkspaceOrderFlow() {
           setSelectedPlanId(res.data.workspace[0].id);
         }
       } catch (e) {
-        setPlansError("Could not load plans. Please try again shortly.");
+        setPlansError('Could not load plans. Please try again shortly.');
       }
     })();
   }, []);
 
-  const selectedPlan = plans?.find((p) => p.id === selectedPlanId);
-  const monthlyTotal = selectedPlan ? selectedPlan.monthlyPrice * seats : 0;
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  // Load the Google Maps JavaScript API (with Places) once
+  useEffect(() => {
+    if (!MAPS_KEY) return;
+    if (window.google && window.google.maps && window.google.maps.places) {
+      setMapsReady(true);
+      return;
+    }
+    const existing = document.getElementById('gmaps-places-script');
+    if (existing) {
+      existing.addEventListener('load', () => setMapsReady(true));
+      return;
+    }
+    const script = document.createElement('script');
+    script.id = 'gmaps-places-script';
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places`;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => setMapsReady(true);
+    document.body.appendChild(script);
+  }, []);
 
-  const lookupZip = async () => {
-    const zip = form.zip.trim();
-    if (!/^\d{5}$/.test(zip)) {
-      setZipMsg("Enter a valid 5-digit US ZIP code.");
-      return;
-    }
-    if (!MAPS_KEY) {
-      setZipMsg("Address lookup is not configured yet (missing Maps key).");
-      return;
-    }
-    setZipLoading(true);
-    setZipMsg("");
-    try {
-      const url = `https://maps.googleapis.com/maps/api/geocode/json?components=postal_code:${zip}|country:US&key=${MAPS_KEY}`;
-      const res = await axios.get(url);
-      if (res.data.status !== "OK" || !res.data.results.length) {
-        setZipMsg("No address found for that ZIP. You can type it manually.");
-        setZipLoading(false);
-        return;
-      }
-      const comps = res.data.results[0].address_components;
+  // Bind Places Autocomplete to the street field when we reach step 2 and maps is ready
+  useEffect(() => {
+    if (step !== 2 || !mapsReady || !streetInputRef.current) return;
+    if (autocompleteRef.current) return; // already bound
+    const ac = new window.google.maps.places.Autocomplete(streetInputRef.current, {
+      types: ['address'],
+      componentRestrictions: { country: 'us' },
+      fields: ['address_components', 'formatted_address'],
+    });
+    autocompleteRef.current = ac;
+    ac.addListener('place_changed', () => {
+      const place = ac.getPlace();
+      if (!place || !place.address_components) return;
+      const comps = place.address_components;
       const get = (type) => comps.find((c) => c.types.includes(type));
+      const streetNumber = get('street_number')?.long_name || '';
+      const route = get('route')?.long_name || '';
       const city =
-        get("locality")?.long_name ||
-        get("sublocality")?.long_name ||
-        get("postal_town")?.long_name ||
-        "";
-      const stateShort = get("administrative_area_level_1")?.short_name || "";
-      setForm((f) => ({ ...f, city, state: stateShort }));
-      setZipMsg("Address details filled from ZIP. Add your street address.");
-    } catch (e) {
-      setZipMsg("Lookup failed. You can type the address manually.");
-    } finally {
-      setZipLoading(false);
-    }
-  };
+        get('locality')?.long_name ||
+        get('sublocality')?.long_name ||
+        get('postal_town')?.long_name || '';
+      const stateShort = get('administrative_area_level_1')?.short_name || '';
+      const zip = get('postal_code')?.long_name || '';
+      const street = `${streetNumber} ${route}`.trim();
+      setForm((f) => ({
+        ...f,
+        streetAddress: street || f.streetAddress,
+        city,
+        state: stateShort,
+        zip,
+      }));
+    });
+  }, [step, mapsReady]);
+
+  const selectedPlan = plans?.find((p) => p.id === selectedPlanId);
+  const monthlyTotal = selectedPlan ? (selectedPlan.monthlyPrice * seats) : 0;
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
   const canContinueStep1 = selectedPlan && seats >= 1;
   const canSubmit =
     form.organizationName &&
     /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(form.domain) &&
-    form.desiredAdminUsername &&
-    form.tempPassword.length >= 8 &&
-    form.streetAddress &&
-    form.city &&
-    form.state &&
-    /^\d{5}$/.test(form.zip) &&
-    form.firstName &&
-    form.lastName &&
-    /\S+@\S+\.\S+/.test(form.email) &&
-    /\S+@\S+\.\S+/.test(form.alternateEmail);
+    form.desiredAdminUsername && form.tempPassword.length >= 8 &&
+    form.streetAddress && form.city && form.state && /^\d{5}$/.test(form.zip) &&
+    form.firstName && form.lastName &&
+    /\S+@\S+\.\S+/.test(form.email) && /\S+@\S+\.\S+/.test(form.alternateEmail);
 
   const placeOrder = async () => {
-    setSubmitting(true);
-    setSubmitError("");
+    setSubmitting(true); setSubmitError('');
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem('token');
       const payload = {
-        type: "workspace",
-        plan: {
-          id: selectedPlan.id,
-          name: selectedPlan.name,
-          monthlyPrice: selectedPlan.monthlyPrice,
-        },
-        seats: Number(seats),
-        monthlyTotal,
+        type: 'workspace',
+        plan: { id: selectedPlan.id, name: selectedPlan.name, monthlyPrice: selectedPlan.monthlyPrice },
+        seats: Number(seats), monthlyTotal,
         organization: {
-          name: form.organizationName,
-          domain: form.domain.toLowerCase(),
-          desiredAdminUsername: form.desiredAdminUsername.toLowerCase(),
-          tempPassword: form.tempPassword,
-          country: "US",
-          streetAddress: form.streetAddress,
-          streetAddress2: form.streetAddress2,
-          city: form.city,
-          state: form.state,
-          zip: form.zip,
+          name: form.organizationName, domain: form.domain.toLowerCase(),
+          desiredAdminUsername: form.desiredAdminUsername.toLowerCase(), tempPassword: form.tempPassword,
+          country: 'US', streetAddress: form.streetAddress, streetAddress2: form.streetAddress2,
+          city: form.city, state: form.state, zip: form.zip,
         },
         contact: {
-          firstName: form.firstName,
-          lastName: form.lastName,
-          email: form.email,
-          alternateEmail: form.alternateEmail,
-          phone: form.phone,
+          firstName: form.firstName, lastName: form.lastName, email: form.email,
+          alternateEmail: form.alternateEmail, phone: form.phone,
         },
       };
       const res = await axios.post(`${API_URL}/workspace-orders`, payload, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      setOrderDone(res.data);
-      setStep(4);
+      setOrderDone(res.data); setStep(4);
     } catch (e) {
-      setSubmitError(
-        e?.response?.data?.error ||
-        "Could not place the order. Please check your details and try again.",
-      );
-    } finally {
-      setSubmitting(false);
-    }
+      setSubmitError(e?.response?.data?.error || 'Could not place the order. Please check your details and try again.');
+    } finally { setSubmitting(false); }
   };
 
   return (
@@ -1481,13 +1389,11 @@ function WorkspaceOrderFlow() {
       <style>{wofStyles}</style>
       <header className="wof-head">
         <h2>Set up Google Workspace</h2>
-        <p>
-          Choose a plan, tell us about your organization, and place your order.
-        </p>
+        <p>Choose a plan, tell us about your organization, and place your order.</p>
         <ol className="wof-steps">
-          <li className={step >= 1 ? "on" : ""}>Plan</li>
-          <li className={step >= 2 ? "on" : ""}>Organization</li>
-          <li className={step >= 3 ? "on" : ""}>Review</li>
+          <li className={step >= 1 ? 'on' : ''}>Plan</li>
+          <li className={step >= 2 ? 'on' : ''}>Organization</li>
+          <li className={step >= 3 ? 'on' : ''}>Review</li>
         </ol>
       </header>
 
@@ -1495,27 +1401,17 @@ function WorkspaceOrderFlow() {
         <section className="wof-card">
           <h3>Choose your plan</h3>
           {plansError && <div className="wof-alert err">{plansError}</div>}
-          {!plans && !plansError && (
-            <div className="wof-muted">Loading plans…</div>
-          )}
+          {!plans && !plansError && <div className="wof-muted">Loading plans…</div>}
           <div className="wof-plans">
             {plans?.map((p) => (
-              <button
-                type="button"
-                key={p.id}
-                className={`wof-plan ${selectedPlanId === p.id ? "sel" : ""}`}
-                onClick={() => setSelectedPlanId(p.id)}
-              >
+              <button type="button" key={p.id}
+                className={`wof-plan ${selectedPlanId === p.id ? 'sel' : ''}`}
+                onClick={() => setSelectedPlanId(p.id)}>
                 <div className="wof-plan-name">{p.name}</div>
-                <div className="wof-plan-price">
-                  ${Number(p.monthlyPrice).toFixed(2)}
-                  <span>/user/mo</span>
-                </div>
+                <div className="wof-plan-price">${Number(p.monthlyPrice).toFixed(2)}<span>/user/mo</span></div>
                 {p.features && (
                   <ul className="wof-plan-feats">
-                    {p.features.slice(0, 4).map((f, i) => (
-                      <li key={i}>{f}</li>
-                    ))}
+                    {p.features.slice(0, 4).map((f, i) => (<li key={i}>{f}</li>))}
                   </ul>
                 )}
               </button>
@@ -1524,40 +1420,18 @@ function WorkspaceOrderFlow() {
           <div className="wof-seats">
             <label>Number of user licenses (seats)</label>
             <div className="wof-stepper">
-              <button
-                type="button"
-                onClick={() => setSeats(Math.max(1, seats - 1))}
-              >
-                −
-              </button>
-              <input
-                type="number"
-                min="1"
-                value={seats}
-                onChange={(e) =>
-                  setSeats(Math.max(1, parseInt(e.target.value || "1", 10)))
-                }
-              />
-              <button type="button" onClick={() => setSeats(seats + 1)}>
-                +
-              </button>
+              <button type="button" onClick={() => setSeats(Math.max(1, seats - 1))}>−</button>
+              <input type="number" min="1" value={seats}
+                onChange={(e) => setSeats(Math.max(1, parseInt(e.target.value || '1', 10)))} />
+              <button type="button" onClick={() => setSeats(seats + 1)}>+</button>
             </div>
           </div>
           <div className="wof-summary">
-            <span>
-              {selectedPlan ? selectedPlan.name : "—"} × {seats}
-            </span>
+            <span>{selectedPlan ? selectedPlan.name : '—'} × {seats}</span>
             <strong>${monthlyTotal.toFixed(2)}/mo</strong>
           </div>
           <div className="wof-actions">
-            <button
-              type="button"
-              className="wof-btn primary"
-              disabled={!canContinueStep1}
-              onClick={() => setStep(2)}
-            >
-              Continue
-            </button>
+            <button type="button" className="wof-btn primary" disabled={!canContinueStep1} onClick={() => setStep(2)}>Continue</button>
           </div>
         </section>
       )}
@@ -1566,180 +1440,72 @@ function WorkspaceOrderFlow() {
         <section className="wof-card">
           <h3>Organization information</h3>
           <div className="wof-grid">
-            <div className="wof-field">
-              <label>Organization name *</label>
-              <input
-                value={form.organizationName}
-                onChange={set("organizationName")}
-                placeholder="Acme Inc."
-              />
-            </div>
-            <div className="wof-field">
-              <label>Domain *</label>
-              <input
-                value={form.domain}
-                onChange={set("domain")}
-                placeholder="acme.com"
-              />
-            </div>
+            <div className="wof-field"><label>Organization name *</label>
+              <input value={form.organizationName} onChange={set('organizationName')} placeholder="Acme Inc." /></div>
+            <div className="wof-field"><label>Domain *</label>
+              <input value={form.domain} onChange={set('domain')} placeholder="acme.com" /></div>
           </div>
           <div className="wof-grid">
-            <div className="wof-field">
-              <label>Desired admin username *</label>
+            <div className="wof-field"><label>Desired admin username *</label>
               <div className="wof-inline">
-                <input
-                  value={form.desiredAdminUsername}
-                  onChange={set("desiredAdminUsername")}
-                  placeholder="admin"
-                />
-                <span className="wof-suffix">
-                  @{form.domain || "yourdomain.com"}
-                </span>
+                <input value={form.desiredAdminUsername} onChange={set('desiredAdminUsername')} placeholder="admin" />
+                <span className="wof-suffix">@{form.domain || 'yourdomain.com'}</span>
               </div>
               <small>This becomes the Workspace administrator login.</small>
             </div>
-            <div className="wof-field">
-              <label>Temporary password *</label>
-              <input
-                type="password"
-                value={form.tempPassword}
-                onChange={set("tempPassword")}
-                placeholder="At least 8 characters"
-              />
+            <div className="wof-field"><label>Temporary password *</label>
+              <input type="password" value={form.tempPassword} onChange={set('tempPassword')} placeholder="At least 8 characters" />
               <small>You'll be prompted to change this on first sign-in.</small>
             </div>
           </div>
           <h3 className="wof-subhead">Business address</h3>
-          <div className="wof-grid">
-            <div className="wof-field">
-              <label>Country *</label>
-              <input value="United States" disabled />
-            </div>
-            <div className="wof-field">
-              <label>ZIP code *</label>
-              <div className="wof-inline">
-                <input
-                  value={form.zip}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      zip: e.target.value.replace(/\D/g, "").slice(0, 5),
-                    })
-                  }
-                  placeholder="e.g. 94043"
-                  inputMode="numeric"
-                />
-                <button
-                  type="button"
-                  className="wof-btn ghost"
-                  onClick={lookupZip}
-                  disabled={zipLoading}
-                >
-                  {zipLoading ? "Looking up…" : "Auto-fill"}
-                </button>
-              </div>
-              {zipMsg && <small className="wof-zipmsg">{zipMsg}</small>}
-            </div>
-          </div>
+          <div className="wof-field"><label>Country *</label><input value="United States" disabled /></div>
           <div className="wof-field">
             <label>Street address *</label>
             <input
+              ref={streetInputRef}
               value={form.streetAddress}
-              onChange={set("streetAddress")}
-              placeholder="123 Main St"
+              onChange={set('streetAddress')}
+              placeholder="Start typing your address…"
+              autoComplete="off"
             />
+            <small>{MAPS_KEY ? 'Start typing and pick your address from the list.' : 'Address suggestions unavailable — enter manually.'}</small>
           </div>
-          <div className="wof-field">
-            <label>Street address line 2</label>
-            <input
-              value={form.streetAddress2}
-              onChange={set("streetAddress2")}
-              placeholder="Suite 400 (optional)"
-            />
-          </div>
+          <div className="wof-field"><label>Street address line 2</label>
+            <input value={form.streetAddress2} onChange={set('streetAddress2')} placeholder="Suite 400 (optional)" /></div>
           <div className="wof-grid">
-            <div className="wof-field">
-              <label>City *</label>
-              <input
-                value={form.city}
-                onChange={set("city")}
-                placeholder="Mountain View"
-              />
-            </div>
-            <div className="wof-field">
-              <label>State *</label>
-              <select value={form.state} onChange={set("state")}>
+            <div className="wof-field"><label>City *</label>
+              <input value={form.city} onChange={set('city')} placeholder="Mountain View" /></div>
+            <div className="wof-field"><label>State *</label>
+              <select value={form.state} onChange={set('state')}>
                 <option value="">Please select</option>
-                {US_STATES.map(([abbr, name]) => (
-                  <option key={abbr} value={abbr}>
-                    {name}
-                  </option>
-                ))}
+                {US_STATES.map(([abbr, name]) => (<option key={abbr} value={abbr}>{name}</option>))}
               </select>
             </div>
           </div>
+          <div className="wof-field" style={{ maxWidth: 220 }}><label>ZIP code *</label>
+            <input value={form.zip}
+              onChange={(e) => setForm({ ...form, zip: e.target.value.replace(/\D/g, '').slice(0, 5) })}
+              placeholder="ZIP" inputMode="numeric" /></div>
           <h3 className="wof-subhead">Contact information</h3>
-          <p className="wof-muted">
-            Used to create the initial administrator account.
-          </p>
+          <p className="wof-muted">Used to create the initial administrator account.</p>
           <div className="wof-grid">
-            <div className="wof-field">
-              <label>First name *</label>
-              <input value={form.firstName} onChange={set("firstName")} />
-            </div>
-            <div className="wof-field">
-              <label>Last name *</label>
-              <input value={form.lastName} onChange={set("lastName")} />
-            </div>
+            <div className="wof-field"><label>First name *</label><input value={form.firstName} onChange={set('firstName')} /></div>
+            <div className="wof-field"><label>Last name *</label><input value={form.lastName} onChange={set('lastName')} /></div>
           </div>
-          <div className="wof-field">
-            <label>Email *</label>
-            <input
-              value={form.email}
-              onChange={set("email")}
-              placeholder="you@example.com"
-            />
-          </div>
+          <div className="wof-field"><label>Email *</label>
+            <input value={form.email} onChange={set('email')} placeholder="you@example.com" /></div>
           <div className="wof-grid">
-            <div className="wof-field">
-              <label>Alternate email * (not on your new domain)</label>
-              <input
-                value={form.alternateEmail}
-                onChange={set("alternateEmail")}
-                placeholder="you@gmail.com"
-              />
-            </div>
-            <div className="wof-field">
-              <label>Phone</label>
-              <input
-                value={form.phone}
-                onChange={set("phone")}
-                placeholder="+1 555 123 4567"
-              />
-            </div>
+            <div className="wof-field"><label>Alternate email * (not on your new domain)</label>
+              <input value={form.alternateEmail} onChange={set('alternateEmail')} placeholder="you@gmail.com" /></div>
+            <div className="wof-field"><label>Phone</label>
+              <input value={form.phone} onChange={set('phone')} placeholder="+1 555 123 4567" /></div>
           </div>
           <div className="wof-actions">
-            <button
-              type="button"
-              className="wof-btn ghost"
-              onClick={() => setStep(1)}
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              className="wof-btn primary"
-              disabled={!canSubmit}
-              onClick={() => setStep(3)}
-            >
-              Review order
-            </button>
+            <button type="button" className="wof-btn ghost" onClick={() => setStep(1)}>Back</button>
+            <button type="button" className="wof-btn primary" disabled={!canSubmit} onClick={() => setStep(3)}>Review order</button>
           </div>
-          {!canSubmit && (
-            <small className="wof-muted">
-              Complete all required (*) fields to continue.
-            </small>
-          )}
+          {!canSubmit && <small className="wof-muted">Complete all required (*) fields to continue.</small>}
         </section>
       )}
 
@@ -1747,66 +1513,24 @@ function WorkspaceOrderFlow() {
         <section className="wof-card">
           <h3>Review your order</h3>
           <div className="wof-review">
-            <div className="wof-review-row">
-              <span>Plan</span>
-              <strong>{selectedPlan?.name}</strong>
-            </div>
-            <div className="wof-review-row">
-              <span>Seats</span>
-              <strong>{seats}</strong>
-            </div>
-            <div className="wof-review-row">
-              <span>Monthly total</span>
-              <strong>${monthlyTotal.toFixed(2)}/mo</strong>
-            </div>
+            <div className="wof-review-row"><span>Plan</span><strong>{selectedPlan?.name}</strong></div>
+            <div className="wof-review-row"><span>Seats</span><strong>{seats}</strong></div>
+            <div className="wof-review-row"><span>Monthly total</span><strong>${monthlyTotal.toFixed(2)}/mo</strong></div>
             <hr />
-            <div className="wof-review-row">
-              <span>Organization</span>
-              <strong>{form.organizationName}</strong>
-            </div>
-            <div className="wof-review-row">
-              <span>Domain</span>
-              <strong>{form.domain}</strong>
-            </div>
-            <div className="wof-review-row">
-              <span>Admin</span>
-              <strong>
-                {form.desiredAdminUsername}@{form.domain}
-              </strong>
-            </div>
-            <div className="wof-review-row">
-              <span>Address</span>
-              <strong>
-                {form.streetAddress}, {form.city}, {form.state} {form.zip}
-              </strong>
-            </div>
-            <div className="wof-review-row">
-              <span>Contact</span>
-              <strong>
-                {form.firstName} {form.lastName} · {form.email}
-              </strong>
-            </div>
+            <div className="wof-review-row"><span>Organization</span><strong>{form.organizationName}</strong></div>
+            <div className="wof-review-row"><span>Domain</span><strong>{form.domain}</strong></div>
+            <div className="wof-review-row"><span>Admin</span><strong>{form.desiredAdminUsername}@{form.domain}</strong></div>
+            <div className="wof-review-row"><span>Address</span><strong>{form.streetAddress}, {form.city}, {form.state} {form.zip}</strong></div>
+            <div className="wof-review-row"><span>Contact</span><strong>{form.firstName} {form.lastName} · {form.email}</strong></div>
           </div>
           <div className="wof-note">
-            After you place this order, you'll verify your domain at
-            admin.google.com, then add Google Voice. We'll guide you through it.
+            After you place this order, you'll verify your domain at admin.google.com, then add Google Voice. We'll guide you through it.
           </div>
           {submitError && <div className="wof-alert err">{submitError}</div>}
           <div className="wof-actions">
-            <button
-              type="button"
-              className="wof-btn ghost"
-              onClick={() => setStep(2)}
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              className="wof-btn primary"
-              disabled={submitting}
-              onClick={placeOrder}
-            >
-              {submitting ? "Placing order…" : "Place order"}
+            <button type="button" className="wof-btn ghost" onClick={() => setStep(2)}>Back</button>
+            <button type="button" className="wof-btn primary" disabled={submitting} onClick={placeOrder}>
+              {submitting ? 'Placing order…' : 'Place order'}
             </button>
           </div>
         </section>
@@ -1816,31 +1540,13 @@ function WorkspaceOrderFlow() {
         <section className="wof-card wof-done">
           <div className="wof-check">✓</div>
           <h3>Order placed</h3>
-          <p>
-            Your Google Workspace order for <strong>{form.domain}</strong> has
-            been received.
-          </p>
-          {orderDone.orderNumber && (
-            <p className="wof-muted">Order number: {orderDone.orderNumber}</p>
-          )}
+          <p>Your Google Workspace order for <strong>{form.domain}</strong> has been received.</p>
+          {orderDone.orderNumber && <p className="wof-muted">Order number: {orderDone.orderNumber}</p>}
           <div className="wof-next">
             <h4>Next steps</h4>
             <ol>
-              <li>
-                Open{" "}
-                <a
-                  href="https://admin.google.com"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  admin.google.com
-                </a>{" "}
-                in a new tab and verify your domain.
-              </li>
-              <li>
-                Come back here to add a Google Voice subscription (one per
-                domain).
-              </li>
+              <li>Open <a href="https://admin.google.com" target="_blank" rel="noreferrer">admin.google.com</a> in a new tab and verify your domain.</li>
+              <li>Come back here to add a Google Voice subscription (one per domain).</li>
             </ol>
           </div>
         </section>
@@ -1905,7 +1611,10 @@ const wofStyles = `
 .wof-next h4{margin:0 0 8px}
 .wof-next ol{margin:0;padding-left:18px;color:#5b6075;font-size:14px}
 .wof-next a{color:#2563eb}
+.pac-container{z-index:100000!important;border-radius:10px;margin-top:2px;box-shadow:0 6px 24px rgba(16,24,40,.18);font-family:inherit}
+.pac-item{padding:8px 12px;cursor:pointer}
 `;
+
 
 // ==================== ROOT RENDER ====================
 export default function Root() {
