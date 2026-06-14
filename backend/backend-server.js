@@ -200,6 +200,36 @@ const WorkspaceOrderSchema = new mongoose.Schema(
 );
 const WorkspaceOrder = mongoose.model('WorkspaceOrder', WorkspaceOrderSchema);
 
+// Stores the reseller's Google OAuth connection (refresh token) — set once by admin
+const GoogleConnectionSchema = new mongoose.Schema(
+  {
+    name: { type: String, default: 'Reseller Google Connection' },
+    refreshToken: String,
+    accessToken: String,
+    tokenExpiry: Date,
+    connectedEmail: String,
+    scopes: [String],
+    active: { type: Boolean, default: true },
+  },
+  { timestamps: true }
+);
+const GoogleConnection = mongoose.model('GoogleConnection', GoogleConnectionSchema);
+
+// Build a configured OAuth2 client
+function makeOAuthClient() {
+  return new google.auth.OAuth2(
+    process.env.GOOGLE_OAUTH_CLIENT_ID,
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+    process.env.GOOGLE_OAUTH_REDIRECT_URI
+  );
+}
+
+const RESELLER_SCOPES = [
+  'https://www.googleapis.com/auth/admin.directory.user',
+  'https://www.googleapis.com/auth/admin.directory.domain',
+  'https://www.googleapis.com/auth/apps.order',
+];
+
 // Seed placeholder plans once (won't overwrite later edits)
 async function seedPlans() {
   try {
@@ -624,6 +654,88 @@ app.post('/api/workspace-orders/:id/verify', authenticateCustomer, async (req, r
     res.status(500).json({ error: error.message });
   }
 });
+
+// ==================== GOOGLE OAUTH CONNECTION (Stage 2c) ====================
+
+// Step A: Admin starts the connect flow -> redirects to Google sign-in
+app.get('/api/google/connect', (req, res) => {
+  try {
+    if (!process.env.GOOGLE_OAUTH_CLIENT_ID) {
+      return res.status(500).send('Google OAuth not configured. Set GOOGLE_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI.');
+    }
+    const oauth2 = makeOAuthClient();
+    const url = oauth2.generateAuthUrl({
+      access_type: 'offline',     // get a refresh token
+      prompt: 'consent',          // force refresh token on every connect
+      scope: RESELLER_SCOPES,
+    });
+    res.redirect(url);
+  } catch (e) {
+    res.status(500).send('Could not start Google connection: ' + e.message);
+  }
+});
+
+// Step B: Google redirects back here with a code -> exchange for tokens, store them
+app.get('/api/google/callback', async (req, res) => {
+  try {
+    const { code } = req.query;
+    if (!code) return res.status(400).send('Missing authorization code.');
+    const oauth2 = makeOAuthClient();
+    const { tokens } = await oauth2.getToken(code);
+    oauth2.setCredentials(tokens);
+
+    // Find out which account connected
+    let email = '';
+    try {
+      const oauth2api = google.oauth2({ version: 'v2', auth: oauth2 });
+      const info = await oauth2api.userinfo.get();
+      email = info.data.email || '';
+    } catch (_) { }
+
+    // Upsert a single connection record
+    let conn = await GoogleConnection.findOne();
+    if (!conn) conn = new GoogleConnection();
+    if (tokens.refresh_token) conn.refreshToken = tokens.refresh_token;
+    conn.accessToken = tokens.access_token;
+    conn.tokenExpiry = tokens.expiry_date ? new Date(tokens.expiry_date) : null;
+    conn.connectedEmail = email;
+    conn.scopes = RESELLER_SCOPES;
+    conn.active = true;
+    await conn.save();
+
+    // Simple success page
+    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px">
+      <h2>✅ Google connected</h2>
+      <p>Connected as <b>${email || 'your reseller account'}</b>.</p>
+      <p>You can close this tab and return to your portal.</p>
+      </body></html>`);
+  } catch (e) {
+    res.status(500).send('Google connection failed: ' + e.message);
+  }
+});
+
+// Status: is the reseller Google account connected?
+app.get('/api/google/status', authenticateCustomer, async (req, res) => {
+  try {
+    const conn = await GoogleConnection.findOne();
+    res.json({
+      connected: !!(conn && conn.refreshToken && conn.active),
+      email: conn?.connectedEmail || null,
+      scopes: conn?.scopes || [],
+    });
+  } catch (e) {
+    res.status(500).json({ connected: false });
+  }
+});
+
+// Helper: get an authorized client using the stored refresh token (used by provisioning later)
+async function getResellerAuth() {
+  const conn = await GoogleConnection.findOne();
+  if (!conn || !conn.refreshToken) throw new Error('Google account not connected');
+  const oauth2 = makeOAuthClient();
+  oauth2.setCredentials({ refresh_token: conn.refreshToken });
+  return oauth2;
+}
 
 // ORDER MANAGEMENT
 app.post('/api/orders', authenticateCustomer, async (req, res) => {
