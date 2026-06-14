@@ -1106,21 +1106,43 @@ app.post('/api/admin/add-voice', authenticateCustomer, async (req, res) => {
       return res.status(400).json({ error: 'This domain already has a Google Voice subscription (one per domain).' });
     }
 
-    // 3) Add the Voice subscription (Flexible plan)
-    try {
-      await reseller.subscriptions.insert({
-        customerId: dom,
-        requestBody: {
+    // 3) Add the Voice subscription. Voice may require a specific plan type,
+    //    so try FLEXIBLE first, then ANNUAL_MONTHLY_PAY if Google says "not applicable".
+    const plansToTry = ['FLEXIBLE', 'ANNUAL_MONTHLY_PAY'];
+    let lastErr = '';
+    let added = false;
+    for (const planName of plansToTry) {
+      try {
+        const body = {
           customerId: dom,
           skuId: voicePlan.skuId,
-          plan: { planName: 'FLEXIBLE' },
+          plan: { planName },
           seats: { numberOfSeats: numSeats, maximumNumberOfSeats: numSeats },
           purchaseOrderId: `VOICE-${Date.now()}`,
-        },
-      });
-    } catch (subErr) {
-      const msg = subErr?.errors?.[0]?.message || subErr?.message || '';
-      return res.status(400).json({ error: 'Voice subscription failed: ' + msg, step: 'voice_subscription' });
+        };
+        if (planName === 'ANNUAL_MONTHLY_PAY') {
+          body.plan.commitmentInterval = undefined; // let Google default it
+        }
+        await reseller.subscriptions.insert({ customerId: dom, requestBody: body });
+        added = true;
+        break;
+      } catch (subErr) {
+        lastErr = subErr?.errors?.[0]?.message || subErr?.message || '';
+        // Only retry with a different plan if it's a plan-applicability error
+        if (!/not applicable|invalid|plan/i.test(lastErr)) break;
+      }
+    }
+
+    if (!added) {
+      let hint = '';
+      if (/not applicable|invalid/i.test(lastErr)) {
+        hint = ' This usually means Voice for this SKU isn\'t enabled for this customer, or the customer already has a conflicting subscription. Check the customer in the USA Partner Console.';
+      } else if (/suspended/i.test(lastErr)) {
+        hint = ' Resolve the suspended subscription on this customer first.';
+      } else if (/terms of service|consent/i.test(lastErr)) {
+        hint = ' Accept the Google Voice reseller terms of service / purchase consent in the USA Partner Console.';
+      }
+      return res.status(400).json({ error: 'Voice subscription failed: ' + lastErr + hint, step: 'voice_subscription' });
     }
 
     res.json({ success: true, message: `Google ${voicePlan.name} added to ${dom}.`, domain: dom, plan: voicePlan.name, seats: numSeats });
