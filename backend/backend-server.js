@@ -30,12 +30,29 @@ mongoose.connect(process.env.MONGODB_URI, {
 
 mongoose.connection.once('open', () => {
   console.log('✅ MongoDB connected');
-  seedPlans();
-  backfillPlanSkus();
+  seedPlans().then(() => backfillPlanSkus());
 });
 mongoose.connection.on('error', (err) => {
   console.error('MongoDB connection error:', err.message);
 });
+
+// Backfill Google SKU IDs onto existing workspace plans (safe to run every boot)
+async function backfillPlanSkus() {
+  try {
+    const skuMap = {
+      starter: '1010020027',
+      standard: '1010020028',
+      plus: '1010020025',
+      frontline: '1010020030',
+    };
+    for (const [planId, skuId] of Object.entries(skuMap)) {
+      await Plan.updateOne({ planId, $or: [{ skuId: { $exists: false } }, { skuId: null }, { skuId: '' }] }, { $set: { skuId } });
+    }
+    console.log('✅ Plan SKUs backfilled');
+  } catch (e) {
+    console.error('SKU backfill error:', e.message);
+  }
+}
 
 // ==================== SCHEMAS ====================
 
