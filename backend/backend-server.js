@@ -44,6 +44,9 @@ async function backfillPlanSkus() {
       standard: '1010020028',
       plus: '1010020025',
       frontline: '1010020030',
+      'voice-starter': '1010330003',
+      'voice-standard': '1010330004',
+      'voice-premier': '1010330002',
     };
     for (const [planId, skuId] of Object.entries(skuMap)) {
       await Plan.updateOne({ planId, $or: [{ skuId: { $exists: false } }, { skuId: null }, { skuId: '' }] }, { $set: { skuId } });
@@ -223,6 +226,7 @@ const WorkspaceOrder = mongoose.model('WorkspaceOrder', WorkspaceOrderSchema);
 // Stores the reseller's Google OAuth connection (refresh token) — set once by admin
 const GoogleConnectionSchema = new mongoose.Schema(
   {
+    account: { type: String, default: 'pk', index: true }, // 'pk' (Pakistan) or 'usa'
     name: { type: String, default: 'Reseller Google Connection' },
     refreshToken: String,
     accessToken: String,
@@ -235,12 +239,21 @@ const GoogleConnectionSchema = new mongoose.Schema(
 );
 const GoogleConnection = mongoose.model('GoogleConnection', GoogleConnectionSchema);
 
-// Build a configured OAuth2 client
+// Build a configured OAuth2 client (Pakistan / default)
 function makeOAuthClient() {
   return new google.auth.OAuth2(
     process.env.GOOGLE_OAUTH_CLIENT_ID,
     process.env.GOOGLE_OAUTH_CLIENT_SECRET,
     process.env.GOOGLE_OAUTH_REDIRECT_URI
+  );
+}
+
+// Build a configured OAuth2 client for the USA reseller account
+function makeUsaOAuthClient() {
+  return new google.auth.OAuth2(
+    process.env.GOOGLE_OAUTH_CLIENT_ID_USA,
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET_USA,
+    process.env.GOOGLE_OAUTH_REDIRECT_URI_USA
   );
 }
 
@@ -273,15 +286,15 @@ async function seedPlans() {
         features: ['Business email', 'Shared device support', 'Meet (100 participants)', 'For frontline workers']
       },
       {
-        planId: 'voice-starter', category: 'voice', name: 'Voice Starter', monthlyPrice: 12.00, sortOrder: 1,
+        planId: 'voice-starter', category: 'voice', name: 'Voice Starter', monthlyPrice: 12.00, sortOrder: 1, skuId: '1010330003',
         features: ['1 user / domain region', 'Voicemail & SMS', 'Call forwarding']
       },
       {
-        planId: 'voice-standard', category: 'voice', name: 'Voice Standard', monthlyPrice: 24.00, sortOrder: 2,
+        planId: 'voice-standard', category: 'voice', name: 'Voice Standard', monthlyPrice: 24.00, sortOrder: 2, skuId: '1010330004',
         features: ['Unlimited US regions', 'Multi-level auto attendant', 'Ring groups']
       },
       {
-        planId: 'voice-premier', category: 'voice', name: 'Voice Premier', monthlyPrice: 36.00, sortOrder: 3,
+        planId: 'voice-premier', category: 'voice', name: 'Voice Premier', monthlyPrice: 36.00, sortOrder: 3, skuId: '1010330002',
         features: ['Unlimited international', 'Advanced reporting', 'Desk phone support']
       },
     ]);
@@ -735,20 +748,20 @@ app.get('/api/google/callback', async (req, res) => {
       email = info.data.email || '';
     } catch (_) { }
 
-    // Upsert a single connection record
-    let conn = await GoogleConnection.findOne();
-    if (!conn) conn = new GoogleConnection();
+    // Upsert the Pakistan connection record
+    let conn = await GoogleConnection.findOne({ account: 'pk' });
+    if (!conn) conn = new GoogleConnection({ account: 'pk' });
     if (tokens.refresh_token) conn.refreshToken = tokens.refresh_token;
     conn.accessToken = tokens.access_token;
     conn.tokenExpiry = tokens.expiry_date ? new Date(tokens.expiry_date) : null;
     conn.connectedEmail = email;
     conn.scopes = RESELLER_SCOPES;
+    conn.name = 'Pakistan Reseller';
     conn.active = true;
     await conn.save();
 
-    // Simple success page
     res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px">
-      <h2>✅ Google connected</h2>
+      <h2>✅ Pakistan reseller connected</h2>
       <p>Connected as <b>${email || 'your reseller account'}</b>.</p>
       <p>You can close this tab and return to your portal.</p>
       </body></html>`);
@@ -757,19 +770,86 @@ app.get('/api/google/callback', async (req, res) => {
   }
 });
 
+// ===== USA reseller OAuth (for Google Voice) =====
+app.get('/api/google/usa/connect', (req, res) => {
+  try {
+    if (!process.env.GOOGLE_OAUTH_CLIENT_ID_USA) {
+      return res.status(500).send('USA OAuth not configured. Set GOOGLE_OAUTH_CLIENT_ID_USA / SECRET_USA / REDIRECT_URI_USA.');
+    }
+    const oauth2 = makeUsaOAuthClient();
+    const url = oauth2.generateAuthUrl({
+      access_type: 'offline',
+      prompt: 'consent',
+      scope: ['https://www.googleapis.com/auth/apps.order'], // Voice subscription only needs apps.order
+    });
+    res.redirect(url);
+  } catch (e) {
+    res.status(500).send('Could not start USA connection: ' + e.message);
+  }
+});
+
+app.get('/api/google/usa/callback', async (req, res) => {
+  try {
+    const { code } = req.query;
+    if (!code) return res.status(400).send('Missing authorization code.');
+    const oauth2 = makeUsaOAuthClient();
+    const { tokens } = await oauth2.getToken(code);
+    oauth2.setCredentials(tokens);
+
+    let email = '';
+    try {
+      const oauth2api = google.oauth2({ version: 'v2', auth: oauth2 });
+      const info = await oauth2api.userinfo.get();
+      email = info.data.email || '';
+    } catch (_) { }
+
+    let conn = await GoogleConnection.findOne({ account: 'usa' });
+    if (!conn) conn = new GoogleConnection({ account: 'usa' });
+    if (tokens.refresh_token) conn.refreshToken = tokens.refresh_token;
+    conn.accessToken = tokens.access_token;
+    conn.tokenExpiry = tokens.expiry_date ? new Date(tokens.expiry_date) : null;
+    conn.connectedEmail = email;
+    conn.scopes = ['https://www.googleapis.com/auth/apps.order'];
+    conn.name = 'USA Reseller (Voice)';
+    conn.active = true;
+    await conn.save();
+
+    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px">
+      <h2>✅ USA reseller connected (Voice)</h2>
+      <p>Connected as <b>${email || 'your USA reseller account'}</b>.</p>
+      <p>You can close this tab and return to your portal.</p>
+      </body></html>`);
+  } catch (e) {
+    res.status(500).send('USA connection failed: ' + e.message);
+  }
+});
+
 // Status: is the reseller Google account connected?
 app.get('/api/google/status', authenticateCustomer, async (req, res) => {
   try {
-    const conn = await GoogleConnection.findOne();
+    const pk = await GoogleConnection.findOne({ account: 'pk' });
+    const usa = await GoogleConnection.findOne({ account: 'usa' });
     res.json({
-      connected: !!(conn && conn.refreshToken && conn.active),
-      email: conn?.connectedEmail || null,
-      scopes: conn?.scopes || [],
+      connected: !!(pk && pk.refreshToken && pk.active) || !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
+      email: pk?.connectedEmail || null,
+      usa: {
+        connected: !!(usa && usa.refreshToken && usa.active),
+        email: usa?.connectedEmail || null,
+      },
     });
   } catch (e) {
     res.status(500).json({ connected: false });
   }
 });
+
+// Auth client for the USA reseller (OAuth refresh token) — used for Voice
+async function getUsaAuth() {
+  const conn = await GoogleConnection.findOne({ account: 'usa' });
+  if (!conn || !conn.refreshToken) throw new Error('USA reseller not connected. Connect it to sell Voice.');
+  const oauth2 = makeUsaOAuthClient();
+  oauth2.setCredentials({ refresh_token: conn.refreshToken });
+  return oauth2;
+}
 
 // Full scopes needed for end-to-end provisioning (customer + admin user + verification)
 const PROVISION_SCOPES = [
@@ -804,7 +884,7 @@ function getServiceAccountAuth() {
 async function getResellerAuth() {
   const sa = getServiceAccountAuth();
   if (sa) return sa;
-  const conn = await GoogleConnection.findOne();
+  const conn = await GoogleConnection.findOne({ account: 'pk' });
   if (!conn || !conn.refreshToken) throw new Error('Google account not connected');
   const oauth2 = makeOAuthClient();
   oauth2.setCredentials({ refresh_token: conn.refreshToken });
@@ -816,6 +896,9 @@ app.post('/api/admin/backfill-skus', async (req, res) => {
   try {
     const skuMap = {
       starter: '1010020027',
+      'voice-starter': '1010330003',
+      'voice-standard': '1010330004',
+      'voice-premier': '1010330002',
       standard: '1010020028',
       plus: '1010020025',
       frontline: '1010020030',
@@ -975,6 +1058,74 @@ app.post('/api/workspace-orders/:id/provision', authenticateCustomer, async (req
     });
   } catch (error) {
     const msg = error?.message || 'Provisioning failed';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ==================== ADD GOOGLE VOICE TO AN EXISTING DOMAIN ====================
+// Adds a Voice subscription to a domain that already has Workspace.
+// Enforces: domain must exist in Google, must have an active Workspace sub, and only ONE Voice sub per domain.
+app.post('/api/admin/add-voice', authenticateCustomer, async (req, res) => {
+  try {
+    const { domain, voicePlanId, seats } = req.body;
+    const dom = (domain || '').toLowerCase().trim();
+    if (!dom) return res.status(400).json({ error: 'Domain is required.' });
+
+    const voicePlan = await Plan.findOne({ planId: voicePlanId, category: 'voice' });
+    if (!voicePlan || !voicePlan.skuId) {
+      return res.status(400).json({ error: 'Invalid Voice plan or missing SKU.' });
+    }
+    const numSeats = Math.max(1, parseInt(seats, 10) || 1);
+
+    // Voice is sold through the USA reseller account (Pakistan can't sell Voice)
+    let auth;
+    try {
+      auth = await getUsaAuth();
+    } catch (e) {
+      return res.status(400).json({ error: e.message, step: 'usa_not_connected' });
+    }
+    const reseller = google.reseller({ version: 'v1', auth });
+
+    // 1) Confirm the customer exists in the USA reseller account
+    try {
+      await reseller.customers.get({ customerId: dom });
+    } catch (e) {
+      if (e?.code === 404) {
+        return res.status(400).json({ error: 'This domain is not a customer in the USA reseller account. Voice requires the customer to exist there.' });
+      }
+      throw e;
+    }
+
+    // 2) Enforce one Voice subscription per domain (Workspace lives on the Pakistan account, so we don't require it here)
+    const subResp = await reseller.subscriptions.list({ customerId: dom });
+    const existing = subResp.data.subscriptions || [];
+    const voiceSkus = ['1010330003', '1010330004', '1010330002', '1010330005', '1010330006'];
+    const hasVoice = existing.some((s) => voiceSkus.includes(String(s.skuId)));
+
+    if (hasVoice) {
+      return res.status(400).json({ error: 'This domain already has a Google Voice subscription (one per domain).' });
+    }
+
+    // 3) Add the Voice subscription (Flexible plan)
+    try {
+      await reseller.subscriptions.insert({
+        customerId: dom,
+        requestBody: {
+          customerId: dom,
+          skuId: voicePlan.skuId,
+          plan: { planName: 'FLEXIBLE' },
+          seats: { numberOfSeats: numSeats, maximumNumberOfSeats: numSeats },
+          purchaseOrderId: `VOICE-${Date.now()}`,
+        },
+      });
+    } catch (subErr) {
+      const msg = subErr?.errors?.[0]?.message || subErr?.message || '';
+      return res.status(400).json({ error: 'Voice subscription failed: ' + msg, step: 'voice_subscription' });
+    }
+
+    res.json({ success: true, message: `Google ${voicePlan.name} added to ${dom}.`, domain: dom, plan: voicePlan.name, seats: numSeats });
+  } catch (error) {
+    const msg = error?.errors?.[0]?.message || error?.message || 'Could not add Voice.';
     res.status(500).json({ error: msg });
   }
 });
@@ -1229,35 +1380,40 @@ app.get('/api/dashboard', authenticateCustomer, async (req, res) => {
 // Live subscriptions from Google (all customers on the reseller account)
 app.get('/api/admin/google/subscriptions', authenticateCustomer, async (req, res) => {
   try {
-    const auth = await getResellerAuth();
-    const reseller = google.reseller({ version: 'v1', auth });
-    let subs = [];
-    let pageToken;
-    do {
-      const resp = await reseller.subscriptions.list({
-        maxResults: 100,
-        pageToken,
-      });
-      const page = resp.data.subscriptions || [];
-      subs = subs.concat(page);
-      pageToken = resp.data.nextPageToken;
-    } while (pageToken);
+    const collect = async (auth, accountLabel) => {
+      const reseller = google.reseller({ version: 'v1', auth });
+      let subs = [];
+      let pageToken;
+      do {
+        const resp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
+        subs = subs.concat(resp.data.subscriptions || []);
+        pageToken = resp.data.nextPageToken;
+      } while (pageToken);
+      return subs.map((s) => ({
+        account: accountLabel,
+        customerId: s.customerId,
+        domain: s.customerDomain || s.customerId,
+        skuId: s.skuId,
+        skuName: s.skuName || s.skuId,
+        planName: s.plan?.planName,
+        seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
+        licensedSeats: s.seats?.licensedNumberOfSeats ?? null,
+        status: s.status,
+        creationTime: s.creationTime ? Number(s.creationTime) : null,
+        purchaseOrderId: s.purchaseOrderId || null,
+      }));
+    };
 
-    // Shape the data for the UI
-    const rows = subs.map((s) => ({
-      customerId: s.customerId,
-      domain: s.customerDomain || s.customerId,
-      skuId: s.skuId,
-      skuName: s.skuName || s.skuId,
-      planName: s.plan?.planName,
-      seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
-      licensedSeats: s.seats?.licensedNumberOfSeats ?? null,
-      status: s.status,
-      creationTime: s.creationTime ? Number(s.creationTime) : null,
-      purchaseOrderId: s.purchaseOrderId || null,
-    }));
+    let rows = [];
+    // Pakistan account (Workspace)
+    try {
+      rows = rows.concat(await collect(await getResellerAuth(), 'PK'));
+    } catch (_) { }
+    // USA account (Voice) — only if connected
+    try {
+      rows = rows.concat(await collect(await getUsaAuth(), 'USA'));
+    } catch (_) { }
 
-    // Summary counts
     const uniqueDomains = new Set(rows.map((r) => r.domain));
     const summary = {
       totalSubscriptions: rows.length,
