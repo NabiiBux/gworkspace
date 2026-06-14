@@ -793,8 +793,21 @@ const SubscriptionsSection = () => {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [voicePlans, setVoicePlans] = useState([]);
+  const [vForm, setVForm] = useState({ domain: '', voicePlanId: '', seats: 1 });
+  const [vMsg, setVMsg] = useState('');
+  const [vBusy, setVBusy] = useState(false);
 
-  useEffect(() => { fetchSubs(); }, []);
+  useEffect(() => { fetchSubs(); fetchVoicePlans(); }, []);
+
+  const fetchVoicePlans = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/products`);
+      const v = res.data.voice || [];
+      setVoicePlans(v);
+      if (v.length) setVForm((f) => ({ ...f, voicePlanId: v[0].id }));
+    } catch (_) { }
+  };
 
   const fetchSubs = async () => {
     setLoading(true); setError('');
@@ -811,6 +824,27 @@ const SubscriptionsSection = () => {
       setLoading(false);
     }
   };
+
+  const addVoice = async () => {
+    if (!vForm.domain || !vForm.voicePlanId) { setVMsg('Pick a domain and a Voice plan.'); return; }
+    setVBusy(true); setVMsg('');
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API_URL}/admin/add-voice`, vForm, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      setVMsg('✓ ' + (res.data.message || 'Voice added.'));
+      fetchSubs();
+    } catch (e) {
+      setVMsg(e?.response?.data?.error || 'Could not add Voice.');
+    } finally { setVBusy(false); }
+  };
+
+  // Domains that have Workspace but no Voice yet (candidates for adding Voice)
+  const voiceSkus = ['1010330003', '1010330004', '1010330002', '1010330005', '1010330006'];
+  const domainsWithWorkspace = [...new Set(rows.filter(r => String(r.skuId).startsWith('101002')).map(r => r.domain))];
+  const domainsWithVoice = new Set(rows.filter(r => voiceSkus.includes(String(r.skuId))).map(r => r.domain));
+  const eligibleDomains = domainsWithWorkspace.filter(d => !domainsWithVoice.has(d));
 
   const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString() : '—';
   const planLabel = (p) => ({
@@ -837,6 +871,46 @@ const SubscriptionsSection = () => {
           <div className="stat-card"><h3>Suspended</h3><p className="stat-value">{summary.suspendedSubscriptions}</p></div>
         </div>
       )}
+
+      {/* Add Google Voice to an existing domain */}
+      <div className="add-voice-card" style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+        <h3 style={{ margin: '0 0 4px' }}>📞 Add Google Voice to a domain</h3>
+        <p style={{ margin: '0 0 12px', color: '#5b6075', fontSize: 14 }}>
+          Voice can be added to a domain that already has active Workspace (one Voice subscription per domain).
+        </p>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Domain</label>
+            <select value={vForm.domain} onChange={(e) => setVForm({ ...vForm, domain: e.target.value })}
+              style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', minWidth: 200 }}>
+              <option value="">Select a domain…</option>
+              {eligibleDomains.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Voice plan</label>
+            <select value={vForm.voicePlanId} onChange={(e) => setVForm({ ...vForm, voicePlanId: e.target.value })}
+              style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', minWidth: 160 }}>
+              {voicePlans.map(p => <option key={p.id} value={p.id}>{p.name} (${p.monthlyPrice}/mo)</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Seats</label>
+            <input type="number" min="1" value={vForm.seats}
+              onChange={(e) => setVForm({ ...vForm, seats: Math.max(1, parseInt(e.target.value) || 1) })}
+              style={{ height: 40, width: 80, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }} />
+          </div>
+          <button className="btn btn-primary" onClick={addVoice} disabled={vBusy} style={{ height: 40 }}>
+            {vBusy ? 'Adding…' : 'Add Voice'}
+          </button>
+        </div>
+        {eligibleDomains.length === 0 && (
+          <p style={{ marginTop: 10, fontSize: 13, color: '#9a3412' }}>
+            No eligible domains (need active Workspace and no existing Voice).
+          </p>
+        )}
+        {vMsg && <div style={{ marginTop: 12, fontSize: 14, color: vMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{vMsg}</div>}
+      </div>
 
       <button className="btn btn-secondary" onClick={fetchSubs} style={{ marginBottom: 12 }}>↻ Refresh</button>
 
