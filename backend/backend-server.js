@@ -212,6 +212,7 @@ const WorkspaceOrderSchema = new mongoose.Schema(
       default: 'pending',
     },
     domainVerified: { type: Boolean, default: false },
+    googleProvisioned: { type: Boolean, default: false },
     txtRecord: String,
     voiceEligible: { type: Boolean, default: true }, // one Voice sub per domain (Stage 2)
   },
@@ -689,7 +690,7 @@ app.post('/api/workspace-orders/:id/verify', authenticateCustomer, async (req, r
     const order = await WorkspaceOrder.findOne({ _id: req.params.id, customerId: req.customerId });
     if (!order) return res.status(404).json({ error: 'Order not found' });
     order.domainVerified = true;
-    order.status = 'provisioned'; // becomes real provisioning trigger in Stage 2c
+    if (order.status !== 'provisioned') order.status = 'domain_verification';
     await order.save();
     res.json({ success: true, domainVerified: true, status: order.status });
   } catch (error) {
@@ -804,8 +805,24 @@ app.post('/api/workspace-orders/:id/provision', authenticateCustomer, async (req
   try {
     const order = await WorkspaceOrder.findOne({ _id: req.params.id, customerId: req.customerId });
     if (!order) return res.status(404).json({ error: 'Order not found' });
-    if (order.status === 'provisioned') {
-      return res.json({ success: true, alreadyProvisioned: true, message: 'This order is already provisioned.' });
+    if (order.googleProvisioned && !req.query.force) {
+      // Verify it really exists in Google rather than trusting the flag
+      try {
+        const auth = await getResellerAuth();
+        const reseller = google.reseller({ version: 'v1', auth });
+        const domain = (order.organization?.domain || '').toLowerCase();
+        const existing = await reseller.customers.get({ customerId: domain });
+        return res.json({
+          success: true,
+          alreadyProvisioned: true,
+          message: `Confirmed in Google: customer ${existing.data.customerDomain || domain} exists.`,
+        });
+      } catch (checkErr) {
+        // Flag said provisioned but Google has no such customer -> reset and re-provision
+        order.googleProvisioned = false;
+        await order.save();
+        // fall through to provisioning below
+      }
     }
 
     // Look up the plan to get its Google SKU id
@@ -872,6 +889,7 @@ app.post('/api/workspace-orders/:id/provision', authenticateCustomer, async (req
     }
 
     order.status = 'provisioned';
+    order.googleProvisioned = true;
     await order.save();
     res.json({ success: true, customerCreated, message: 'Customer and Workspace subscription created in Google.' });
   } catch (error) {
