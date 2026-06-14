@@ -1282,6 +1282,7 @@ function WorkspaceOrderFlow() {
   const [verification, setVerification] = useState(null);
   const [verifying, setVerifying] = useState(false);
   const [verifyMsg, setVerifyMsg] = useState('');
+  const [domainStatus, setDomainStatus] = useState({ state: 'idle', message: '' }); // idle|checking|available|taken|invalid
   const [mapsReady, setMapsReady] = useState(false);
   const streetInputRef = useRef(null);
   const autocompleteRef = useRef(null);
@@ -1380,6 +1381,33 @@ function WorkspaceOrderFlow() {
     return () => { cancelled = true; };
   }, [step, mapsReady]);
 
+  // Debounced domain availability check
+  useEffect(() => {
+    const domain = (form.domain || '').toLowerCase().trim();
+    if (!domain) { setDomainStatus({ state: 'idle', message: '' }); return; }
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain)) {
+      setDomainStatus({ state: 'invalid', message: 'Enter a valid domain (e.g. example.com).' });
+      return;
+    }
+    setDomainStatus({ state: 'checking', message: 'Checking availability…' });
+    const t = setTimeout(async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await axios.get(`${API_URL}/workspace-orders/check-domain/${encodeURIComponent(domain)}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.data.available) {
+          setDomainStatus({ state: 'available', message: res.data.message || 'Domain is available.' });
+        } else {
+          setDomainStatus({ state: 'taken', message: res.data.message || 'This domain is not available.' });
+        }
+      } catch (e) {
+        setDomainStatus({ state: 'invalid', message: 'Could not check domain. Try again.' });
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [form.domain]);
+
   const selectedPlan = plans?.find((p) => p.id === selectedPlanId);
   const monthlyTotal = selectedPlan ? (selectedPlan.monthlyPrice * seats) : 0;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
@@ -1388,6 +1416,7 @@ function WorkspaceOrderFlow() {
   const canSubmit =
     form.organizationName &&
     /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(form.domain) &&
+    domainStatus.state === 'available' &&
     form.desiredAdminUsername && form.tempPassword.length >= 8 &&
     form.streetAddress && form.city && form.state && /^\d{5}$/.test(form.zip) &&
     form.firstName && form.lastName &&
@@ -1511,7 +1540,16 @@ function WorkspaceOrderFlow() {
             <div className="wof-field"><label>Organization name *</label>
               <input value={form.organizationName} onChange={set('organizationName')} placeholder="Acme Inc." /></div>
             <div className="wof-field"><label>Domain *</label>
-              <input value={form.domain} onChange={set('domain')} placeholder="acme.com" /></div>
+              <input value={form.domain} onChange={set('domain')} placeholder="acme.com" />
+              {domainStatus.state !== 'idle' && (
+                <small className={`wof-domain-status ${domainStatus.state}`}>
+                  {domainStatus.state === 'checking' && '⏳ '}
+                  {domainStatus.state === 'available' && '✓ '}
+                  {(domainStatus.state === 'taken' || domainStatus.state === 'invalid') && '✕ '}
+                  {domainStatus.message}
+                </small>
+              )}
+            </div>
           </div>
           <div className="wof-grid">
             <div className="wof-field"><label>Desired admin username *</label>
@@ -1737,6 +1775,9 @@ const wofStyles = `
 .wof-verify-msg{margin:10px 0;font-size:13px;color:#2563eb;background:#f5f8ff;border-radius:8px;padding:8px 12px}
 .wof-verified-ok{margin-top:22px;border-top:1px solid #e7e9f0;padding-top:20px;text-align:center}
 .wof-verify-badge{display:inline-block;background:#dcfce7;color:#166534;font-weight:600;padding:8px 16px;border-radius:999px;margin-bottom:8px}
+.wof-domain-status.checking{color:#7a809a!important}
+.wof-domain-status.available{color:#16a34a!important}
+.wof-domain-status.taken,.wof-domain-status.invalid{color:#b42318!important}
 `;
 
 

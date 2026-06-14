@@ -546,6 +546,30 @@ app.get('/api/workspace-orders', authenticateCustomer, async (req, res) => {
   }
 });
 
+// Check whether a domain is already taken (DB-level now; Google API check added in Stage 2c)
+app.get('/api/workspace-orders/check-domain/:domain', authenticateCustomer, async (req, res) => {
+  try {
+    const domain = (req.params.domain || '').toLowerCase().trim();
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain)) {
+      return res.status(400).json({ available: false, reason: 'invalid', message: 'Enter a valid domain (e.g. example.com).' });
+    }
+    // Has this domain already been ordered through this portal?
+    const existing = await WorkspaceOrder.findOne({ 'organization.domain': domain });
+    if (existing) {
+      return res.json({
+        available: false,
+        reason: 'taken',
+        message: 'This domain already has a Workspace order. Use the existing customer to purchase add-ons.',
+      });
+    }
+    // Stage 2c: also query Google Reseller API here to catch domains registered
+    // outside this portal. For now, DB check only.
+    res.json({ available: true, message: 'Domain is available.' });
+  } catch (error) {
+    res.status(500).json({ available: false, reason: 'error', message: 'Could not check domain right now.' });
+  }
+});
+
 // Get one workspace order (for the verification screen)
 app.get('/api/workspace-orders/:id', authenticateCustomer, async (req, res) => {
   try {
