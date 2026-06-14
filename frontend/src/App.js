@@ -842,9 +842,11 @@ const SubscriptionsSection = () => {
 
   // Domains that have Workspace but no Voice yet (candidates for adding Voice)
   const voiceSkus = ['1010330003', '1010330004', '1010330002', '1010330005', '1010330006'];
-  const domainsWithWorkspace = [...new Set(rows.filter(r => String(r.skuId).startsWith('101002')).map(r => r.domain))];
+  // Voice can ONLY be added to domains that exist in the USA reseller account.
+  // Eligible = USA-account domains that don't already have a Voice subscription.
+  const usaDomains = [...new Set(rows.filter(r => r.account === 'USA').map(r => r.domain))];
   const domainsWithVoice = new Set(rows.filter(r => voiceSkus.includes(String(r.skuId))).map(r => r.domain));
-  const eligibleDomains = domainsWithWorkspace.filter(d => !domainsWithVoice.has(d));
+  const eligibleDomains = usaDomains.filter(d => !domainsWithVoice.has(d));
 
   const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString() : '—';
   const planLabel = (p) => ({
@@ -876,7 +878,7 @@ const SubscriptionsSection = () => {
       <div className="add-voice-card" style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 16, marginBottom: 20 }}>
         <h3 style={{ margin: '0 0 4px' }}>📞 Add Google Voice to a domain</h3>
         <p style={{ margin: '0 0 12px', color: '#5b6075', fontSize: 14 }}>
-          Voice can be added to a domain that already has active Workspace (one Voice subscription per domain).
+          Voice is sold through the USA reseller account. Only USA-account domains appear here (one Voice subscription per domain).
         </p>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div>
@@ -906,7 +908,7 @@ const SubscriptionsSection = () => {
         </div>
         {eligibleDomains.length === 0 && (
           <p style={{ marginTop: 10, fontSize: 13, color: '#9a3412' }}>
-            No eligible domains (need active Workspace and no existing Voice).
+            No eligible USA-account domains (need a customer in the USA reseller without existing Voice).
           </p>
         )}
         {vMsg && <div style={{ marginTop: 12, fontSize: 14, color: vMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{vMsg}</div>}
