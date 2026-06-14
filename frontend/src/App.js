@@ -1282,6 +1282,8 @@ function WorkspaceOrderFlow() {
   const [verification, setVerification] = useState(null);
   const [verifying, setVerifying] = useState(false);
   const [verifyMsg, setVerifyMsg] = useState('');
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionMsg, setProvisionMsg] = useState('');
   const [domainStatus, setDomainStatus] = useState({ state: 'idle', message: '' }); // idle|checking|available|taken|invalid
   const [mapsReady, setMapsReady] = useState(false);
   const streetInputRef = useRef(null);
@@ -1479,6 +1481,27 @@ function WorkspaceOrderFlow() {
       navigator.clipboard.writeText(verification.txtRecord);
       setVerifyMsg('TXT record copied to clipboard.');
     }
+  };
+
+  const provisionOrder = async () => {
+    if (!orderDone?.id) return;
+    setProvisioning(true); setProvisionMsg('');
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API_URL}/workspace-orders/${orderDone.id}/provision`, {}, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.data.success) {
+        setProvisionMsg(res.data.alreadyProvisioned
+          ? 'This order was already created in Google.'
+          : '✓ Customer and Workspace subscription created in Google!');
+      } else {
+        setProvisionMsg('Provisioning returned an unexpected response.');
+      }
+    } catch (e) {
+      const d = e?.response?.data;
+      setProvisionMsg((d?.error || 'Provisioning failed.') + (d?.step ? ` (step: ${d.step})` : ''));
+    } finally { setProvisioning(false); }
   };
 
   return (
@@ -1693,8 +1716,14 @@ function WorkspaceOrderFlow() {
               <div className="wof-verify-badge">✓ Domain verified</div>
               <p className="wof-muted">{form.domain} is verified.</p>
               <div className="wof-next">
-                <h4>Next step</h4>
-                <p>Add a Google Voice subscription for this domain (one per domain). We'll set this up next.</p>
+                <h4>Create in Google</h4>
+                <p className="wof-muted">Create this customer and Workspace subscription on your reseller account.</p>
+                {provisionMsg && <div className="wof-verify-msg">{provisionMsg}</div>}
+                <div className="wof-actions" style={{ justifyContent: 'center' }}>
+                  <button type="button" className="wof-btn primary" onClick={provisionOrder} disabled={provisioning}>
+                    {provisioning ? 'Creating in Google…' : 'Provision to Google'}
+                  </button>
+                </div>
               </div>
             </div>
           )}

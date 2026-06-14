@@ -31,6 +31,7 @@ mongoose.connect(process.env.MONGODB_URI, {
 mongoose.connection.once('open', () => {
   console.log('✅ MongoDB connected');
   seedPlans();
+  backfillPlanSkus();
 });
 mongoose.connection.on('error', (err) => {
   console.error('MongoDB connection error:', err.message);
@@ -151,6 +152,7 @@ const PlanSchema = new mongoose.Schema(
     category: { type: String, enum: ['workspace', 'voice', 'addon'], required: true },
     name: { type: String, required: true },
     monthlyPrice: { type: Number, required: true }, // your selling price /user/mo
+    skuId: String, // Google Reseller API SKU id (for provisioning)
     features: [String],
     active: { type: Boolean, default: true },
     sortOrder: { type: Number, default: 0 },
@@ -237,19 +239,19 @@ async function seedPlans() {
     if (count > 0) return;
     await Plan.insertMany([
       {
-        planId: 'starter', category: 'workspace', name: 'Business Starter', monthlyPrice: 7.20, sortOrder: 1,
+        planId: 'starter', category: 'workspace', name: 'Business Starter', monthlyPrice: 7.20, sortOrder: 1, skuId: '1010020027',
         features: ['30 GB pooled storage', 'Custom business email', 'Meet (100 participants)', 'Security & management controls']
       },
       {
-        planId: 'standard', category: 'workspace', name: 'Business Standard', monthlyPrice: 14.40, sortOrder: 2,
+        planId: 'standard', category: 'workspace', name: 'Business Standard', monthlyPrice: 14.40, sortOrder: 2, skuId: '1010020028',
         features: ['2 TB pooled storage', 'Custom business email', 'Meet (150 participants) + recording', 'eSignature in Docs']
       },
       {
-        planId: 'plus', category: 'workspace', name: 'Business Plus', monthlyPrice: 21.60, sortOrder: 3,
+        planId: 'plus', category: 'workspace', name: 'Business Plus', monthlyPrice: 21.60, sortOrder: 3, skuId: '1010020025',
         features: ['5 TB pooled storage', 'Enhanced security & Vault', 'Meet (500 participants) + attendance', 'Advanced endpoint management']
       },
       {
-        planId: 'frontline', category: 'workspace', name: 'Frontline Starter', monthlyPrice: 6.00, sortOrder: 4,
+        planId: 'frontline', category: 'workspace', name: 'Frontline Starter', monthlyPrice: 6.00, sortOrder: 4, skuId: '1010020030',
         features: ['Business email', 'Shared device support', 'Meet (100 participants)', 'For frontline workers']
       },
       {
@@ -759,6 +761,107 @@ async function getResellerAuth() {
   oauth2.setCredentials({ refresh_token: conn.refreshToken });
   return oauth2;
 }
+
+// One-time: backfill Google SKU IDs onto existing workspace plans
+app.post('/api/admin/backfill-skus', async (req, res) => {
+  try {
+    const skuMap = {
+      starter: '1010020027',
+      standard: '1010020028',
+      plus: '1010020025',
+      frontline: '1010020030',
+    };
+    const results = [];
+    for (const [planId, skuId] of Object.entries(skuMap)) {
+      const r = await Plan.updateOne({ planId }, { $set: { skuId } });
+      results.push({ planId, skuId, matched: r.matchedCount ?? r.n, modified: r.modifiedCount ?? r.nModified });
+    }
+    res.json({ success: true, results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Provision a workspace order into Google: create customer + create subscription
+app.post('/api/workspace-orders/:id/provision', authenticateCustomer, async (req, res) => {
+  try {
+    const order = await WorkspaceOrder.findOne({ _id: req.params.id, customerId: req.customerId });
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (order.status === 'provisioned') {
+      return res.json({ success: true, alreadyProvisioned: true, message: 'This order is already provisioned.' });
+    }
+
+    // Look up the plan to get its Google SKU id
+    const planDoc = await Plan.findOne({ planId: order.plan?.id });
+    if (!planDoc || !planDoc.skuId) {
+      return res.status(400).json({ error: 'Plan is missing a Google SKU. Set it in admin before provisioning.' });
+    }
+
+    const auth = await getResellerAuth();
+    const reseller = google.reseller({ version: 'v1', auth });
+    const org = order.organization || {};
+    const contact = order.contact || {};
+    const domain = (org.domain || '').toLowerCase();
+
+    // 1) Create the customer (idempotent-ish: if exists, we catch and continue)
+    let customerCreated = false;
+    try {
+      await reseller.customers.insert({
+        requestBody: {
+          customerDomain: domain,
+          alternateEmail: contact.alternateEmail,
+          customerDomainVerified: !!order.domainVerified,
+          phoneNumber: contact.phone || undefined,
+          postalAddress: {
+            contactName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
+            organizationName: org.name,
+            addressLine1: org.streetAddress,
+            addressLine2: org.streetAddress2 || undefined,
+            locality: org.city,
+            region: org.state,
+            postalCode: org.zip,
+            countryCode: 'US',
+          },
+        },
+      });
+      customerCreated = true;
+    } catch (custErr) {
+      const msg = custErr?.errors?.[0]?.message || custErr?.message || '';
+      // If the customer already exists, proceed to subscription
+      if (!/already exists|entity already|duplicate/i.test(msg)) {
+        return res.status(400).json({ error: 'Customer creation failed: ' + msg, step: 'customer' });
+      }
+    }
+
+    // 2) Create the Workspace subscription
+    try {
+      await reseller.subscriptions.insert({
+        customerId: domain,
+        requestBody: {
+          customerId: domain,
+          skuId: planDoc.skuId,
+          plan: { planName: 'FLEXIBLE' }, // pay-as-you-go monthly; matches reseller pricing
+          seats: { numberOfSeats: order.seats, maximumNumberOfSeats: order.seats },
+          purchaseOrderId: order.orderNumber,
+        },
+      });
+    } catch (subErr) {
+      const msg = subErr?.errors?.[0]?.message || subErr?.message || '';
+      return res.status(400).json({
+        error: 'Subscription creation failed: ' + msg,
+        step: 'subscription',
+        customerCreated,
+      });
+    }
+
+    order.status = 'provisioned';
+    await order.save();
+    res.json({ success: true, customerCreated, message: 'Customer and Workspace subscription created in Google.' });
+  } catch (error) {
+    const msg = error?.message || 'Provisioning failed';
+    res.status(500).json({ error: msg });
+  }
+});
 
 // ORDER MANAGEMENT
 app.post('/api/orders', authenticateCustomer, async (req, res) => {
