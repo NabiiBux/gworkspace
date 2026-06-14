@@ -1226,6 +1226,82 @@ app.get('/api/dashboard', authenticateCustomer, async (req, res) => {
   }
 });
 
+// Live subscriptions from Google (all customers on the reseller account)
+app.get('/api/admin/google/subscriptions', authenticateCustomer, async (req, res) => {
+  try {
+    const auth = await getResellerAuth();
+    const reseller = google.reseller({ version: 'v1', auth });
+    let subs = [];
+    let pageToken;
+    do {
+      const resp = await reseller.subscriptions.list({
+        maxResults: 100,
+        pageToken,
+      });
+      const page = resp.data.subscriptions || [];
+      subs = subs.concat(page);
+      pageToken = resp.data.nextPageToken;
+    } while (pageToken);
+
+    // Shape the data for the UI
+    const rows = subs.map((s) => ({
+      customerId: s.customerId,
+      domain: s.customerDomain || s.customerId,
+      skuId: s.skuId,
+      skuName: s.skuName || s.skuId,
+      planName: s.plan?.planName,
+      seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
+      licensedSeats: s.seats?.licensedNumberOfSeats ?? null,
+      status: s.status,
+      creationTime: s.creationTime ? Number(s.creationTime) : null,
+      purchaseOrderId: s.purchaseOrderId || null,
+    }));
+
+    // Summary counts
+    const uniqueDomains = new Set(rows.map((r) => r.domain));
+    const summary = {
+      totalSubscriptions: rows.length,
+      activeSubscriptions: rows.filter((r) => r.status === 'ACTIVE').length,
+      suspendedSubscriptions: rows.filter((r) => r.status === 'SUSPENDED').length,
+      totalCustomers: uniqueDomains.size,
+    };
+
+    res.json({ subscriptions: rows, summary });
+  } catch (e) {
+    const msg = e?.errors?.[0]?.message || e?.message || 'Could not fetch subscriptions from Google';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// Live dashboard stats from Google
+app.get('/api/admin/google/dashboard', authenticateCustomer, async (req, res) => {
+  try {
+    const auth = await getResellerAuth();
+    const reseller = google.reseller({ version: 'v1', auth });
+    let subs = [];
+    let pageToken;
+    do {
+      const resp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
+      subs = subs.concat(resp.data.subscriptions || []);
+      pageToken = resp.data.nextPageToken;
+    } while (pageToken);
+
+    const uniqueDomains = new Set(subs.map((s) => s.customerDomain || s.customerId));
+    const totalSeats = subs.reduce((sum, s) => sum + (s.seats?.numberOfSeats || 0), 0);
+
+    res.json({
+      totalCustomers: uniqueDomains.size,
+      totalSubscriptions: subs.length,
+      activeSubscriptions: subs.filter((s) => s.status === 'ACTIVE').length,
+      suspendedSubscriptions: subs.filter((s) => s.status === 'SUSPENDED').length,
+      totalSeats,
+    });
+  } catch (e) {
+    const msg = e?.errors?.[0]?.message || e?.message || 'Could not fetch dashboard data from Google';
+    res.status(500).json({ error: msg });
+  }
+});
+
 // HEALTH CHECK
 app.get('/api/health', (req, res) => {
   res.json({ status: 'Server is running' });

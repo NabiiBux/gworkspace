@@ -400,36 +400,55 @@ const Dashboard = () => {
 
 // ==================== OVERVIEW SECTION ====================
 const OverviewSection = ({ stats }) => {
+  const [live, setLive] = useState(null);
+  const [liveErr, setLiveErr] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await axios.get(`${API_URL}/admin/google/dashboard`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        setLive(res.data);
+      } catch (e) {
+        setLiveErr(e?.response?.data?.error || 'Could not load live Google data.');
+      }
+    })();
+  }, []);
+
   if (!stats) return <div className="loading">Loading...</div>;
 
   return (
     <div className="section">
       <h2>Dashboard Overview</h2>
 
+      {liveErr && <div style={{ background: '#fff7ed', color: '#9a3412', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{liveErr}</div>}
+
       <div className="stats-grid">
         <div className="stat-card">
-          <h3>Active Orders</h3>
-          <p className="stat-value">{stats.orders}</p>
+          <h3>Customers (Google)</h3>
+          <p className="stat-value">{live ? live.totalCustomers : '…'}</p>
         </div>
 
         <div className="stat-card">
           <h3>Active Subscriptions</h3>
-          <p className="stat-value">{stats.activeSubscriptions}</p>
+          <p className="stat-value">{live ? live.activeSubscriptions : '…'}</p>
         </div>
 
         <div className="stat-card">
-          <h3>Total Users</h3>
-          <p className="stat-value">{stats.totalUsers}</p>
+          <h3>Total Seats</h3>
+          <p className="stat-value">{live ? live.totalSeats : '…'}</p>
         </div>
 
         <div className="stat-card">
-          <h3>Total Revenue</h3>
-          <p className="stat-value">${stats.totalRevenue.toFixed(2)}</p>
+          <h3>All Subscriptions</h3>
+          <p className="stat-value">{live ? live.totalSubscriptions : '…'}</p>
         </div>
 
         <div className="stat-card">
-          <h3>Pending Invoices</h3>
-          <p className="stat-value">{stats.pendingInvoices}</p>
+          <h3>Suspended</h3>
+          <p className="stat-value">{live ? live.suspendedSubscriptions : '…'}</p>
         </div>
 
         <div className="stat-card">
@@ -770,80 +789,84 @@ const OrdersSection = () => {
 
 // ==================== SUBSCRIPTIONS SECTION ====================
 const SubscriptionsSection = () => {
-  const [subscriptions, setSubscriptions] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    fetchSubscriptions();
-  }, []);
+  useEffect(() => { fetchSubs(); }, []);
 
-  const fetchSubscriptions = async () => {
+  const fetchSubs = async () => {
+    setLoading(true); setError('');
     try {
-      const response = await axios.get(`${API_URL}/subscriptions`);
-      setSubscriptions(response.data);
-    } catch (error) {
-      console.error('Error fetching subscriptions:', error);
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API_URL}/admin/google/subscriptions`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      setRows(res.data.subscriptions || []);
+      setSummary(res.data.summary || null);
+    } catch (e) {
+      setError(e?.response?.data?.error || 'Could not load subscriptions from Google.');
     } finally {
       setLoading(false);
     }
   };
 
-  const updateSeats = async (id, newSeats) => {
-    try {
-      await axios.patch(`${API_URL}/subscriptions/${id}`, { seats: newSeats });
-      fetchSubscriptions();
-      alert('Subscription updated!');
-    } catch (error) {
-      alert('Failed to update subscription');
-    }
-  };
+  const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString() : '—';
+  const planLabel = (p) => ({
+    FLEXIBLE: 'Flexible (monthly)',
+    ANNUAL_MONTHLY_PAY: 'Annual (monthly pay)',
+    ANNUAL_YEARLY_PAY: 'Annual (yearly pay)',
+    TRIAL: 'Trial',
+    FREE: 'Free',
+  }[p] || p || '—');
 
-  if (loading) return <div className="loading">Loading subscriptions...</div>;
+  if (loading) return <div className="loading">Loading live subscriptions from Google…</div>;
 
   return (
     <div className="section">
-      <h2>🔄 Subscriptions</h2>
+      <h2>🔄 Subscriptions (live from Google)</h2>
 
-      {subscriptions.length === 0 ? (
-        <p>No active subscriptions.</p>
-      ) : (
-        <div className="subscriptions-grid">
-          {subscriptions.map((sub) => (
-            <div key={sub._id} className="subscription-card">
-              <div className="subscription-header">
-                <h4>{sub.plan}</h4>
-                <span className={`status ${sub.status}`}>{sub.status}</span>
-              </div>
+      {error && <div className="error-banner" style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
 
-              <div className="subscription-details">
-                <p>
-                  <strong>Type:</strong> {sub.type}
-                </p>
-                <p>
-                  <strong>Seats:</strong> {sub.seats}
-                </p>
-                <p>
-                  <strong>Price:</strong> ${sub.monthlyPrice}/month
-                </p>
-                <p>
-                  <strong>Next Billing:</strong>{' '}
-                  {new Date(sub.nextBillingDate).toLocaleDateString()}
-                </p>
-              </div>
-
-              <div className="subscription-actions">
-                <input
-                  type="number"
-                  min="1"
-                  value={sub.seats}
-                  onChange={(e) => updateSeats(sub._id, parseInt(e.target.value))}
-                  className="input-small"
-                />
-                <button className="btn btn-primary">Update Seats</button>
-              </div>
-            </div>
-          ))}
+      {summary && (
+        <div className="stats-grid" style={{ marginBottom: 20 }}>
+          <div className="stat-card"><h3>Customers</h3><p className="stat-value">{summary.totalCustomers}</p></div>
+          <div className="stat-card"><h3>Subscriptions</h3><p className="stat-value">{summary.totalSubscriptions}</p></div>
+          <div className="stat-card"><h3>Active</h3><p className="stat-value">{summary.activeSubscriptions}</p></div>
+          <div className="stat-card"><h3>Suspended</h3><p className="stat-value">{summary.suspendedSubscriptions}</p></div>
         </div>
+      )}
+
+      <button className="btn btn-secondary" onClick={fetchSubs} style={{ marginBottom: 12 }}>↻ Refresh</button>
+
+      {rows.length === 0 ? (
+        <p>No subscriptions found on your reseller account.</p>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Domain</th>
+              <th>Product</th>
+              <th>Plan</th>
+              <th>Seats</th>
+              <th>Status</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((s, i) => (
+              <tr key={`${s.customerId}-${s.skuId}-${i}`}>
+                <td>{s.domain}</td>
+                <td>{s.skuName}</td>
+                <td>{planLabel(s.planName)}</td>
+                <td>{s.seats ?? s.licensedSeats ?? '—'}</td>
+                <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
+                <td>{fmtDate(s.creationTime)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   );
