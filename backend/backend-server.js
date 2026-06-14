@@ -1106,41 +1106,43 @@ app.post('/api/admin/add-voice', authenticateCustomer, async (req, res) => {
       return res.status(400).json({ error: 'This domain already has a Google Voice subscription (one per domain).' });
     }
 
-    // 3) Add the Voice subscription. Voice may require a specific plan type,
-    //    so try FLEXIBLE first, then ANNUAL_MONTHLY_PAY if Google says "not applicable".
-    const plansToTry = ['FLEXIBLE', 'ANNUAL_MONTHLY_PAY'];
+    // 3) Add the Voice subscription. Use the correct seats field per plan type:
+    //    FLEXIBLE -> maximumNumberOfSeats only; ANNUAL_MONTHLY_PAY -> numberOfSeats only.
+    const attempts = [
+      { planName: 'FLEXIBLE', seats: { maximumNumberOfSeats: numSeats } },
+      { planName: 'ANNUAL_MONTHLY_PAY', seats: { numberOfSeats: numSeats } },
+    ];
     let lastErr = '';
     let added = false;
-    for (const planName of plansToTry) {
+    for (const attempt of attempts) {
       try {
-        const body = {
+        await reseller.subscriptions.insert({
           customerId: dom,
-          skuId: voicePlan.skuId,
-          plan: { planName },
-          seats: { numberOfSeats: numSeats, maximumNumberOfSeats: numSeats },
-          purchaseOrderId: `VOICE-${Date.now()}`,
-        };
-        if (planName === 'ANNUAL_MONTHLY_PAY') {
-          body.plan.commitmentInterval = undefined; // let Google default it
-        }
-        await reseller.subscriptions.insert({ customerId: dom, requestBody: body });
+          requestBody: {
+            customerId: dom,
+            skuId: voicePlan.skuId,
+            plan: { planName: attempt.planName },
+            seats: { kind: 'subscriptions#seats', ...attempt.seats },
+            purchaseOrderId: `VOICE-${Date.now()}`,
+          },
+        });
         added = true;
         break;
       } catch (subErr) {
         lastErr = subErr?.errors?.[0]?.message || subErr?.message || '';
-        // Only retry with a different plan if it's a plan-applicability error
-        if (!/not applicable|invalid|plan/i.test(lastErr)) break;
+        // retry with the other plan type only on applicability errors
+        if (!/not applicable|invalid|seat/i.test(lastErr)) break;
       }
     }
 
     if (!added) {
       let hint = '';
       if (/not applicable|invalid/i.test(lastErr)) {
-        hint = ' This usually means Voice for this SKU isn\'t enabled for this customer, or the customer already has a conflicting subscription. Check the customer in the USA Partner Console.';
+        hint = ' The customer may already have Voice, or this Voice SKU needs enabling for them. Check the customer in the USA Partner Console.';
       } else if (/suspended/i.test(lastErr)) {
         hint = ' Resolve the suspended subscription on this customer first.';
       } else if (/terms of service|consent/i.test(lastErr)) {
-        hint = ' Accept the Google Voice reseller terms of service / purchase consent in the USA Partner Console.';
+        hint = ' Accept the Google Voice reseller terms of service in the USA Partner Console.';
       }
       return res.status(400).json({ error: 'Voice subscription failed: ' + lastErr + hint, step: 'voice_subscription' });
     }
@@ -1399,20 +1401,37 @@ app.get('/api/dashboard', authenticateCustomer, async (req, res) => {
   }
 });
 
-// Live subscriptions from Google (all customers on the reseller account)
+// Voice first-party supported countries (ISO codes) — from Google's official list
+const VOICE_SUPPORTED_COUNTRIES = ['BE', 'CA', 'DK', 'FR', 'DE', 'IE', 'IT', 'NL', 'PT', 'ES', 'SE', 'CH', 'GB', 'US'];
+
+// Live subscriptions for ONE account (PK or USA), paginated (100 per page).
+// Query: ?account=PK|USA&page=1
 app.get('/api/admin/google/subscriptions', authenticateCustomer, async (req, res) => {
   try {
-    const collect = async (auth, accountLabel) => {
-      const reseller = google.reseller({ version: 'v1', auth });
-      let subs = [];
-      let pageToken;
-      do {
-        const resp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
-        subs = subs.concat(resp.data.subscriptions || []);
-        pageToken = resp.data.nextPageToken;
-      } while (pageToken);
-      return subs.map((s) => ({
-        account: accountLabel,
+    const account = (req.query.account || 'PK').toUpperCase() === 'USA' ? 'USA' : 'PK';
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = 100;
+
+    // Pick the right auth for the requested account ONLY (no merging)
+    let auth;
+    try {
+      auth = account === 'USA' ? await getUsaAuth() : await getResellerAuth();
+    } catch (e) {
+      return res.status(400).json({ error: e.message, account, notConnected: true });
+    }
+
+    const reseller = google.reseller({ version: 'v1', auth });
+    let subs = [];
+    let pageToken;
+    do {
+      const resp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
+      subs = subs.concat(resp.data.subscriptions || []);
+      pageToken = resp.data.nextPageToken;
+    } while (pageToken);
+
+    const allRows = subs.map((s) => {
+      return {
+        account,
         customerId: s.customerId,
         domain: s.customerDomain || s.customerId,
         skuId: s.skuId,
@@ -1422,29 +1441,24 @@ app.get('/api/admin/google/subscriptions', authenticateCustomer, async (req, res
         licensedSeats: s.seats?.licensedNumberOfSeats ?? null,
         status: s.status,
         creationTime: s.creationTime ? Number(s.creationTime) : null,
-        purchaseOrderId: s.purchaseOrderId || null,
-      }));
-    };
+      };
+    });
 
-    let rows = [];
-    // Pakistan account (Workspace)
-    try {
-      rows = rows.concat(await collect(await getResellerAuth(), 'PK'));
-    } catch (_) { }
-    // USA account (Voice) — only if connected
-    try {
-      rows = rows.concat(await collect(await getUsaAuth(), 'USA'));
-    } catch (_) { }
+    const total = allRows.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const start = (page - 1) * pageSize;
+    const rows = allRows.slice(start, start + pageSize);
 
-    const uniqueDomains = new Set(rows.map((r) => r.domain));
+    const uniqueDomains = new Set(allRows.map((r) => r.domain));
     const summary = {
-      totalSubscriptions: rows.length,
-      activeSubscriptions: rows.filter((r) => r.status === 'ACTIVE').length,
-      suspendedSubscriptions: rows.filter((r) => r.status === 'SUSPENDED').length,
+      account,
+      totalSubscriptions: total,
+      activeSubscriptions: allRows.filter((r) => r.status === 'ACTIVE').length,
+      suspendedSubscriptions: allRows.filter((r) => r.status === 'SUSPENDED').length,
       totalCustomers: uniqueDomains.size,
     };
 
-    res.json({ subscriptions: rows, summary });
+    res.json({ subscriptions: rows, summary, page, totalPages, total });
   } catch (e) {
     const msg = e?.errors?.[0]?.message || e?.message || 'Could not fetch subscriptions from Google';
     res.status(500).json({ error: msg });

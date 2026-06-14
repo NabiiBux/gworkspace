@@ -347,10 +347,18 @@ const Dashboard = () => {
           </li>
           <li>
             <button
-              className={`menu-item ${activeSection === 'subscriptions' ? 'active' : ''}`}
-              onClick={() => setActiveSection('subscriptions')}
+              className={`menu-item ${activeSection === 'subs-pk' ? 'active' : ''}`}
+              onClick={() => setActiveSection('subs-pk')}
             >
-              🔄 Subscriptions
+              🇵🇰 Pakistan Workspace
+            </button>
+          </li>
+          <li>
+            <button
+              className={`menu-item ${activeSection === 'subs-usa' ? 'active' : ''}`}
+              onClick={() => setActiveSection('subs-usa')}
+            >
+              🇺🇸 USA Voice
             </button>
           </li>
           <li>
@@ -389,7 +397,8 @@ const Dashboard = () => {
         {activeSection === 'order-workspace' && <WorkspaceOrderFlow />}
         {activeSection === 'products' && <ProductsSection />}
         {activeSection === 'orders' && <OrdersSection />}
-        {activeSection === 'subscriptions' && <SubscriptionsSection />}
+        {activeSection === 'subs-pk' && <SubscriptionsSection account="PK" />}
+        {activeSection === 'subs-usa' && <SubscriptionsSection account="USA" />}
         {activeSection === 'users' && <UsersSection />}
         {activeSection === 'invoices' && <InvoicesSection />}
         {activeSection === 'domains' && <DomainsSection />}
@@ -787,18 +796,25 @@ const OrdersSection = () => {
   );
 };
 
-// ==================== SUBSCRIPTIONS SECTION ====================
-const SubscriptionsSection = () => {
+// ==================== SUBSCRIPTIONS SECTION (per-account, paginated) ====================
+const SubscriptionsSection = ({ account = 'PK' }) => {
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [notConnected, setNotConnected] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [voicePlans, setVoicePlans] = useState([]);
   const [vForm, setVForm] = useState({ domain: '', voicePlanId: '', seats: 1 });
   const [vMsg, setVMsg] = useState('');
   const [vBusy, setVBusy] = useState(false);
 
-  useEffect(() => { fetchSubs(); fetchVoicePlans(); }, []);
+  const isUSA = account === 'USA';
+
+  useEffect(() => { setPage(1); }, [account]);
+  useEffect(() => { fetchSubs(); }, [account, page]);
+  useEffect(() => { if (isUSA) fetchVoicePlans(); }, [isUSA]);
 
   const fetchVoicePlans = async () => {
     try {
@@ -810,15 +826,17 @@ const SubscriptionsSection = () => {
   };
 
   const fetchSubs = async () => {
-    setLoading(true); setError('');
+    setLoading(true); setError(''); setNotConnected(false);
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${API_URL}/admin/google/subscriptions`, {
+      const res = await axios.get(`${API_URL}/admin/google/subscriptions?account=${account}&page=${page}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       setRows(res.data.subscriptions || []);
       setSummary(res.data.summary || null);
+      setTotalPages(res.data.totalPages || 1);
     } catch (e) {
+      if (e?.response?.data?.notConnected) setNotConnected(true);
       setError(e?.response?.data?.error || 'Could not load subscriptions from Google.');
     } finally {
       setLoading(false);
@@ -833,35 +851,46 @@ const SubscriptionsSection = () => {
       const res = await axios.post(`${API_URL}/admin/add-voice`, vForm, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      setVMsg('✓ ' + (res.data.message || 'Voice added.'));
+      setVMsg('✓ ' + (res.data.message || 'Voice added.') + ' It may take a few minutes to appear in Google.');
       fetchSubs();
     } catch (e) {
       setVMsg(e?.response?.data?.error || 'Could not add Voice.');
     } finally { setVBusy(false); }
   };
 
-  // Domains that have Workspace but no Voice yet (candidates for adding Voice)
+  // USA Voice eligibility: USA-account domains without a Voice sub yet
   const voiceSkus = ['1010330003', '1010330004', '1010330002', '1010330005', '1010330006'];
-  // Voice can ONLY be added to domains that exist in the USA reseller account.
-  // Eligible = USA-account domains that don't already have a Voice subscription.
-  const usaDomains = [...new Set(rows.filter(r => r.account === 'USA').map(r => r.domain))];
   const domainsWithVoice = new Set(rows.filter(r => voiceSkus.includes(String(r.skuId))).map(r => r.domain));
-  const eligibleDomains = usaDomains.filter(d => !domainsWithVoice.has(d));
+  const eligibleDomains = [...new Set(rows.map(r => r.domain))].filter(d => !domainsWithVoice.has(d));
 
   const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString() : '—';
   const planLabel = (p) => ({
     FLEXIBLE: 'Flexible (monthly)',
     ANNUAL_MONTHLY_PAY: 'Annual (monthly pay)',
     ANNUAL_YEARLY_PAY: 'Annual (yearly pay)',
-    TRIAL: 'Trial',
-    FREE: 'Free',
+    TRIAL: 'Trial', FREE: 'Free',
   }[p] || p || '—');
 
-  if (loading) return <div className="loading">Loading live subscriptions from Google…</div>;
+  const title = isUSA ? '🇺🇸 USA Voice Subscriptions' : '🇵🇰 Pakistan Workspace Subscriptions';
+
+  if (loading) return <div className="loading">Loading {isUSA ? 'USA' : 'Pakistan'} subscriptions from Google…</div>;
+
+  if (notConnected) {
+    return (
+      <div className="section">
+        <h2>{title}</h2>
+        <div style={{ background: '#fff7ed', color: '#9a3412', padding: '14px 16px', borderRadius: 10 }}>
+          {isUSA
+            ? 'USA reseller is not connected. Connect it by visiting /api/google/usa/connect on the backend.'
+            : 'Pakistan reseller is not connected.'}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="section">
-      <h2>🔄 Subscriptions (live from Google)</h2>
+      <h2>{title}</h2>
 
       {error && <div className="error-banner" style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
 
@@ -874,83 +903,75 @@ const SubscriptionsSection = () => {
         </div>
       )}
 
-      {/* Add Google Voice to an existing domain */}
-      <div className="add-voice-card" style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 16, marginBottom: 20 }}>
-        <h3 style={{ margin: '0 0 4px' }}>📞 Add Google Voice to a domain</h3>
-        <p style={{ margin: '0 0 12px', color: '#5b6075', fontSize: 14 }}>
-          Voice is sold through the USA reseller account. Only USA-account domains appear here (one Voice subscription per domain).
-        </p>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Domain (type to search)</label>
-            <input
-              list="usa-domains-list"
-              value={vForm.domain}
-              onChange={(e) => setVForm({ ...vForm, domain: e.target.value })}
-              placeholder="Search USA domains…"
-              style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', minWidth: 240 }}
-            />
-            <datalist id="usa-domains-list">
-              {eligibleDomains.map(d => <option key={d} value={d} />)}
-            </datalist>
-            <div style={{ fontSize: 12, color: '#7a809a', marginTop: 4 }}>
-              {eligibleDomains.length} eligible USA domain{eligibleDomains.length === 1 ? '' : 's'}
-            </div>
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Voice plan</label>
-            <select value={vForm.voicePlanId} onChange={(e) => setVForm({ ...vForm, voicePlanId: e.target.value })}
-              style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', minWidth: 160 }}>
-              {voicePlans.map(p => <option key={p.id} value={p.id}>{p.name} (${p.monthlyPrice}/mo)</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Seats</label>
-            <input type="number" min="1" value={vForm.seats}
-              onChange={(e) => setVForm({ ...vForm, seats: Math.max(1, parseInt(e.target.value) || 1) })}
-              style={{ height: 40, width: 80, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }} />
-          </div>
-          <button className="btn btn-primary" onClick={addVoice} disabled={vBusy} style={{ height: 40 }}>
-            {vBusy ? 'Adding…' : 'Add Voice'}
-          </button>
-        </div>
-        {eligibleDomains.length === 0 && (
-          <p style={{ marginTop: 10, fontSize: 13, color: '#9a3412' }}>
-            No eligible USA-account domains (need a customer in the USA reseller without existing Voice).
+      {isUSA && (
+        <div className="add-voice-card" style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <h3 style={{ margin: '0 0 4px' }}>📞 Add Google Voice (USA only)</h3>
+          <p style={{ margin: '0 0 12px', color: '#5b6075', fontSize: 14 }}>
+            Voice is available only in supported countries (US, Canada, UK, and parts of Europe). One Voice subscription per domain.
           </p>
-        )}
-        {vMsg && <div style={{ marginTop: 12, fontSize: 14, color: vMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{vMsg}</div>}
-      </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Domain (type to search)</label>
+              <input list="usa-domains-list" value={vForm.domain}
+                onChange={(e) => setVForm({ ...vForm, domain: e.target.value })}
+                placeholder="Search USA domains…"
+                style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', minWidth: 240 }} />
+              <datalist id="usa-domains-list">
+                {eligibleDomains.map(d => <option key={d} value={d} />)}
+              </datalist>
+              <div style={{ fontSize: 12, color: '#7a809a', marginTop: 4 }}>{eligibleDomains.length} eligible domains</div>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Voice plan</label>
+              <select value={vForm.voicePlanId} onChange={(e) => setVForm({ ...vForm, voicePlanId: e.target.value })}
+                style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', minWidth: 160 }}>
+                {voicePlans.map(p => <option key={p.id} value={p.id}>{p.name} (${p.monthlyPrice}/mo)</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Seats</label>
+              <input type="number" min="1" value={vForm.seats}
+                onChange={(e) => setVForm({ ...vForm, seats: Math.max(1, parseInt(e.target.value) || 1) })}
+                style={{ height: 40, width: 80, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }} />
+            </div>
+            <button className="btn btn-primary" onClick={addVoice} disabled={vBusy} style={{ height: 40 }}>
+              {vBusy ? 'Adding…' : 'Add Voice'}
+            </button>
+          </div>
+          {vMsg && <div style={{ marginTop: 12, fontSize: 14, color: vMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{vMsg}</div>}
+        </div>
+      )}
 
       <button className="btn btn-secondary" onClick={fetchSubs} style={{ marginBottom: 12 }}>↻ Refresh</button>
 
       {rows.length === 0 ? (
-        <p>No subscriptions found on your reseller account.</p>
+        <p>No subscriptions found on this account.</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Domain</th>
-              <th>Product</th>
-              <th>Plan</th>
-              <th>Seats</th>
-              <th>Status</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((s, i) => (
-              <tr key={`${s.customerId}-${s.skuId}-${i}`}>
-                <td>{s.domain}</td>
-                <td>{s.skuName}</td>
-                <td>{planLabel(s.planName)}</td>
-                <td>{s.seats ?? s.licensedSeats ?? '—'}</td>
-                <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
-                <td>{fmtDate(s.creationTime)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <>
+          <table className="data-table">
+            <thead>
+              <tr><th>Domain</th><th>Product</th><th>Plan</th><th>Seats</th><th>Status</th><th>Created</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((s, i) => (
+                <tr key={`${s.customerId}-${s.skuId}-${i}`}>
+                  <td>{s.domain}</td>
+                  <td>{s.skuName}</td>
+                  <td>{planLabel(s.planName)}</td>
+                  <td>{s.seats ?? s.licensedSeats ?? '—'}</td>
+                  <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
+                  <td>{fmtDate(s.creationTime)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center', marginTop: 16 }}>
+            <button className="btn btn-secondary" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}>← Previous</button>
+            <span style={{ fontSize: 14, color: '#5b6075' }}>Page {page} of {totalPages}</span>
+            <button className="btn btn-secondary" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>Next →</button>
+          </div>
+        </>
       )}
     </div>
   );
