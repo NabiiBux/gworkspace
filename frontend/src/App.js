@@ -882,12 +882,20 @@ const SubscriptionsSection = () => {
         </p>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div>
-            <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Domain</label>
-            <select value={vForm.domain} onChange={(e) => setVForm({ ...vForm, domain: e.target.value })}
-              style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', minWidth: 200 }}>
-              <option value="">Select a domain…</option>
-              {eligibleDomains.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
+            <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Domain (type to search)</label>
+            <input
+              list="usa-domains-list"
+              value={vForm.domain}
+              onChange={(e) => setVForm({ ...vForm, domain: e.target.value })}
+              placeholder="Search USA domains…"
+              style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', minWidth: 240 }}
+            />
+            <datalist id="usa-domains-list">
+              {eligibleDomains.map(d => <option key={d} value={d} />)}
+            </datalist>
+            <div style={{ fontSize: 12, color: '#7a809a', marginTop: 4 }}>
+              {eligibleDomains.length} eligible USA domain{eligibleDomains.length === 1 ? '' : 's'}
+            </div>
           </div>
           <div>
             <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Voice plan</label>
