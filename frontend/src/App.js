@@ -1284,6 +1284,8 @@ function WorkspaceOrderFlow() {
   const [verifyMsg, setVerifyMsg] = useState('');
   const [provisioning, setProvisioning] = useState(false);
   const [provisionMsg, setProvisionMsg] = useState('');
+  const [provisionSuccess, setProvisionSuccess] = useState(false);
+  const [loginInfo, setLoginInfo] = useState(null);
   const [domainStatus, setDomainStatus] = useState({ state: 'idle', message: '' }); // idle|checking|available|taken|invalid
   const [mapsReady, setMapsReady] = useState(false);
   const streetInputRef = useRef(null);
@@ -1492,9 +1494,13 @@ function WorkspaceOrderFlow() {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (res.data.success) {
+        setProvisionSuccess(true);
         setProvisionMsg(res.data.alreadyProvisioned
-          ? 'This order was already created in Google.'
-          : '✓ Customer and Workspace subscription created in Google!');
+          ? 'Already created in Google.'
+          : '✓ Customer, admin user, and subscription created in Google!');
+        if (res.data.adminEmail) {
+          setLoginInfo({ email: res.data.adminEmail, password: form.tempPassword });
+        }
       } else {
         setProvisionMsg('Provisioning returned an unexpected response.');
       }
@@ -1719,11 +1725,36 @@ function WorkspaceOrderFlow() {
                 <h4>Create in Google</h4>
                 <p className="wof-muted">Create this customer and Workspace subscription on your reseller account.</p>
                 {provisionMsg && <div className="wof-verify-msg">{provisionMsg}</div>}
-                <div className="wof-actions" style={{ justifyContent: 'center' }}>
-                  <button type="button" className="wof-btn primary" onClick={provisionOrder} disabled={provisioning}>
-                    {provisioning ? 'Creating in Google…' : 'Provision to Google'}
-                  </button>
-                </div>
+                {!provisionSuccess && (
+                  <div className="wof-actions" style={{ justifyContent: 'center' }}>
+                    <button type="button" className="wof-btn primary" onClick={provisionOrder} disabled={provisioning}>
+                      {provisioning ? 'Creating in Google…' : 'Provision to Google'}
+                    </button>
+                  </div>
+                )}
+                {provisionSuccess && (
+                  <div className="wof-finish">
+                    <h4>✓ Your Workspace is ready</h4>
+                    <p className="wof-muted">
+                      Your administrator account has been created. Sign in to manage <strong>{form.domain}</strong>:
+                    </p>
+                    {loginInfo && (
+                      <div className="wof-creds">
+                        <div className="wof-cred-row"><span>Admin email</span><code>{loginInfo.email}</code></div>
+                        <div className="wof-cred-row"><span>Temp password</span><code>{loginInfo.password}</code></div>
+                      </div>
+                    )}
+                    <div className="wof-actions" style={{ justifyContent: 'center', marginTop: 12 }}>
+                      <a className="wof-btn primary" href="https://admin.google.com" target="_blank" rel="noreferrer"
+                        style={{ textDecoration: 'none' }}>
+                        Open Admin Console
+                      </a>
+                    </div>
+                    <p className="wof-muted" style={{ fontSize: 13, marginTop: 10 }}>
+                      You'll be asked to change the password on first sign-in, then verify your domain to activate Gmail.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1807,6 +1838,12 @@ const wofStyles = `
 .wof-domain-status.checking{color:#7a809a!important}
 .wof-domain-status.available{color:#16a34a!important}
 .wof-domain-status.taken,.wof-domain-status.invalid{color:#b42318!important}
+.wof-finish{margin-top:14px;text-align:left;background:#f5fbf6;border:1px solid #cdeccd;border-radius:10px;padding:14px 16px}
+.wof-finish h4{margin:0 0 8px;color:#166534}
+.wof-creds{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+.wof-cred-row{display:flex;justify-content:space-between;align-items:center;gap:12px;background:#fff;border:1px solid #cdeccd;border-radius:8px;padding:8px 12px}
+.wof-cred-row span{font-size:13px;color:#5b6075}
+.wof-cred-row code{font-size:14px;font-weight:600;color:#1a1a2e;word-break:break-all}
 `;
 
 
