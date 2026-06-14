@@ -592,9 +592,32 @@ app.get('/api/workspace-orders/check-domain/:domain', authenticateCustomer, asyn
         message: 'This domain already has a Workspace order. Use the existing customer to purchase add-ons.',
       });
     }
-    // Stage 2c: also query Google Reseller API here to catch domains registered
-    // outside this portal. For now, DB check only.
-    res.json({ available: true, message: 'Domain is available.' });
+
+    // Ask Google: does this domain already have a Workspace customer on our reseller account?
+    try {
+      const auth = await getResellerAuth();
+      const reseller = google.reseller({ version: 'v1', auth });
+      // customers.get with a domain returns the customer if it exists, else 404
+      await reseller.customers.get({ customerId: domain });
+      // If we got here, the customer EXISTS on Google -> domain already has Workspace
+      return res.json({
+        available: false,
+        reason: 'google_taken',
+        message: 'This domain already has Google Workspace. Please use a different domain.',
+      });
+    } catch (gErr) {
+      const code = gErr?.code || gErr?.response?.status;
+      if (code === 404) {
+        // 404 = no customer for this domain on Google -> it's free to use
+        return res.json({ available: true, message: 'Domain is available.' });
+      }
+      if (String(gErr.message || '').includes('not connected')) {
+        // Google not connected — fall back to DB-only result (don't hard-block)
+        return res.json({ available: true, message: 'Domain is available (Google check unavailable).' });
+      }
+      // Other Google errors: be safe, let them proceed but note it
+      return res.json({ available: true, message: 'Domain is available.' });
+    }
   } catch (error) {
     res.status(500).json({ available: false, reason: 'error', message: 'Could not check domain right now.' });
   }
