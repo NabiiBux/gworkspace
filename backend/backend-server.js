@@ -771,8 +771,39 @@ app.get('/api/google/status', authenticateCustomer, async (req, res) => {
   }
 });
 
-// Helper: get an authorized client using the stored refresh token (used by provisioning later)
+// Full scopes needed for end-to-end provisioning (customer + admin user + verification)
+const PROVISION_SCOPES = [
+  'https://www.googleapis.com/auth/apps.order',
+  'https://www.googleapis.com/auth/admin.directory.user',
+  'https://www.googleapis.com/auth/admin.directory.domain',
+  'https://www.googleapis.com/auth/siteverification',
+];
+
+// Service-account auth that impersonates the reseller admin (domain-wide delegation).
+// This is the method that can create users in customer domains.
+function getServiceAccountAuth() {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return null;
+  let creds;
+  try {
+    creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+  } catch (e) {
+    console.error('GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON:', e.message);
+    return null;
+  }
+  const subject = process.env.RESELLER_ADMIN_EMAIL || 'admin@gnbmentor.com';
+  return new google.auth.JWT({
+    email: creds.client_email,
+    key: creds.private_key,
+    scopes: PROVISION_SCOPES,
+    subject, // impersonate the reseller admin
+  });
+}
+
+// Helper: get an authorized client for reseller calls.
+// Prefers the service account (needed for user creation); falls back to OAuth refresh token.
 async function getResellerAuth() {
+  const sa = getServiceAccountAuth();
+  if (sa) return sa;
   const conn = await GoogleConnection.findOne();
   if (!conn || !conn.refreshToken) throw new Error('Google account not connected');
   const oauth2 = makeOAuthClient();
@@ -867,7 +898,50 @@ app.post('/api/workspace-orders/:id/provision', authenticateCustomer, async (req
       }
     }
 
-    // 2) Create the Workspace subscription
+    // 2) Create the first admin user with the customer's chosen username + temp password
+    let adminEmail = '';
+    let adminCreated = false;
+    try {
+      const rawUser = (org.desiredAdminUsername || 'admin').toString().trim();
+      // Accept either "admin" or "admin@domain" — normalize to local part
+      const localPart = rawUser.includes('@') ? rawUser.split('@')[0] : rawUser;
+      adminEmail = `${localPart}@${domain}`;
+      const password = org.tempPassword && org.tempPassword.length >= 8
+        ? org.tempPassword
+        : Math.random().toString(36).slice(2) + 'A1!';
+
+      const directory = google.admin({ version: 'directory_v1', auth });
+      await directory.users.insert({
+        requestBody: {
+          primaryEmail: adminEmail,
+          name: {
+            givenName: contact.firstName || 'Admin',
+            familyName: contact.lastName || org.name || 'User',
+          },
+          password,
+          changePasswordAtNextLogin: true,
+        },
+      });
+      // Promote to super administrator
+      await directory.users.makeAdmin({
+        userKey: adminEmail,
+        requestBody: { status: true },
+      });
+      adminCreated = true;
+    } catch (userErr) {
+      const msg = userErr?.errors?.[0]?.message || userErr?.message || '';
+      // 409 = user already exists -> treat as ok and continue
+      if (!/already exists|entity already|duplicate|409/i.test(msg)) {
+        return res.status(400).json({
+          error: 'Admin user creation failed: ' + msg,
+          step: 'admin_user',
+          customerCreated,
+        });
+      }
+      adminCreated = true; // already existed
+    }
+
+    // 3) Create the Workspace subscription
     try {
       await reseller.subscriptions.insert({
         customerId: domain,
@@ -885,13 +959,20 @@ app.post('/api/workspace-orders/:id/provision', authenticateCustomer, async (req
         error: 'Subscription creation failed: ' + msg,
         step: 'subscription',
         customerCreated,
+        adminCreated,
       });
     }
 
     order.status = 'provisioned';
     order.googleProvisioned = true;
     await order.save();
-    res.json({ success: true, customerCreated, message: 'Customer and Workspace subscription created in Google.' });
+    res.json({
+      success: true,
+      customerCreated,
+      adminCreated,
+      adminEmail,
+      message: 'Customer, admin user, and Workspace subscription created in Google.',
+    });
   } catch (error) {
     const msg = error?.message || 'Provisioning failed';
     res.status(500).json({ error: msg });
