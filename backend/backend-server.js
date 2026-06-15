@@ -19,8 +19,15 @@ const app = express();
 
 // Middleware
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Stripe webhook needs the raw body for signature verification — skip JSON parsing for it
+app.use((req, res, next) => {
+  if (req.originalUrl === '/api/webhooks/stripe') return next();
+  express.json()(req, res, next);
+});
+app.use((req, res, next) => {
+  if (req.originalUrl === '/api/webhooks/stripe') return next();
+  express.urlencoded({ extended: true })(req, res, next);
+});
 
 // ==================== DATABASE CONNECTION ====================
 mongoose.connect(process.env.MONGODB_URI, {
@@ -187,6 +194,33 @@ const User = mongoose.model('User', UserSchema);
 const Invoice = mongoose.model('Invoice', InvoiceSchema);
 const Domain = mongoose.model('Domain', DomainSchema);
 const Ticket = mongoose.model('Ticket', TicketSchema);
+
+// Payment record
+const PaymentSchema = new mongoose.Schema({
+  customerId: mongoose.Schema.Types.ObjectId,
+  customerEmail: String,
+  domain: String,
+  orderId: mongoose.Schema.Types.ObjectId,
+  amount: Number,
+  currency: { type: String, default: 'USD' },
+  method: { type: String, enum: ['stripe', 'nicky'], default: 'stripe' },
+  status: { type: String, enum: ['pending', 'paid', 'failed', 'cancelled'], default: 'pending' },
+  providerRef: String,     // Stripe session id or Nicky bill/order id
+  checkoutUrl: String,     // hosted checkout URL (Stripe or Nicky)
+  createdAt: { type: Date, default: Date.now },
+  paidAt: Date,
+});
+const Payment = mongoose.model('Payment', PaymentSchema);
+
+// Payment settings (which methods are enabled) — keys themselves live in env vars
+const PaymentSettingsSchema = new mongoose.Schema({
+  singleton: { type: String, default: 'main', unique: true },
+  stripeEnabled: { type: Boolean, default: true },
+  nickyEnabled: { type: Boolean, default: true },
+  currency: { type: String, default: 'USD' },
+  updatedAt: { type: Date, default: Date.now },
+});
+const PaymentSettings = mongoose.model('PaymentSettings', PaymentSettingsSchema);
 
 // ==================== STAGE 1: EDITABLE PLANS + WORKSPACE ORDERS ====================
 
@@ -872,6 +906,240 @@ app.patch('/api/admin/tickets/:id/status', authenticateCustomer, requireAdmin, a
     ticket.updatedAt = new Date();
     await ticket.save();
     res.json({ success: true, ticket });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== PAYMENTS ====================
+const FRONTEND_URL = process.env.CORS_ORIGIN || 'https://gworkspaceresellere.vercel.app';
+
+// Customer: create a checkout for an order (method = 'stripe' | 'nicky')
+app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
+  try {
+    const { orderId, method } = req.body;
+    const me = await Customer.findById(req.customerId);
+    const order = await WorkspaceOrder.findOne({ _id: orderId, customerId: req.customerId });
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+
+    const amount = Number(order.monthlyTotal || 0);
+    if (!amount || amount <= 0) return res.status(400).json({ error: 'Order amount is invalid.' });
+
+    const payment = await Payment.create({
+      customerId: me._id,
+      customerEmail: me.businessEmail,
+      domain: order.organization?.domain,
+      orderId: order._id,
+      amount,
+      currency: 'USD',
+      method: method === 'nicky' ? 'nicky' : 'stripe',
+      status: 'pending',
+    });
+
+    // Human-readable description carrying the order number + what was bought
+    const orderDesc = `Order ${order.orderNumber} — ${order.plan?.name || order.type} (${order.seats || 1} seat${(order.seats || 1) === 1 ? '' : 's'}) for ${order.organization?.domain || ''}`;
+
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
+
+    if (payment.method === 'stripe') {
+      if (!process.env.STRIPE_SECRET_KEY) return res.status(500).json({ error: 'Stripe not configured.' });
+      const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        line_items: [{
+          price_data: {
+            currency: 'usd',
+            product_data: { name: orderDesc },
+            unit_amount: Math.round(amount * 100),
+          },
+          quantity: 1,
+        }],
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        client_reference_id: String(payment._id),
+        metadata: { paymentId: String(payment._id), orderId: String(order._id), orderNumber: order.orderNumber },
+      });
+      payment.providerRef = session.id;
+      payment.checkoutUrl = session.url;
+      await payment.save();
+      return res.json({ checkoutUrl: session.url, paymentId: payment._id });
+    }
+
+    // ===== NICKY (crypto) =====
+    try {
+      const nickyUrl = await createNickyPayment({
+        amount,
+        currency: 'USD',
+        description: orderDesc,
+        orderNumber: order.orderNumber,
+        reference: String(payment._id),
+        billDescription: orderDesc,
+        customerEmail: me.businessEmail,
+        customerName: me.username || me.companyName || me.businessEmail,
+        redirectUrl: successUrl,
+      });
+      payment.checkoutUrl = nickyUrl;
+      await payment.save();
+      return res.json({ checkoutUrl: nickyUrl, paymentId: payment._id });
+    } catch (e) {
+      return res.status(500).json({ error: 'Crypto checkout not available yet: ' + e.message });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Nicky create-payment — fill exact endpoint/body from your Nicky Swagger / gnbmentor.com code.
+async function createNickyPayment({ amount, currency, description, orderNumber, reference, billDescription, customerEmail, customerName, redirectUrl }) {
+  const token = process.env.NICKY_API_TOKEN;
+  if (!token) throw new Error('NICKY_API_TOKEN not set');
+  const base = process.env.NICKY_API_BASE || 'https://api-public.pay.nicky.me';
+
+  // Nicky auth = header "x-api-key: <key>"
+  // Create endpoint (from Nicky Swagger): POST /api/public/PaymentReport/CreateForUser ("Create a new transaction")
+  // The body below carries the Workspace/Voice order number + details. Confirm exact field names against your Swagger.
+  const resp = await fetch(`${base}/api/public/PaymentReport/CreateForUser`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': token },
+    body: JSON.stringify({
+      amount,
+      currency,
+      description: billDescription || description,
+      reference: orderNumber || reference,   // order number ties the payment to the order
+      externalId: reference,                  // our internal payment id
+      orderNumber,
+      payerEmail: customerEmail,
+      payerName: customerName,
+      redirectUrl,
+      callbackUrl: `${process.env.BACKEND_URL || ''}/api/webhooks/nicky`,
+    }),
+  });
+  if (!resp.ok) {
+    const t = await resp.text();
+    throw new Error(`Nicky error ${resp.status}: ${t.slice(0, 200)}`);
+  }
+  const data = await resp.json();
+  // Nicky returns the transaction — find the checkout URL or build it from a bill short id.
+  // Adjust these field names once you confirm the CreateForUser response shape.
+  const url =
+    data.checkoutUrl || data.url || data.paymentUrl || data.link ||
+    (data.billShortId ? `https://pay.nicky.me/pay/${data.billShortId}` : null) ||
+    (data.shortId ? `https://pay.nicky.me/pay/${data.shortId}` : null);
+  if (!url) throw new Error('Nicky did not return a checkout URL (confirm CreateForUser response field).');
+  return url;
+}
+
+// Stripe webhook — confirms payment truly completed
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+  try {
+    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+    const sig = req.headers['stripe-signature'];
+    let event;
+    if (process.env.STRIPE_WEBHOOK_SECRET) {
+      event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    } else {
+      event = JSON.parse(req.body.toString());
+    }
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      const pid = session.metadata?.paymentId || session.client_reference_id;
+      if (pid) {
+        const payment = await Payment.findById(pid);
+        if (payment && payment.status !== 'paid') {
+          payment.status = 'paid';
+          payment.paidAt = new Date();
+          await payment.save();
+        }
+      }
+    }
+    res.json({ received: true });
+  } catch (e) {
+    res.status(400).send(`Webhook Error: ${e.message}`);
+  }
+});
+
+// Nicky webhook — Nicky notifies us when crypto payment completes
+app.post('/api/webhooks/nicky', async (req, res) => {
+  try {
+    // Adjust to Nicky's webhook payload: it should include the reference (our payment id) and a status.
+    const ref = req.body?.reference || req.body?.orderReference || req.body?.metadata?.reference;
+    const status = (req.body?.status || '').toLowerCase();
+    if (ref && (status === 'paid' || status === 'completed' || status === 'success')) {
+      const payment = await Payment.findById(ref);
+      if (payment && payment.status !== 'paid') {
+        payment.status = 'paid';
+        payment.paidAt = new Date();
+        await payment.save();
+      }
+    }
+    res.json({ received: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Payment status (customer polls after returning from checkout)
+app.get('/api/customer/payment/:id', authenticateCustomer, async (req, res) => {
+  try {
+    const payment = await Payment.findOne({ _id: req.params.id, customerId: req.customerId });
+    if (!payment) return res.status(404).json({ error: 'Payment not found.' });
+    res.json({ status: payment.status, amount: payment.amount, method: payment.method });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: list own payments
+app.get('/api/customer/payments', authenticateCustomer, async (req, res) => {
+  try {
+    const payments = await Payment.find({ customerId: req.customerId }).sort({ createdAt: -1 });
+    res.json({ payments });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: payment settings (which methods enabled) + which keys are configured
+app.get('/api/admin/payment-settings', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    let s = await PaymentSettings.findOne({ singleton: 'main' });
+    if (!s) s = await PaymentSettings.create({ singleton: 'main' });
+    res.json({
+      stripeEnabled: s.stripeEnabled,
+      nickyEnabled: s.nickyEnabled,
+      currency: s.currency,
+      stripeConfigured: !!process.env.STRIPE_SECRET_KEY,
+      stripeWebhookConfigured: !!process.env.STRIPE_WEBHOOK_SECRET,
+      nickyConfigured: !!process.env.NICKY_API_TOKEN,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch('/api/admin/payment-settings', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    let s = await PaymentSettings.findOne({ singleton: 'main' });
+    if (!s) s = await PaymentSettings.create({ singleton: 'main' });
+    const { stripeEnabled, nickyEnabled, currency } = req.body;
+    if (stripeEnabled !== undefined) s.stripeEnabled = !!stripeEnabled;
+    if (nickyEnabled !== undefined) s.nickyEnabled = !!nickyEnabled;
+    if (currency) s.currency = currency;
+    s.updatedAt = new Date();
+    await s.save();
+    res.json({ success: true, stripeEnabled: s.stripeEnabled, nickyEnabled: s.nickyEnabled, currency: s.currency });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: all payments
+app.get('/api/admin/payments', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const payments = await Payment.find().sort({ createdAt: -1 }).limit(500);
+    const totalPaid = payments.filter(p => p.status === 'paid').reduce((s, p) => s + (p.amount || 0), 0);
+    res.json({ payments, totalPaid, count: payments.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
