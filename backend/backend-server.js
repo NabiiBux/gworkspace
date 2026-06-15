@@ -558,16 +558,24 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { businessEmail, password } = req.body;
 
-    const customer = await Customer.findOne({ businessEmail: (businessEmail || '').toLowerCase() });
+    const emailLc = (businessEmail || '').trim().toLowerCase();
+    // case-insensitive lookup so accounts created with any casing still log in
+    let customer = await Customer.findOne({ businessEmail: emailLc });
+    if (!customer) {
+      customer = await Customer.findOne({ businessEmail: new RegExp('^' + emailLc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
+    }
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
 
     const isValid = await bcrypt.compare(password, customer.password);
     if (!isValid) return res.status(401).json({ error: 'Invalid password' });
 
     // Safeguard: the configured admin email is always admin (prevents lockout)
-    const adminEmail = (process.env.ADMIN_EMAIL || 'admin@gnbmentor.com').toLowerCase();
-    if (customer.businessEmail === adminEmail && customer.role !== 'admin') {
+    const adminEmail = (process.env.ADMIN_EMAIL || 'admin@gnbmentor.com').trim().toLowerCase();
+    const myEmail = (customer.businessEmail || '').trim().toLowerCase();
+    if (myEmail === adminEmail && customer.role !== 'admin') {
       customer.role = 'admin';
+      // normalize stored email to lowercase so future lookups are consistent
+      customer.businessEmail = myEmail;
     }
 
     customer.lastLogin = new Date();
@@ -591,6 +599,35 @@ app.post('/api/auth/login', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// One-time admin promotion by secret (diagnoses + fixes admin role).
+// Visit: /api/admin/fix-admin?secret=YOUR_JWT_SECRET&email=admin@gnbmentor.com
+app.get('/api/admin/fix-admin', async (req, res) => {
+  try {
+    const { secret, email } = req.query;
+    if (!secret || secret !== process.env.JWT_SECRET) {
+      return res.status(403).json({ error: 'Invalid secret.' });
+    }
+    const target = (email || process.env.ADMIN_EMAIL || 'admin@gnbmentor.com').trim().toLowerCase();
+    const customer = await Customer.findOne({
+      businessEmail: new RegExp('^' + target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i'),
+    });
+    if (!customer) {
+      const all = await Customer.find().select('businessEmail role').limit(50);
+      return res.status(404).json({
+        error: 'No account found with that email.',
+        searchedFor: target,
+        existingAccounts: all.map((c) => ({ email: c.businessEmail, role: c.role })),
+      });
+    }
+    customer.role = 'admin';
+    customer.businessEmail = target;
+    await customer.save();
+    res.json({ success: true, message: `${target} is now admin. Log out and log back in.`, role: customer.role });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
