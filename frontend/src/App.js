@@ -399,6 +399,14 @@ const Dashboard = () => {
               🎫 Tickets
             </button>
           </li>
+          <li>
+            <button
+              className={`menu-item ${activeSection === 'payments' ? 'active' : ''}`}
+              onClick={() => setActiveSection('payments')}
+            >
+              💳 Payments
+            </button>
+          </li>
         </ul>
 
         <button onClick={logout} className="btn btn-logout">
@@ -415,6 +423,7 @@ const Dashboard = () => {
         {activeSection === 'subs-usa' && <SubscriptionsSection account="USA" />}
         {activeSection === 'customers' && <AdminCustomersSection />}
         {activeSection === 'tickets' && <AdminTicketsSection />}
+        {activeSection === 'payments' && <AdminPaymentsSection />}
       </main>
     </div>
   );
@@ -1524,6 +1533,92 @@ const AdminTicketsSection = () => {
 };
 
 
+// ==================== ADMIN: PAYMENTS SECTION ====================
+const AdminPaymentsSection = () => {
+  const [settings, setSettings] = useState(null);
+  const [payments, setPayments] = useState([]);
+  const [totalPaid, setTotalPaid] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [s, p] = await Promise.all([
+        axios.get(`${API_URL}/admin/payment-settings`),
+        axios.get(`${API_URL}/admin/payments`).catch(() => ({ data: { payments: [], totalPaid: 0 } })),
+      ]);
+      setSettings(s.data);
+      setPayments(p.data.payments || []);
+      setTotalPaid(p.data.totalPaid || 0);
+    } catch (_) { } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const toggle = async (key, val) => {
+    setMsg('');
+    try {
+      const res = await axios.patch(`${API_URL}/admin/payment-settings`, { [key]: val });
+      setSettings(s => ({ ...s, ...res.data }));
+      setMsg('✓ Saved.');
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not save.'); }
+  };
+
+  const card = { background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
+  if (loading) return <div className="loading">Loading payments…</div>;
+
+  return (
+    <div className="section">
+      <h2>💳 Payments</h2>
+
+      <div className="stats-grid" style={{ marginBottom: 20 }}>
+        <div className="stat-card"><h3>Total received</h3><p className="stat-value">${Number(totalPaid).toFixed(2)}</p></div>
+        <div className="stat-card"><h3>Payments</h3><p className="stat-value">{payments.length}</p></div>
+        <div className="stat-card"><h3>Paid</h3><p className="stat-value">{payments.filter(p => p.status === 'paid').length}</p></div>
+      </div>
+
+      <div style={{ ...card, marginBottom: 20 }}>
+        <h3 style={{ marginTop: 0 }}>Payment methods</h3>
+        <p style={{ color: '#6b7280', fontSize: 14 }}>Turn methods on/off. API keys are set securely in your server environment (Railway), never here.</p>
+        <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 12 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="checkbox" checked={!!settings?.stripeEnabled} onChange={e => toggle('stripeEnabled', e.target.checked)} />
+            💳 Card (Stripe) {settings?.stripeConfigured ? <span style={{ color: '#166534', fontSize: 12 }}>· keys set</span> : <span style={{ color: '#b45309', fontSize: 12 }}>· keys missing</span>}
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="checkbox" checked={!!settings?.nickyEnabled} onChange={e => toggle('nickyEnabled', e.target.checked)} />
+            🪙 Crypto (Nicky) {settings?.nickyConfigured ? <span style={{ color: '#166534', fontSize: 12 }}>· keys set</span> : <span style={{ color: '#b45309', fontSize: 12 }}>· keys missing</span>}
+          </label>
+        </div>
+        {msg && <div style={{ marginTop: 12, color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</div>}
+        <div style={{ marginTop: 16, fontSize: 13, color: '#6b7280', borderTop: '1px solid #f0f0f0', paddingTop: 12 }}>
+          Required server env vars: <code>STRIPE_SECRET_KEY</code>, <code>STRIPE_WEBHOOK_SECRET</code>, <code>NICKY_API_TOKEN</code>, <code>BACKEND_URL</code>.
+        </div>
+      </div>
+
+      <h3>All payments</h3>
+      {payments.length === 0 ? <p>No payments yet.</p> : (
+        <table className="data-table">
+          <thead><tr><th>Date</th><th>Customer</th><th>Domain</th><th>Amount</th><th>Method</th><th>Status</th></tr></thead>
+          <tbody>
+            {payments.map(p => (
+              <tr key={p._id}>
+                <td>{new Date(p.createdAt).toLocaleDateString()}</td>
+                <td>{p.customerEmail}</td>
+                <td>{p.domain || '—'}</td>
+                <td>${Number(p.amount || 0).toFixed(2)}</td>
+                <td>{p.method === 'nicky' ? 'Crypto' : 'Card'}</td>
+                <td><span className={`status ${p.status}`}>{p.status}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+};
+
+
 // ==================== CUSTOMER PORTAL ====================
 // Shared theme tokens for the customer portal (matches portal.gnbmentor.com)
 const TEAL = '#0F766E';
@@ -1670,15 +1765,103 @@ const CustomerOverview = ({ onNavigate }) => {
 
 // Customer Payments page (placeholder until Stripe is wired in Step 2)
 const CustomerPayments = () => {
+  const [orders, setOrders] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState('');
+
   const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [o, p] = await Promise.all([
+        axios.get(`${API_URL}/workspace-orders`),
+        axios.get(`${API_URL}/customer/payments`).catch(() => ({ data: { payments: [] } })),
+      ]);
+      setOrders(o.data || []);
+      setPayments(p.data.payments || []);
+    } catch (_) { } finally { setLoading(false); }
+  };
+  useEffect(() => {
+    load();
+    // If returning from checkout, show a message
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('payment') === 'success') setMsg('✓ Payment received — thank you! It may take a moment to confirm.');
+    if (params.get('payment') === 'cancelled') setMsg('Payment was cancelled. You can try again anytime.');
+  }, []);
+
+  const pay = async (orderId, method) => {
+    setBusy(orderId + method); setMsg('');
+    try {
+      const res = await axios.post(`${API_URL}/customer/checkout`, { orderId, method });
+      if (res.data.checkoutUrl) {
+        window.location.href = res.data.checkoutUrl; // redirect to Stripe or Nicky hosted checkout
+      } else {
+        setMsg('Could not start checkout.');
+      }
+    } catch (e) {
+      setMsg(e?.response?.data?.error || 'Could not start checkout.');
+    } finally { setBusy(''); }
+  };
+
+  const paidOrderIds = new Set(payments.filter(p => p.status === 'paid').map(p => String(p.orderId)));
+
+  if (loading) return <div className="loading">Loading your payments…</div>;
+
   return (
     <div>
       <h1 style={{ fontSize: 28, margin: '0 0 6px' }}>💳 Payments</h1>
-      <p style={{ color: MUTE, margin: '0 0 24px' }}>Manage how you pay for your subscriptions.</p>
-      <div style={card}>
-        <p style={{ marginTop: 0 }}>Online payment (card) is being set up for your account.</p>
-        <p style={{ color: MUTE, marginBottom: 0 }}>For now, our team will send you an invoice for any new subscriptions. You'll be able to pay by card here soon.</p>
-      </div>
+      <p style={{ color: MUTE, margin: '0 0 20px' }}>Pay for your orders by card or crypto.</p>
+
+      {msg && <div style={{ background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a', padding: '12px 16px', borderRadius: 10, marginBottom: 20 }}>{msg}</div>}
+
+      <h3>Orders awaiting payment</h3>
+      {orders.filter(o => !paidOrderIds.has(String(o._id))).length === 0 ? (
+        <div style={{ ...card, color: MUTE }}>No orders awaiting payment.</div>
+      ) : orders.filter(o => !paidOrderIds.has(String(o._id))).map(o => (
+        <div key={o._id} style={{ ...card, marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>{o.organization?.domain}</div>
+              <div style={{ color: MUTE, fontSize: 14 }}>Order {o.orderNumber} · {o.plan?.name} · {o.seats} seat{o.seats === 1 ? '' : 's'}</div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <strong style={{ fontSize: 20 }}>${Number(o.monthlyTotal || 0).toFixed(2)}</strong>
+              <button onClick={() => pay(o._id, 'stripe')} disabled={!!busy}
+                style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: 'pointer' }}>
+                {busy === o._id + 'stripe' ? '…' : '💳 Pay by card'}
+              </button>
+              <button onClick={() => pay(o._id, 'nicky')} disabled={!!busy}
+                style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: 'pointer' }}>
+                {busy === o._id + 'nicky' ? '…' : '🪙 Pay with crypto'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      <h3 style={{ marginTop: 28 }}>Payment history</h3>
+      {payments.length === 0 ? (
+        <div style={{ ...card, color: MUTE }}>No payments yet.</div>
+      ) : (
+        <div style={card}>
+          <table className="data-table" style={{ width: '100%' }}>
+            <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Status</th></tr></thead>
+            <tbody>
+              {payments.map(p => (
+                <tr key={p._id}>
+                  <td>{new Date(p.createdAt).toLocaleDateString()}</td>
+                  <td>${Number(p.amount || 0).toFixed(2)}</td>
+                  <td>{p.method === 'nicky' ? 'Crypto' : 'Card'}</td>
+                  <td><span className={`status ${p.status}`}>{p.status}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 };
@@ -2008,8 +2191,44 @@ const LandingPage = () => {
         </div>
       </section>
 
-      <footer style={{ textAlign: 'center', padding: '30px', color: MUTEL, borderTop: '1px solid #eef2f1' }}>
-        © {new Date().getFullYear()} Artisan Drywall LLC · Google Workspace Reseller
+      {/* CTA band */}
+      <section style={{ background: T, color: '#fff', padding: '64px 40px', textAlign: 'center' }}>
+        <h2 style={{ fontSize: 44, margin: '0 0 12px', fontWeight: 800 }}>Ready when you are</h2>
+        <p style={{ fontSize: 18, opacity: 0.95, margin: '0 0 32px' }}>Sign up to save your orders, or browse plans first — whatever is easier for you.</p>
+        <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <button onClick={() => go('/register')} style={{ background: '#fff', color: T, border: 'none', borderRadius: 12, padding: '16px 32px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Compare plans</button>
+          <button onClick={() => go('/login')} style={{ background: 'transparent', color: '#fff', border: '2px solid rgba(255,255,255,0.7)', borderRadius: 12, padding: '16px 32px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Sign in</button>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer style={{ background: '#10241f', color: '#cbd5d1', padding: '48px 40px 32px' }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 40, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 9, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>A</div>
+              <strong style={{ color: '#fff', fontSize: 18 }}>Artisan Drywall LLC</strong>
+            </div>
+            <p style={{ maxWidth: 320, lineHeight: 1.6, color: '#9fb4ae' }}>
+              Google Workspace for your domain — simple ordering, secure payment, and support while you get set up.
+            </p>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, letterSpacing: 1, color: '#7e948e', fontWeight: 700, marginBottom: 14 }}>EXPLORE</div>
+            {[['Plans & pricing', '/register'], ['Why choose us', '/'], ['Create account', '/register'], ['Sign in', '/login']].map(([t, h]) => (
+              <div key={t} style={{ marginBottom: 12 }}>
+                <a href={h} style={{ color: '#cbd5d1', textDecoration: 'none' }}>{t}</a>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div style={{ fontSize: 12, letterSpacing: 1, color: '#7e948e', fontWeight: 700, marginBottom: 14 }}>ACCOUNT</div>
+            <div style={{ marginBottom: 12 }}><a href="/login" style={{ color: '#cbd5d1', textDecoration: 'none' }}>Customer portal</a></div>
+          </div>
+        </div>
+        <div style={{ maxWidth: 1200, margin: '32px auto 0', paddingTop: 24, borderTop: '1px solid #1e3a33', color: '#7e948e', fontSize: 14 }}>
+          © {new Date().getFullYear()} Artisan Drywall LLC · Google Workspace Reseller
+        </div>
       </footer>
     </div>
   );
