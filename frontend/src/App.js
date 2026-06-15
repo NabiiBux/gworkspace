@@ -144,13 +144,21 @@ const LoginPage = ({ adminMode = false }) => {
           >
             Login
           </button>
-          <button
-            className={`tab ${activeTab === 'register' ? 'active' : ''}`}
-            onClick={() => setActiveTab('register')}
-          >
-            Register
-          </button>
+          {!adminMode && (
+            <button
+              className={`tab ${activeTab === 'register' ? 'active' : ''}`}
+              onClick={() => setActiveTab('register')}
+            >
+              Register
+            </button>
+          )}
         </div>
+
+        {adminMode && (
+          <p style={{ textAlign: 'center', color: '#6b7280', fontSize: 13, margin: '8px 0 0' }}>
+            Administrator login
+          </p>
+        )}
 
         {error && <div className="error-message">{error}</div>}
 
@@ -1517,35 +1525,160 @@ const AdminTicketsSection = () => {
 
 
 // ==================== CUSTOMER PORTAL ====================
+// Shared theme tokens for the customer portal (matches portal.gnbmentor.com)
+const TEAL = '#0F766E';
+const TEAL_DARK = '#115E56';
+const INK = '#1f2937';
+const MUTE = '#6b7280';
+
 const CustomerPortal = () => {
   const { user, logout } = useAuth();
-  const [section, setSection] = useState('dashboard');
+  const [section, setSection] = useState('overview');
+
+  const navItems = [
+    { key: 'overview', label: 'Overview', icon: '🏠' },
+    { key: 'dashboard', label: 'My subscriptions', icon: '📚' },
+    { key: 'order', label: 'New subscription', icon: '✨' },
+    { key: 'voice', label: 'Google Voice', icon: '📞' },
+    { key: 'payments', label: 'Payments', icon: '💳' },
+    { key: 'support', label: 'Support', icon: '🎫' },
+    { key: 'settings', label: 'Account settings', icon: '⚙️' },
+  ];
+
+  const name = user?.username || (user?.businessEmail || '').split('@')[0];
 
   return (
-    <div className="dashboard-layout">
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <h1>🧩 My Portal</h1>
-          <p style={{ fontSize: 12, color: '#9aa0b5', margin: '4px 0 0' }}>{user?.businessEmail}</p>
+    <div style={{ minHeight: '100vh', background: '#f6f8f7', color: INK, fontFamily: 'Inter, system-ui, sans-serif' }}>
+      {/* Top bar */}
+      <header style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '14px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 8, background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>A</div>
+          <strong style={{ fontSize: 18, color: TEAL }}>Artisan Drywall LLC</strong>
         </div>
-        <nav>
-          <ul className="sidebar-menu">
-            <li><button className={`menu-item ${section === 'dashboard' ? 'active' : ''}`} onClick={() => setSection('dashboard')}>📊 My Subscriptions</button></li>
-            <li><button className={`menu-item ${section === 'order' ? 'active' : ''}`} onClick={() => setSection('order')}>✨ Order Workspace</button></li>
-            <li><button className={`menu-item ${section === 'voice' ? 'active' : ''}`} onClick={() => setSection('voice')}>📞 Google Voice</button></li>
-            <li><button className={`menu-item ${section === 'support' ? 'active' : ''}`} onClick={() => setSection('support')}>🎫 Support</button></li>
-            <li><button className={`menu-item ${section === 'settings' ? 'active' : ''}`} onClick={() => setSection('settings')}>⚙️ Account Settings</button></li>
-          </ul>
-        </nav>
-        <button className="logout-btn" onClick={logout}>🚪 Logout</button>
-      </aside>
-      <main className="main-content">
-        {section === 'dashboard' && <CustomerSubscriptions />}
-        {section === 'order' && <WorkspaceOrderFlow />}
-        {section === 'voice' && <CustomerVoice />}
-        {section === 'support' && <CustomerSupport />}
-        {section === 'settings' && <CustomerSettings />}
-      </main>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <span style={{ color: MUTE }}>Welcome, <strong style={{ color: INK }}>{name}</strong></span>
+          <span style={{ background: '#e6f4f1', color: TEAL, padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600 }}>Customer</span>
+          <button onClick={logout} style={{ border: '1px solid #e5e7eb', background: '#fff', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', color: INK }}>Logout</button>
+        </div>
+      </header>
+
+      <div style={{ display: 'flex', gap: 24, padding: 24, maxWidth: 1200, margin: '0 auto', alignItems: 'flex-start' }}>
+        {/* Sidebar card */}
+        <aside style={{ width: 240, background: '#fff', borderRadius: 16, padding: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', flexShrink: 0 }}>
+          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700, padding: '6px 12px' }}>ACCOUNT</div>
+          {navItems.map((it) => {
+            const active = section === it.key;
+            return (
+              <button key={it.key} onClick={() => setSection(it.key)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left',
+                  padding: '12px 14px', marginTop: 6, borderRadius: 12, cursor: 'pointer', border: 'none',
+                  background: active ? TEAL : 'transparent',
+                  color: active ? '#fff' : INK, fontSize: 15, fontWeight: active ? 600 : 500,
+                }}>
+                <span>{it.icon}</span>{it.label}
+              </button>
+            );
+          })}
+        </aside>
+
+        {/* Main content */}
+        <main style={{ flex: 1, minWidth: 0 }}>
+          {section === 'overview' && <CustomerOverview onNavigate={setSection} />}
+          {section === 'dashboard' && <CustomerSubscriptions />}
+          {section === 'order' && <WorkspaceOrderFlow />}
+          {section === 'voice' && <CustomerVoice />}
+          {section === 'payments' && <CustomerPayments />}
+          {section === 'support' && <CustomerSupport />}
+          {section === 'settings' && <CustomerSettings />}
+        </main>
+      </div>
+    </div>
+  );
+};
+
+// Customer Overview — stat cards + recent subscriptions (matches screenshot)
+const CustomerOverview = ({ onNavigate }) => {
+  const { user } = useAuth();
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try { const res = await axios.get(`${API_URL}/customer/my-subscriptions`); setData(res.data); }
+      catch (_) { setData({ subscriptions: [] }); }
+      finally { setLoading(false); }
+    })();
+  }, []);
+
+  const name = user?.username || (user?.businessEmail || '').split('@')[0];
+  const subs = data?.subscriptions || [];
+  const active = subs.filter(s => s.status === 'ACTIVE').length;
+  const pending = subs.filter(s => s.status !== 'ACTIVE').length;
+
+  const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
+  const pill = (color, bg) => ({ background: bg, color, padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600 });
+
+  return (
+    <div>
+      <h1 style={{ fontSize: 32, margin: '0 0 6px', color: INK }}>Welcome back, {name}</h1>
+      <p style={{ color: MUTE, margin: '0 0 24px' }}>Your Workspace orders, payments, and mailboxes in one place.</p>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, marginBottom: 24 }}>
+        <div style={card}>
+          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>SUBSCRIPTIONS</div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: INK, margin: '6px 0' }}>{loading ? '…' : subs.length}</div>
+          <div style={{ color: MUTE, fontSize: 14 }}>Total orders</div>
+        </div>
+        <div style={card}>
+          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>ACTIVE</div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: TEAL, margin: '6px 0' }}>{loading ? '…' : active}</div>
+          <div style={{ color: MUTE, fontSize: 14 }}>Live Workspace</div>
+        </div>
+        <div style={card}>
+          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>NEEDS PAYMENT</div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: '#b45309', margin: '6px 0' }}>{loading ? '…' : pending}</div>
+          <div style={{ color: MUTE, fontSize: 14 }}>Awaiting checkout</div>
+        </div>
+      </div>
+
+      <div style={{ ...card, padding: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid #f0f0f0' }}>
+          <h3 style={{ margin: 0 }}>Recent subscriptions</h3>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => onNavigate('payments')} style={{ border: '1px solid #e5e7eb', background: '#fff', borderRadius: 999, padding: '8px 18px', cursor: 'pointer', color: INK }}>Payments</button>
+            <button onClick={() => onNavigate('order')} style={{ border: 'none', background: TEAL, color: '#fff', borderRadius: 999, padding: '8px 18px', cursor: 'pointer', fontWeight: 600 }}>New subscription</button>
+          </div>
+        </div>
+        {loading ? <div style={{ padding: 24 }}>Loading…</div> : subs.length === 0 ? (
+          <div style={{ padding: 24, color: MUTE }}>No subscriptions yet. Click <strong>New subscription</strong> to order Workspace.</div>
+        ) : subs.map((s, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', borderBottom: i < subs.length - 1 ? '1px solid #f5f5f5' : 'none' }}>
+            <div>
+              <div style={{ fontWeight: 700, color: INK }}>{s.domain}</div>
+              <div style={{ color: MUTE, fontSize: 14 }}>{s.skuName} · {s.seats ?? 1} seat{(s.seats ?? 1) === 1 ? '' : 's'}</div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <span style={s.status === 'ACTIVE' ? pill('#166534', '#dcfce7') : pill('#92600a', '#fef3c7')}>{s.status === 'ACTIVE' ? 'Active' : 'Pending'}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Customer Payments page (placeholder until Stripe is wired in Step 2)
+const CustomerPayments = () => {
+  const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
+  return (
+    <div>
+      <h1 style={{ fontSize: 28, margin: '0 0 6px' }}>💳 Payments</h1>
+      <p style={{ color: MUTE, margin: '0 0 24px' }}>Manage how you pay for your subscriptions.</p>
+      <div style={card}>
+        <p style={{ marginTop: 0 }}>Online payment (card) is being set up for your account.</p>
+        <p style={{ color: MUTE, marginBottom: 0 }}>For now, our team will send you an invoice for any new subscriptions. You'll be able to pay by card here soon.</p>
+      </div>
     </div>
   );
 };

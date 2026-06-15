@@ -948,6 +948,15 @@ app.post('/api/workspace-orders', authenticateCustomer, async (req, res) => {
       contact: body.contact,
       status: 'pending',
     });
+
+    // Link this domain to the customer's account so their "My Subscriptions" can find it
+    try {
+      const dom = (body.organization.domain || '').toLowerCase().trim();
+      if (dom) {
+        await Customer.findByIdAndUpdate(req.customerId, { domain: dom });
+      }
+    } catch (_) { }
+
     res.json({ orderNumber: order.orderNumber, id: order._id, status: order.status });
   } catch (error) {
     res.status(500).json({ error: 'Could not create order' });
