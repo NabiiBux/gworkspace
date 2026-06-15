@@ -62,6 +62,7 @@ async function backfillPlanSkus() {
 // Customer Schema
 const CustomerSchema = new mongoose.Schema({
   companyName: String,
+  username: String,
   businessEmail: String,
   password: String,
   phone: String,
@@ -69,6 +70,11 @@ const CustomerSchema = new mongoose.Schema({
   address: String,
   taxId: String,
   resellerCode: String,
+  role: { type: String, enum: ['admin', 'customer'], default: 'customer' },
+  domain: String,                 // the customer's own Google Workspace domain (links their subscriptions)
+  account: { type: String, default: 'pk' }, // which reseller account their domain lives on: 'pk' or 'usa'
+  registrationIp: String,         // IP captured at signup
+  lastLoginIp: String,            // IP captured at last login
   status: { type: String, enum: ['active', 'inactive', 'suspended'], default: 'active' },
   totalUsers: { type: Number, default: 0 },
   totalCost: { type: Number, default: 0 },
@@ -155,6 +161,24 @@ const DomainSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+// Support Ticket Schema
+const TicketSchema = new mongoose.Schema({
+  customerId: mongoose.Schema.Types.ObjectId,
+  customerEmail: String,
+  customerDomain: String,
+  subject: String,
+  status: { type: String, enum: ['open', 'in_progress', 'resolved', 'closed'], default: 'open' },
+  priority: { type: String, enum: ['low', 'normal', 'high'], default: 'normal' },
+  messages: [{
+    fromRole: String,        // 'customer' or 'admin'
+    fromName: String,
+    body: String,
+    createdAt: { type: Date, default: Date.now },
+  }],
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+});
+
 // Models
 const Customer = mongoose.model('Customer', CustomerSchema);
 const Order = mongoose.model('Order', OrderSchema);
@@ -162,6 +186,7 @@ const Subscription = mongoose.model('Subscription', SubscriptionSchema);
 const User = mongoose.model('User', UserSchema);
 const Invoice = mongoose.model('Invoice', InvoiceSchema);
 const Domain = mongoose.model('Domain', DomainSchema);
+const Ticket = mongoose.model('Ticket', TicketSchema);
 
 // ==================== STAGE 1: EDITABLE PLANS + WORKSPACE ORDERS ====================
 
@@ -409,8 +434,8 @@ const generateRandomPassword = () => {
   return Math.random().toString(36).slice(-12) + 'Aa@1';
 };
 
-const generateToken = (id, email) => {
-  return jwt.sign({ id, email }, process.env.JWT_SECRET, { expiresIn: '7d' });
+const generateToken = (id, email, role = 'customer') => {
+  return jwt.sign({ id, email, role }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
 const verifyToken = (token) => {
@@ -422,6 +447,13 @@ const verifyToken = (token) => {
 };
 
 // Middleware for authentication
+// Capture the real client IP (works behind Railway/Vercel proxies)
+function getClientIp(req) {
+  const xf = req.headers['x-forwarded-for'];
+  if (xf) return String(xf).split(',')[0].trim();
+  return req.socket?.remoteAddress || req.ip || '';
+}
+
 const authenticateCustomer = (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'No token provided' });
@@ -430,7 +462,21 @@ const authenticateCustomer = (req, res, next) => {
   if (!decoded) return res.status(401).json({ error: 'Invalid token' });
 
   req.customerId = decoded.id;
+  req.userRole = decoded.role || 'customer';
   next();
+};
+
+// Require admin role for admin-only endpoints
+const requireAdmin = async (req, res, next) => {
+  try {
+    const me = await Customer.findById(req.customerId);
+    if (!me || me.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required.' });
+    }
+    next();
+  } catch (e) {
+    res.status(500).json({ error: 'Authorization check failed.' });
+  }
 };
 
 // ==================== PAYMENT PROCESSING ====================
@@ -459,23 +505,35 @@ const processPayment = async (customerId, amount, paymentMethod) => {
 // AUTH ROUTES
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { companyName, businessEmail, password, phone, country, address, taxId } = req.body;
+    const { companyName, username, businessEmail, password, phone, country, address, taxId, domain } = req.body;
+
+    if (!businessEmail || !password) {
+      return res.status(400).json({ error: 'Email and password are required.' });
+    }
+    const existing = await Customer.findOne({ businessEmail: businessEmail.toLowerCase() });
+    if (existing) return res.status(400).json({ error: 'An account with this email already exists.' });
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const resellerCode = `RSL-${Date.now()}`;
+    const ip = getClientIp(req);
 
     const customer = await Customer.create({
       companyName,
-      businessEmail,
+      username: username || (businessEmail.split('@')[0]),
+      businessEmail: businessEmail.toLowerCase(),
       password: hashedPassword,
       phone,
       country,
       address,
       taxId,
+      domain: domain ? domain.toLowerCase().trim() : undefined,
       resellerCode,
+      role: 'customer',
+      registrationIp: ip,
+      lastLoginIp: ip,
     });
 
-    const token = generateToken(customer._id, customer.businessEmail);
+    const token = generateToken(customer._id, customer.businessEmail, customer.role);
 
     res.status(201).json({
       success: true,
@@ -483,7 +541,10 @@ app.post('/api/auth/register', async (req, res) => {
       customer: {
         id: customer._id,
         companyName: customer.companyName,
+        username: customer.username,
         businessEmail: customer.businessEmail,
+        domain: customer.domain,
+        role: customer.role,
         resellerCode: customer.resellerCode,
       },
       token,
@@ -497,16 +558,23 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { businessEmail, password } = req.body;
 
-    const customer = await Customer.findOne({ businessEmail });
+    const customer = await Customer.findOne({ businessEmail: (businessEmail || '').toLowerCase() });
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
 
     const isValid = await bcrypt.compare(password, customer.password);
     if (!isValid) return res.status(401).json({ error: 'Invalid password' });
 
+    // Safeguard: the configured admin email is always admin (prevents lockout)
+    const adminEmail = (process.env.ADMIN_EMAIL || 'admin@gnbmentor.com').toLowerCase();
+    if (customer.businessEmail === adminEmail && customer.role !== 'admin') {
+      customer.role = 'admin';
+    }
+
     customer.lastLogin = new Date();
+    customer.lastLoginIp = getClientIp(req);
     await customer.save();
 
-    const token = generateToken(customer._id, customer.businessEmail);
+    const token = generateToken(customer._id, customer.businessEmail, customer.role || 'customer');
 
     res.json({
       success: true,
@@ -514,12 +582,261 @@ app.post('/api/auth/login', async (req, res) => {
       customer: {
         id: customer._id,
         companyName: customer.companyName,
+        username: customer.username,
         businessEmail: customer.businessEmail,
+        domain: customer.domain,
+        role: customer.role || 'customer',
         resellerCode: customer.resellerCode,
       },
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Who am I (role, domain) — used by frontend to route admin vs customer
+app.get('/api/auth/me', authenticateCustomer, async (req, res) => {
+  try {
+    const me = await Customer.findById(req.customerId).select('-password');
+    if (!me) return res.status(404).json({ error: 'Not found' });
+    res.json({
+      id: me._id,
+      companyName: me.companyName,
+      username: me.username,
+      businessEmail: me.businessEmail,
+      domain: me.domain,
+      role: me.role || 'customer',
+      resellerCode: me.resellerCode,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== CUSTOMER SELF-SERVICE ====================
+// Update own profile (username / email)
+app.patch('/api/customer/profile', authenticateCustomer, async (req, res) => {
+  try {
+    const { username, businessEmail } = req.body;
+    const me = await Customer.findById(req.customerId);
+    if (!me) return res.status(404).json({ error: 'Not found' });
+
+    if (businessEmail && businessEmail.toLowerCase() !== me.businessEmail) {
+      const taken = await Customer.findOne({ businessEmail: businessEmail.toLowerCase() });
+      if (taken) return res.status(400).json({ error: 'That email is already in use.' });
+      me.businessEmail = businessEmail.toLowerCase();
+    }
+    if (username) me.username = username;
+    await me.save();
+    res.json({ success: true, username: me.username, businessEmail: me.businessEmail });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Change own password (must provide current password)
+app.post('/api/customer/change-password', authenticateCustomer, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+    }
+    const me = await Customer.findById(req.customerId);
+    if (!me) return res.status(404).json({ error: 'Not found' });
+    const ok = await bcrypt.compare(currentPassword || '', me.password);
+    if (!ok) return res.status(401).json({ error: 'Current password is incorrect.' });
+    me.password = await bcrypt.hash(newPassword, 10);
+    await me.save();
+    res.json({ success: true, message: 'Password changed.' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer's OWN subscriptions (isolated to their domain only)
+app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res) => {
+  try {
+    const me = await Customer.findById(req.customerId);
+    if (!me) return res.status(404).json({ error: 'Not found' });
+    if (!me.domain) return res.json({ subscriptions: [], domain: null, note: 'No domain linked to your account yet.' });
+
+    // Look up this domain on the correct reseller account
+    const account = (me.account || 'pk');
+    let auth;
+    try {
+      auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+    } catch (e) {
+      return res.status(400).json({ error: 'Reseller not connected for your account.' });
+    }
+    const reseller = google.reseller({ version: 'v1', auth });
+
+    let subs = [];
+    try {
+      const resp = await reseller.subscriptions.list({ customerId: me.domain });
+      subs = resp.data.subscriptions || [];
+    } catch (e) {
+      if (e?.code === 404) return res.json({ subscriptions: [], domain: me.domain });
+      throw e;
+    }
+
+    const rows = subs.map((s) => ({
+      domain: s.customerDomain || me.domain,
+      skuId: s.skuId,
+      skuName: s.skuName || s.skuId,
+      planName: s.plan?.planName,
+      seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
+      status: s.status,
+      creationTime: s.creationTime ? Number(s.creationTime) : null,
+    }));
+    res.json({ subscriptions: rows, domain: me.domain });
+  } catch (e) {
+    const msg = e?.errors?.[0]?.message || e?.message || 'Could not load your subscriptions.';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ==================== ADMIN: CUSTOMERS VIEW ====================
+// List all portal customers with their info (admin only)
+app.get('/api/admin/customers', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const customers = await Customer.find({ role: { $ne: 'admin' } })
+      .select('-password')
+      .sort({ createdAt: -1 });
+    const rows = customers.map((c) => ({
+      id: c._id,
+      companyName: c.companyName,
+      username: c.username,
+      email: c.businessEmail,
+      domain: c.domain,
+      account: c.account,
+      registrationIp: c.registrationIp,
+      lastLoginIp: c.lastLoginIp,
+      status: c.status,
+      createdAt: c.createdAt,
+      lastLogin: c.lastLogin,
+    }));
+    res.json({ customers: rows, total: rows.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: reset a customer's portal password
+app.post('/api/admin/customers/:id/reset-password', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+    const pwd = newPassword && newPassword.length >= 6 ? newPassword : `Temp-${Math.random().toString(36).slice(2, 10)}`;
+    const c = await Customer.findById(req.params.id);
+    if (!c) return res.status(404).json({ error: 'Customer not found' });
+    c.password = await bcrypt.hash(pwd, 10);
+    await c.save();
+    res.json({ success: true, message: 'Password reset.', temporaryPassword: pwd });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== SUPPORT TICKETS ====================
+// Customer: open a ticket
+app.post('/api/customer/tickets', authenticateCustomer, async (req, res) => {
+  try {
+    const { subject, message, priority } = req.body;
+    if (!subject || !message) return res.status(400).json({ error: 'Subject and message are required.' });
+    const me = await Customer.findById(req.customerId);
+    const ticket = await Ticket.create({
+      customerId: me._id,
+      customerEmail: me.businessEmail,
+      customerDomain: me.domain,
+      subject,
+      priority: ['low', 'normal', 'high'].includes(priority) ? priority : 'normal',
+      status: 'open',
+      messages: [{ fromRole: 'customer', fromName: me.username || me.businessEmail, body: message }],
+    });
+    res.status(201).json({ success: true, ticket });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: list own tickets
+app.get('/api/customer/tickets', authenticateCustomer, async (req, res) => {
+  try {
+    const tickets = await Ticket.find({ customerId: req.customerId }).sort({ updatedAt: -1 });
+    res.json({ tickets });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: reply to own ticket
+app.post('/api/customer/tickets/:id/reply', authenticateCustomer, async (req, res) => {
+  try {
+    const { message } = req.body;
+    const ticket = await Ticket.findOne({ _id: req.params.id, customerId: req.customerId });
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    if (!message) return res.status(400).json({ error: 'Message required.' });
+    const me = await Customer.findById(req.customerId);
+    ticket.messages.push({ fromRole: 'customer', fromName: me.username || me.businessEmail, body: message });
+    if (ticket.status === 'resolved' || ticket.status === 'closed') ticket.status = 'open';
+    ticket.updatedAt = new Date();
+    await ticket.save();
+    res.json({ success: true, ticket });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: list all tickets (optionally filter by status)
+app.get('/api/admin/tickets', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const filter = {};
+    if (req.query.status) filter.status = req.query.status;
+    const tickets = await Ticket.find(filter).sort({ updatedAt: -1 });
+    const counts = {
+      open: await Ticket.countDocuments({ status: 'open' }),
+      in_progress: await Ticket.countDocuments({ status: 'in_progress' }),
+      resolved: await Ticket.countDocuments({ status: 'resolved' }),
+      closed: await Ticket.countDocuments({ status: 'closed' }),
+    };
+    res.json({ tickets, counts });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: reply to a ticket
+app.post('/api/admin/tickets/:id/reply', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { message } = req.body;
+    const ticket = await Ticket.findById(req.params.id);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    if (!message) return res.status(400).json({ error: 'Message required.' });
+    const me = await Customer.findById(req.customerId);
+    ticket.messages.push({ fromRole: 'admin', fromName: me.username || 'Support', body: message });
+    if (ticket.status === 'open') ticket.status = 'in_progress';
+    ticket.updatedAt = new Date();
+    await ticket.save();
+    res.json({ success: true, ticket });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: change ticket status (resolve / close / reopen)
+app.patch('/api/admin/tickets/:id/status', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!['open', 'in_progress', 'resolved', 'closed'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status.' });
+    }
+    const ticket = await Ticket.findById(req.params.id);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    ticket.status = status;
+    ticket.updatedAt = new Date();
+    await ticket.save();
+    res.json({ success: true, ticket });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

@@ -29,11 +29,23 @@ const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      // Verify token is still valid
-    }
-    setLoading(false);
+    const loadMe = async () => {
+      if (token) {
+        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        try {
+          const res = await axios.get(`${API_URL}/auth/me`);
+          setUser(res.data);
+        } catch (e) {
+          // token invalid/expired
+          setToken(null);
+          setUser(null);
+          localStorage.removeItem('token');
+          delete axios.defaults.headers.common['Authorization'];
+        }
+      }
+      setLoading(false);
+    };
+    loadMe();
   }, [token]);
 
   const login = (email, token, userData) => {
@@ -60,7 +72,7 @@ const AuthProvider = ({ children }) => {
 const useAuth = () => useContext(AuthContext);
 
 // ==================== LOGIN PAGE ====================
-const LoginPage = () => {
+const LoginPage = ({ adminMode = false }) => {
   const { login } = useAuth();
   const [activeTab, setActiveTab] = useState('login');
   const [loading, setLoading] = useState(false);
@@ -75,6 +87,8 @@ const LoginPage = () => {
   // Register Form
   const [registerForm, setRegisterForm] = useState({
     companyName: '',
+    username: '',
+    domain: '',
     businessEmail: '',
     password: '',
     phone: '',
@@ -363,26 +377,18 @@ const Dashboard = () => {
           </li>
           <li>
             <button
-              className={`menu-item ${activeSection === 'users' ? 'active' : ''}`}
-              onClick={() => setActiveSection('users')}
+              className={`menu-item ${activeSection === 'customers' ? 'active' : ''}`}
+              onClick={() => setActiveSection('customers')}
             >
-              👥 Users
+              👥 Customers
             </button>
           </li>
           <li>
             <button
-              className={`menu-item ${activeSection === 'invoices' ? 'active' : ''}`}
-              onClick={() => setActiveSection('invoices')}
+              className={`menu-item ${activeSection === 'tickets' ? 'active' : ''}`}
+              onClick={() => setActiveSection('tickets')}
             >
-              📄 Invoices
-            </button>
-          </li>
-          <li>
-            <button
-              className={`menu-item ${activeSection === 'domains' ? 'active' : ''}`}
-              onClick={() => setActiveSection('domains')}
-            >
-              🌐 Domains
+              🎫 Tickets
             </button>
           </li>
         </ul>
@@ -399,9 +405,8 @@ const Dashboard = () => {
         {activeSection === 'orders' && <OrdersSection />}
         {activeSection === 'subs-pk' && <SubscriptionsSection account="PK" />}
         {activeSection === 'subs-usa' && <SubscriptionsSection account="USA" />}
-        {activeSection === 'users' && <UsersSection />}
-        {activeSection === 'invoices' && <InvoicesSection />}
-        {activeSection === 'domains' && <DomainsSection />}
+        {activeSection === 'customers' && <AdminCustomersSection />}
+        {activeSection === 'tickets' && <AdminTicketsSection />}
       </main>
     </div>
   );
@@ -1367,15 +1372,446 @@ const DomainsSection = () => {
   );
 };
 
+// ==================== ADMIN: CUSTOMERS SECTION ====================
+const AdminCustomersSection = () => {
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [resetMsg, setResetMsg] = useState({});
+
+  const load = async () => {
+    setLoading(true); setError('');
+    try { const res = await axios.get(`${API_URL}/admin/customers`); setCustomers(res.data.customers || []); }
+    catch (e) { setError(e?.response?.data?.error || 'Could not load customers.'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const resetPassword = async (id) => {
+    try {
+      const res = await axios.post(`${API_URL}/admin/customers/${id}/reset-password`, {});
+      setResetMsg(m => ({ ...m, [id]: `New temp password: ${res.data.temporaryPassword}` }));
+    } catch (e) {
+      setResetMsg(m => ({ ...m, [id]: e?.response?.data?.error || 'Reset failed.' }));
+    }
+  };
+
+  if (loading) return <div className="loading">Loading customers…</div>;
+
+  return (
+    <div className="section">
+      <h2>👥 Customers</h2>
+      {error && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
+      <p style={{ color: '#5b6075' }}>{customers.length} registered customer{customers.length === 1 ? '' : 's'}</p>
+      {customers.length === 0 ? <p>No customers have registered yet.</p> : (
+        <table className="data-table">
+          <thead><tr><th>Username</th><th>Email</th><th>Domain</th><th>Reg. IP</th><th>Last login IP</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody>
+            {customers.map(c => (
+              <tr key={c.id}>
+                <td>{c.username || '—'}</td>
+                <td>{c.email}</td>
+                <td>{c.domain || '—'}</td>
+                <td style={{ fontSize: 12 }}>{c.registrationIp || '—'}</td>
+                <td style={{ fontSize: 12 }}>{c.lastLoginIp || '—'}</td>
+                <td><span className={`status ${c.status}`}>{c.status}</span></td>
+                <td>
+                  <button className="btn btn-secondary" onClick={() => resetPassword(c.id)}>Reset password</button>
+                  {resetMsg[c.id] && <div style={{ fontSize: 12, color: '#166534', marginTop: 4 }}>{resetMsg[c.id]}</div>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+};
+
+// ==================== ADMIN: TICKETS SECTION ====================
+const AdminTicketsSection = () => {
+  const [tickets, setTickets] = useState([]);
+  const [counts, setCounts] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('');
+  const [openId, setOpenId] = useState(null);
+  const [reply, setReply] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const q = filter ? `?status=${filter}` : '';
+      const res = await axios.get(`${API_URL}/admin/tickets${q}`);
+      setTickets(res.data.tickets || []); setCounts(res.data.counts || {});
+    } catch (_) { } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, [filter]);
+
+  const sendReply = async (id) => {
+    if (!reply) return;
+    try { await axios.post(`${API_URL}/admin/tickets/${id}/reply`, { message: reply }); setReply(''); load(); }
+    catch (_) { }
+  };
+  const setStatus = async (id, status) => {
+    try { await axios.patch(`${API_URL}/admin/tickets/${id}/status`, { status }); load(); }
+    catch (_) { }
+  };
+
+  return (
+    <div className="section">
+      <h2>🎫 Support Tickets</h2>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        {['', 'open', 'in_progress', 'resolved', 'closed'].map(s => (
+          <button key={s || 'all'} className={`btn ${filter === s ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFilter(s)}>
+            {s === '' ? 'All' : s.replace('_', ' ')} {s && counts[s] !== undefined ? `(${counts[s]})` : ''}
+          </button>
+        ))}
+      </div>
+
+      {loading ? <p>Loading…</p> : tickets.length === 0 ? <p>No tickets.</p> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {tickets.map(t => (
+            <div key={t._id} style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <strong>{t.subject}</strong>
+                  <div style={{ fontSize: 12, color: '#6b7280' }}>{t.customerEmail} {t.customerDomain ? `• ${t.customerDomain}` : ''} • {t.priority}</div>
+                </div>
+                <span className={`status ${t.status}`}>{t.status.replace('_', ' ')}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                <button className="btn btn-secondary" onClick={() => setOpenId(openId === t._id ? null : t._id)}>
+                  {openId === t._id ? 'Hide' : 'View'}
+                </button>
+                <button className="btn btn-secondary" onClick={() => setStatus(t._id, 'resolved')}>Mark resolved</button>
+                <button className="btn btn-secondary" onClick={() => setStatus(t._id, 'closed')}>Close</button>
+                <button className="btn btn-secondary" onClick={() => setStatus(t._id, 'open')}>Reopen</button>
+              </div>
+              {openId === t._id && (
+                <div style={{ marginTop: 12 }}>
+                  {t.messages.map((m, i) => (
+                    <div key={i} style={{
+                      marginBottom: 8, padding: '8px 12px', borderRadius: 8,
+                      background: m.fromRole === 'admin' ? '#eef2ff' : '#f3f4f6'
+                    }}>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>
+                        {m.fromRole === 'admin' ? 'Support' : 'Customer'} • {new Date(m.createdAt).toLocaleString()}
+                      </div>
+                      <div>{m.body}</div>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <input placeholder="Type a reply…" value={reply} onChange={e => setReply(e.target.value)}
+                      style={{ flex: 1, height: 38, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }} />
+                    <button className="btn btn-primary" onClick={() => sendReply(t._id)}>Reply</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+// ==================== CUSTOMER PORTAL ====================
+const CustomerPortal = () => {
+  const { user, logout } = useAuth();
+  const [section, setSection] = useState('dashboard');
+
+  return (
+    <div className="dashboard-layout">
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <h1>🧩 My Portal</h1>
+          <p style={{ fontSize: 12, color: '#9aa0b5', margin: '4px 0 0' }}>{user?.businessEmail}</p>
+        </div>
+        <nav>
+          <ul className="sidebar-menu">
+            <li><button className={`menu-item ${section === 'dashboard' ? 'active' : ''}`} onClick={() => setSection('dashboard')}>📊 My Subscriptions</button></li>
+            <li><button className={`menu-item ${section === 'order' ? 'active' : ''}`} onClick={() => setSection('order')}>✨ Order Workspace</button></li>
+            <li><button className={`menu-item ${section === 'voice' ? 'active' : ''}`} onClick={() => setSection('voice')}>📞 Google Voice</button></li>
+            <li><button className={`menu-item ${section === 'support' ? 'active' : ''}`} onClick={() => setSection('support')}>🎫 Support</button></li>
+            <li><button className={`menu-item ${section === 'settings' ? 'active' : ''}`} onClick={() => setSection('settings')}>⚙️ Account Settings</button></li>
+          </ul>
+        </nav>
+        <button className="logout-btn" onClick={logout}>🚪 Logout</button>
+      </aside>
+      <main className="main-content">
+        {section === 'dashboard' && <CustomerSubscriptions />}
+        {section === 'order' && <WorkspaceOrderFlow />}
+        {section === 'voice' && <CustomerVoice />}
+        {section === 'support' && <CustomerSupport />}
+        {section === 'settings' && <CustomerSettings />}
+      </main>
+    </div>
+  );
+};
+
+// Customer: their own subscriptions
+const CustomerSubscriptions = () => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await axios.get(`${API_URL}/customer/my-subscriptions`);
+        setData(res.data);
+      } catch (e) { setError(e?.response?.data?.error || 'Could not load your subscriptions.'); }
+      finally { setLoading(false); }
+    })();
+  }, []);
+
+  if (loading) return <div className="loading">Loading your subscriptions…</div>;
+
+  const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString() : '—';
+
+  return (
+    <div className="section">
+      <h2>📊 My Subscriptions</h2>
+      {error && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
+      {data?.domain && <p style={{ color: '#5b6075' }}>Domain: <strong>{data.domain}</strong></p>}
+      {(!data?.subscriptions || data.subscriptions.length === 0) ? (
+        <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 20 }}>
+          <p style={{ margin: 0 }}>You don't have any subscriptions yet. Use <strong>Order Workspace</strong> to get started.</p>
+        </div>
+      ) : (
+        <table className="data-table">
+          <thead><tr><th>Product</th><th>Plan</th><th>Seats</th><th>Status</th><th>Started</th></tr></thead>
+          <tbody>
+            {data.subscriptions.map((s, i) => (
+              <tr key={i}>
+                <td>{s.skuName}</td>
+                <td>{s.planName || '—'}</td>
+                <td>{s.seats ?? '—'}</td>
+                <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
+                <td>{fmtDate(s.creationTime)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+};
+
+// Customer: Google Voice info + guidance (number assignment happens in their Admin console)
+const CustomerVoice = () => {
+  const { user } = useAuth();
+  return (
+    <div className="section">
+      <h2>📞 Google Voice</h2>
+      <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 20, marginBottom: 16 }}>
+        <p style={{ marginTop: 0 }}>
+          Google Voice adds business phone numbers to your Workspace. Voice is available in supported countries
+          (US, Canada, UK, and parts of Europe). One Voice subscription per account.
+        </p>
+        <p style={{ marginBottom: 0, color: '#5b6075' }}>
+          To request Voice for your domain, please open a support ticket and our team will provision it for you.
+        </p>
+      </div>
+
+      <div style={{ background: '#fffbea', border: '1px solid #fde68a', borderRadius: 12, padding: 20 }}>
+        <h3 style={{ marginTop: 0 }}>📋 After Voice is active: assign your phone numbers</h3>
+        <p>Once your Voice subscription is active, phone numbers are assigned in <strong>your own Google Admin console</strong> (this step is required by Google and can't be done from this portal):</p>
+        <ol style={{ lineHeight: 1.8 }}>
+          <li>Go to your Google Admin console</li>
+          <li>Open <strong>Apps → Google Workspace → Google Voice</strong></li>
+          <li>Add a <strong>Voice location</strong> (service address — required for emergency calling)</li>
+          <li>Assign a <strong>Voice license</strong> to each user</li>
+          <li>Assign or request a <strong>phone number</strong> for each user</li>
+        </ol>
+        <a href="https://admin.google.com/ac/apps/voice" target="_blank" rel="noreferrer"
+          className="btn btn-primary" style={{ display: 'inline-block', marginTop: 8, textDecoration: 'none' }}>
+          Open Google Admin console →
+        </a>
+        <p style={{ marginBottom: 0, marginTop: 12, fontSize: 13, color: '#92600a' }}>
+          Need help? <a href="https://knowledge.workspace.google.com/admin/voice/assign-voice-numbers-to-users" target="_blank" rel="noreferrer">Google's guide to assigning numbers</a>.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// Customer: support tickets
+const CustomerSupport = () => {
+  const [tickets, setTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ subject: '', message: '', priority: 'normal' });
+  const [msg, setMsg] = useState('');
+  const [openId, setOpenId] = useState(null);
+  const [reply, setReply] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try { const res = await axios.get(`${API_URL}/customer/tickets`); setTickets(res.data.tickets || []); }
+    catch (_) { } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const submit = async () => {
+    if (!form.subject || !form.message) { setMsg('Please enter a subject and message.'); return; }
+    try {
+      await axios.post(`${API_URL}/customer/tickets`, form);
+      setForm({ subject: '', message: '', priority: 'normal' }); setMsg('✓ Ticket submitted.');
+      load();
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not submit ticket.'); }
+  };
+
+  const sendReply = async (id) => {
+    if (!reply) return;
+    try { await axios.post(`${API_URL}/customer/tickets/${id}/reply`, { message: reply }); setReply(''); load(); }
+    catch (_) { }
+  };
+
+  return (
+    <div className="section">
+      <h2>🎫 Support</h2>
+
+      <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+        <h3 style={{ marginTop: 0 }}>Open a new ticket</h3>
+        <input placeholder="Subject" value={form.subject} onChange={e => setForm({ ...form, subject: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 10 }} />
+        <textarea placeholder="Describe your issue…" value={form.message} onChange={e => setForm({ ...form, message: e.target.value })}
+          style={{ width: '100%', minHeight: 90, borderRadius: 8, border: '1px solid #d8dbe6', padding: 10, marginBottom: 10 }} />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <select value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })}
+            style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }}>
+            <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
+          </select>
+          <button className="btn btn-primary" onClick={submit}>Submit ticket</button>
+          {msg && <span style={{ fontSize: 14, color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</span>}
+        </div>
+      </div>
+
+      <h3>My tickets</h3>
+      {loading ? <p>Loading…</p> : tickets.length === 0 ? <p>No tickets yet.</p> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {tickets.map(t => (
+            <div key={t._id} style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong>{t.subject}</strong>
+                <span className={`status ${t.status}`}>{t.status.replace('_', ' ')}</span>
+              </div>
+              <button className="btn btn-secondary" style={{ marginTop: 8 }}
+                onClick={() => setOpenId(openId === t._id ? null : t._id)}>
+                {openId === t._id ? 'Hide' : 'View conversation'}
+              </button>
+              {openId === t._id && (
+                <div style={{ marginTop: 12 }}>
+                  {t.messages.map((m, i) => (
+                    <div key={i} style={{
+                      marginBottom: 8, padding: '8px 12px', borderRadius: 8,
+                      background: m.fromRole === 'admin' ? '#eef2ff' : '#f3f4f6'
+                    }}>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>
+                        {m.fromRole === 'admin' ? 'Support' : 'You'} • {new Date(m.createdAt).toLocaleString()}
+                      </div>
+                      <div>{m.body}</div>
+                    </div>
+                  ))}
+                  {t.status !== 'closed' && (
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <input placeholder="Type a reply…" value={reply} onChange={e => setReply(e.target.value)}
+                        style={{ flex: 1, height: 38, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }} />
+                      <button className="btn btn-primary" onClick={() => sendReply(t._id)}>Reply</button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Customer: account settings (username/email, password)
+const CustomerSettings = () => {
+  const { user } = useAuth();
+  const [profile, setProfile] = useState({ username: user?.username || '', businessEmail: user?.businessEmail || '' });
+  const [pMsg, setPMsg] = useState('');
+  const [pwd, setPwd] = useState({ currentPassword: '', newPassword: '' });
+  const [pwdMsg, setPwdMsg] = useState('');
+
+  const saveProfile = async () => {
+    setPMsg('');
+    try { await axios.patch(`${API_URL}/customer/profile`, profile); setPMsg('✓ Saved.'); }
+    catch (e) { setPMsg(e?.response?.data?.error || 'Could not save.'); }
+  };
+  const changePwd = async () => {
+    setPwdMsg('');
+    try { const r = await axios.post(`${API_URL}/customer/change-password`, pwd); setPwdMsg('✓ ' + (r.data.message || 'Password changed.')); setPwd({ currentPassword: '', newPassword: '' }); }
+    catch (e) { setPwdMsg(e?.response?.data?.error || 'Could not change password.'); }
+  };
+
+  return (
+    <div className="section">
+      <h2>⚙️ Account Settings</h2>
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20, marginBottom: 20, maxWidth: 480 }}>
+        <h3 style={{ marginTop: 0 }}>Profile</h3>
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Username</label>
+        <input value={profile.username} onChange={e => setProfile({ ...profile, username: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Email</label>
+        <input value={profile.businessEmail} onChange={e => setProfile({ ...profile, businessEmail: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
+        <button className="btn btn-primary" onClick={saveProfile}>Save profile</button>
+        {pMsg && <span style={{ marginLeft: 10, fontSize: 14, color: pMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{pMsg}</span>}
+      </div>
+
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20, maxWidth: 480 }}>
+        <h3 style={{ marginTop: 0 }}>Change password</h3>
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Current password</label>
+        <input type="password" value={pwd.currentPassword} onChange={e => setPwd({ ...pwd, currentPassword: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>New password</label>
+        <input type="password" value={pwd.newPassword} onChange={e => setPwd({ ...pwd, newPassword: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
+        <button className="btn btn-primary" onClick={changePwd}>Change password</button>
+        {pwdMsg && <span style={{ marginLeft: 10, fontSize: 14, color: pwdMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{pwdMsg}</span>}
+      </div>
+    </div>
+  );
+};
+
+
 // ==================== MAIN APP ====================
 function App() {
-  const { token, loading } = useAuth();
+  const { token, user, loading } = useAuth();
 
   if (loading) {
     return <div className="loading">Loading...</div>;
   }
 
-  return token ? <Dashboard /> : <LoginPage />;
+  const isAdminPath = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
+
+  if (!token) {
+    // Show the login page; pass whether this is the admin entrance
+    return <LoginPage adminMode={isAdminPath} />;
+  }
+
+  const role = user?.role || 'customer';
+
+  // Admin portal lives at /admin and requires admin role
+  if (isAdminPath) {
+    if (role === 'admin') return <Dashboard />;
+    // Non-admins can't access /admin
+    return (
+      <div className="loading" style={{ padding: 40, textAlign: 'center' }}>
+        This area is for administrators only.{' '}
+        <a href="/" style={{ color: '#2563eb' }}>Go to your portal</a>
+      </div>
+    );
+  }
+
+  // Main URL: admins see admin dashboard; customers see the customer portal
+  return role === 'admin' ? <Dashboard /> : <CustomerPortal />;
 }
 
 // ==================== STAGE 1: WORKSPACE ORDER FLOW ====================
