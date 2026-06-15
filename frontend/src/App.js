@@ -72,9 +72,9 @@ const AuthProvider = ({ children }) => {
 const useAuth = () => useContext(AuthContext);
 
 // ==================== LOGIN PAGE ====================
-const LoginPage = ({ adminMode = false }) => {
+const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
   const { login } = useAuth();
-  const [activeTab, setActiveTab] = useState('login');
+  const [activeTab, setActiveTab] = useState(startTab);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -1914,6 +1914,112 @@ const CustomerSettings = () => {
 };
 
 
+// ==================== PUBLIC LANDING PAGE ====================
+const LandingPage = () => {
+  const [plans, setPlans] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try { const res = await axios.get(`${API_URL}/products`); setPlans(res.data.workspace || []); } catch (_) { }
+    })();
+  }, []);
+
+  const T = '#0F766E', TD = '#115E56', INKL = '#1f2937', MUTEL = '#6b7280';
+  const go = (p) => { window.location.href = p; };
+
+  return (
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg,#ffffff 0%,#f0f7f5 60%,#eef4fb 100%)', fontFamily: 'Inter, system-ui, sans-serif', color: INKL }}>
+      {/* Nav */}
+      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 40px', maxWidth: 1200, margin: '0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>A</div>
+          <strong style={{ fontSize: 22, color: T }}>Artisan Drywall LLC</strong>
+        </div>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button onClick={() => go('/login')} style={{ background: 'transparent', border: 'none', color: INKL, fontSize: 16, cursor: 'pointer', padding: '10px 16px' }}>↪ Login</button>
+          <button onClick={() => go('/register')} style={{ background: T, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 20px', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>+ Sign Up</button>
+        </div>
+      </header>
+
+      {/* Hero */}
+      <section style={{ display: 'flex', gap: 40, padding: '40px 40px 60px', maxWidth: 1200, margin: '0 auto', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ flex: 1, minWidth: 320 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: '#fff', borderRadius: 999, padding: '8px 18px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
+            <span style={{ display: 'flex', gap: 4 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: '#3b82f6' }} />
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: '#ef4444' }} />
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: '#f59e0b' }} />
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: '#22c55e' }} />
+            </span>
+            <strong style={{ fontSize: 14 }}>Business email & apps in one place</strong>
+          </div>
+          <h1 style={{ fontSize: 56, lineHeight: 1.05, margin: '0 0 20px', fontWeight: 800 }}>
+            Get <span style={{ color: T }}>professional email</span> for your team
+          </h1>
+          <p style={{ fontSize: 18, color: MUTEL, lineHeight: 1.6, margin: '0 0 28px', maxWidth: 520 }}>
+            The same Gmail, Calendar, Drive, and Meet experience you know — set up for your company domain. Choose how many mailboxes you need, pay online, and follow simple steps to go live.
+          </p>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 28 }}>
+            <div style={tag(T)}><span style={{ fontWeight: 700 }}>G</span> Search & Workspace</div>
+            <div style={tag(T)}>📞 Voice & calling</div>
+            <div style={tag(T)}>📧 Gmail, Meet & Drive</div>
+          </div>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+            <button onClick={() => go('/register')} style={{ background: T, color: '#fff', border: 'none', borderRadius: 12, padding: '16px 28px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>See plans & prices ↓</button>
+            <button onClick={() => go('/register')} style={{ background: '#fff', color: INKL, border: '1px solid #e5e7eb', borderRadius: 12, padding: '16px 28px', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>Create a free account</button>
+          </div>
+        </div>
+
+        {/* What you get card */}
+        <div style={{ flex: '0 0 440px', background: '#fff', borderRadius: 24, padding: 32, boxShadow: '0 10px 40px rgba(0,0,0,0.08)' }}>
+          <h3 style={{ margin: '0 0 4px', fontSize: 22 }}>What you get</h3>
+          <p style={{ color: MUTEL, margin: '0 0 24px' }}>Popular apps for work — explained in plain English.</p>
+          {[
+            ['📧', 'Gmail', 'on your own domain — like you@yourbusiness.com'],
+            ['🎥', 'Google Meet', 'for video meetings with teammates and clients'],
+            ['📁', 'Drive', 'to store and share files, plus Calendar to stay organized'],
+          ].map(([ic, t, d], i) => (
+            <div key={i} style={{ display: 'flex', gap: 14, marginBottom: 18 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: '#f0f7f5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>{ic}</div>
+              <div><strong>{t}</strong> <span style={{ color: MUTEL }}>{d}</span></div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Plans */}
+      <section style={{ padding: '20px 40px 80px', maxWidth: 1200, margin: '0 auto' }}>
+        <h2 style={{ fontSize: 36, textAlign: 'center', margin: '0 0 8px' }}>Plans & prices</h2>
+        <p style={{ textAlign: 'center', color: MUTEL, margin: '0 0 40px' }}>Pick the Workspace plan that fits your team.</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 24 }}>
+          {plans.length === 0 ? (
+            <p style={{ textAlign: 'center', color: MUTEL, gridColumn: '1/-1' }}>Loading plans…</p>
+          ) : plans.map((p) => (
+            <div key={p.id} style={{ background: '#fff', borderRadius: 20, padding: 28, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', border: '1px solid #eef2f1' }}>
+              <h3 style={{ margin: '0 0 8px', fontSize: 20 }}>{p.name}</h3>
+              <div style={{ fontSize: 36, fontWeight: 800, color: T }}>${p.monthlyPrice}<span style={{ fontSize: 15, color: MUTEL, fontWeight: 400 }}>/user/mo</span></div>
+              {p.features && (
+                <ul style={{ listStyle: 'none', padding: 0, margin: '18px 0 24px', color: MUTEL }}>
+                  {p.features.slice(0, 5).map((f, i) => <li key={i} style={{ padding: '4px 0' }}>✓ {f}</li>)}
+                </ul>
+              )}
+              <button onClick={() => go('/register')} style={{ width: '100%', background: T, color: '#fff', border: 'none', borderRadius: 12, padding: '14px', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>Get started</button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <footer style={{ textAlign: 'center', padding: '30px', color: MUTEL, borderTop: '1px solid #eef2f1' }}>
+        © {new Date().getFullYear()} Artisan Drywall LLC · Google Workspace Reseller
+      </footer>
+    </div>
+  );
+};
+
+function tag(T) {
+  return { display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid #eef2f1', borderRadius: 14, padding: '12px 18px', fontWeight: 600, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' };
+}
+
+
 // ==================== MAIN APP ====================
 function App() {
   const { token, user, loading } = useAuth();
@@ -1923,10 +2029,16 @@ function App() {
   }
 
   const isAdminPath = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
+  const path = typeof window !== 'undefined' ? window.location.pathname : '/';
+  const isAuthPath = path.startsWith('/login') || path.startsWith('/register') || isAdminPath;
 
   if (!token) {
-    // Show the login page; pass whether this is the admin entrance
-    return <LoginPage adminMode={isAdminPath} />;
+    // Logged-out: show the public landing page on the main URL,
+    // and the login form on /login, /register, or /admin.
+    if (isAuthPath) {
+      return <LoginPage adminMode={isAdminPath} startTab={path.startsWith('/register') ? 'register' : 'login'} />;
+    }
+    return <LandingPage />;
   }
 
   const role = user?.role || 'customer';
