@@ -978,6 +978,7 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
         customerEmail: me.businessEmail,
         customerName: me.username || me.companyName || me.businessEmail,
         redirectUrl: successUrl,
+        cancelUrl: cancelUrl,
       });
       payment.checkoutUrl = nickyUrl;
       await payment.save();
@@ -1026,14 +1027,12 @@ async function createNickyPayment({ amount, currency, description, orderNumber, 
     throw new Error(`Nicky error ${resp.status}: ${t.slice(0, 300)}`);
   }
   const data = await resp.json();
-  console.log('NICKY RESPONSE:', JSON.stringify(data));  // logs the real response so we can see the URL field
-  // Nicky returns the payment request. Find the hosted checkout URL or build it from a short id.
-  const shortId = data.bill?.shortId || data.shortId || data.requestShortId ||
-    data.bill?.paymentReports?.[0]?.billShortId;
+  console.log('NICKY RESPONSE:', JSON.stringify(data));
+  // Nicky checkout URL format (confirmed): https://pay.nicky.me/home?paymentId=<shortId>
+  const shortId = data.bill?.shortId || data.shortId || data.requestShortId;
   const url =
-    data.checkoutUrl || data.url || data.paymentUrl || data.link || data.payUrl ||
-    data.paymentRequestUrl || data.hostedUrl ||
-    (shortId ? `https://pay.nicky.me/${shortId}` : null);
+    data.checkoutUrl || data.url || data.paymentUrl || data.hostedUrl ||
+    (shortId ? `https://pay.nicky.me/home?paymentId=${shortId}` : null);
   if (!url) {
     throw new Error('Nicky created the request but no checkout URL was found. Response keys: ' + Object.keys(data).join(', ') + (shortId ? ` (shortId=${shortId})` : ''));
   }
