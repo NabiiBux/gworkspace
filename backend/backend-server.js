@@ -991,42 +991,52 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
 });
 
 // Nicky create-payment — fill exact endpoint/body from your Nicky Swagger / gnbmentor.com code.
-async function createNickyPayment({ amount, currency, description, orderNumber, reference, billDescription, customerEmail, customerName, redirectUrl }) {
+async function createNickyPayment({ amount, currency, description, orderNumber, reference, billDescription, customerEmail, customerName, redirectUrl, cancelUrl }) {
   const token = process.env.NICKY_API_TOKEN;
   if (!token) throw new Error('NICKY_API_TOKEN not set');
   const base = process.env.NICKY_API_BASE || 'https://api-public.pay.nicky.me';
+  // The pricing/settlement asset id from your Nicky account (e.g. a USD or stablecoin asset id).
+  const assetId = process.env.NICKY_ASSET_ID || '';
 
-  // Nicky auth = header "x-api-key: <key>"
-  // Create endpoint (from Nicky Swagger): POST /api/public/PaymentReport/CreateForUser ("Create a new transaction")
-  // The body below carries the Workspace/Voice order number + details. Confirm exact field names against your Swagger.
-  const resp = await fetch(`${base}/api/public/PaymentReport/CreateForUser`, {
+  // Real Nicky CreateForUser schema
+  const body = {
+    blockchainAssetId: assetId,
+    amountExpectedNative: Number(amount),
+    billDetails: {
+      invoiceReference: orderNumber || reference || '',
+      description: billDescription || description || '',
+    },
+    requester: {
+      email: customerEmail || '',
+      name: customerName || '',
+    },
+    sendNotification: true,
+    successUrl: redirectUrl,
+    cancelUrl: cancelUrl || redirectUrl,
+  };
+
+  const resp = await fetch(`${base}/api/public/PaymentRequestPublicApi/create`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': token },
-    body: JSON.stringify({
-      amount,
-      currency,
-      description: billDescription || description,
-      reference: orderNumber || reference,   // order number ties the payment to the order
-      externalId: reference,                  // our internal payment id
-      orderNumber,
-      payerEmail: customerEmail,
-      payerName: customerName,
-      redirectUrl,
-      callbackUrl: `${process.env.BACKEND_URL || ''}/api/webhooks/nicky`,
-    }),
+    headers: { 'Content-Type': 'application/json', 'X-API-KEY': token },
+    body: JSON.stringify(body),
   });
   if (!resp.ok) {
     const t = await resp.text();
-    throw new Error(`Nicky error ${resp.status}: ${t.slice(0, 200)}`);
+    console.error('NICKY ERROR', resp.status, t);
+    throw new Error(`Nicky error ${resp.status}: ${t.slice(0, 300)}`);
   }
   const data = await resp.json();
-  // Nicky returns the transaction — find the checkout URL or build it from a bill short id.
-  // Adjust these field names once you confirm the CreateForUser response shape.
+  console.log('NICKY RESPONSE:', JSON.stringify(data));  // logs the real response so we can see the URL field
+  // Nicky returns the payment request. Find the hosted checkout URL or build it from a short id.
+  const shortId = data.bill?.shortId || data.shortId || data.requestShortId ||
+    data.bill?.paymentReports?.[0]?.billShortId;
   const url =
-    data.checkoutUrl || data.url || data.paymentUrl || data.link ||
-    (data.billShortId ? `https://pay.nicky.me/pay/${data.billShortId}` : null) ||
-    (data.shortId ? `https://pay.nicky.me/pay/${data.shortId}` : null);
-  if (!url) throw new Error('Nicky did not return a checkout URL (confirm CreateForUser response field).');
+    data.checkoutUrl || data.url || data.paymentUrl || data.link || data.payUrl ||
+    data.paymentRequestUrl || data.hostedUrl ||
+    (shortId ? `https://pay.nicky.me/${shortId}` : null);
+  if (!url) {
+    throw new Error('Nicky created the request but no checkout URL was found. Response keys: ' + Object.keys(data).join(', ') + (shortId ? ` (shortId=${shortId})` : ''));
+  }
   return url;
 }
 
