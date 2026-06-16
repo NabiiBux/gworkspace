@@ -1178,7 +1178,7 @@ app.get('/api/admin/plans', async (req, res) => {
   }
 });
 
-app.post('/api/admin/plans', async (req, res) => {
+app.post('/api/admin/plans', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const plan = await Plan.create(req.body);
     res.json(plan);
@@ -1187,7 +1187,7 @@ app.post('/api/admin/plans', async (req, res) => {
   }
 });
 
-app.put('/api/admin/plans/:id', async (req, res) => {
+app.put('/api/admin/plans/:id', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const plan = await Plan.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!plan) return res.status(404).json({ error: 'Plan not found' });
@@ -1197,7 +1197,7 @@ app.put('/api/admin/plans/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/admin/plans/:id', async (req, res) => {
+app.delete('/api/admin/plans/:id', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     await Plan.findByIdAndDelete(req.params.id);
     res.json({ deleted: true });

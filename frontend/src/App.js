@@ -519,150 +519,132 @@ const OverviewSection = ({ stats }) => {
 
 // ==================== PRODUCTS SECTION ====================
 const ProductsSection = () => {
-  const [products, setProducts] = useState(null);
-  const [selectedProducts, setSelectedProducts] = useState([]);
+  const [plans, setPlans] = useState(null);
+  const [editing, setEditing] = useState(null); // plan being edited (or 'new')
+  const [form, setForm] = useState({ planId: '', category: 'workspace', name: '', monthlyPrice: 0, skuId: '', features: '', active: true, sortOrder: 0 });
+  const [msg, setMsg] = useState('');
 
-  useEffect(() => {
-    fetchProducts();
-  }, []);
+  const load = async () => {
+    try { const res = await axios.get(`${API_URL}/admin/plans`); setPlans(res.data); }
+    catch (_) { try { const r = await axios.get(`${API_URL}/products`); setPlans([...(r.data.workspace || []), ...(r.data.voice || []), ...(r.data.addon || [])]); } catch (__) { setPlans([]); } }
+  };
+  useEffect(() => { load(); }, []);
 
-  const fetchProducts = async () => {
+  const startNew = () => {
+    setForm({ planId: '', category: 'workspace', name: '', monthlyPrice: 0, skuId: '', features: '', active: true, sortOrder: 0 });
+    setEditing('new');
+  };
+  const startEdit = (p) => {
+    setForm({
+      planId: p.planId || '', category: p.category || 'workspace', name: p.name || '',
+      monthlyPrice: p.monthlyPrice ?? 0, skuId: p.skuId || '',
+      features: (p.features || []).join(', '), active: p.active !== false, sortOrder: p.sortOrder || 0,
+    });
+    setEditing(p._id || p.id);
+  };
+
+  const save = async () => {
+    setMsg('');
+    const payload = {
+      planId: form.planId.trim(),
+      category: form.category,
+      name: form.name.trim(),
+      monthlyPrice: Number(form.monthlyPrice),
+      skuId: form.skuId.trim(),
+      features: form.features ? form.features.split(',').map(s => s.trim()).filter(Boolean) : [],
+      active: !!form.active,
+      sortOrder: Number(form.sortOrder) || 0,
+    };
+    if (!payload.planId || !payload.name) { setMsg('Plan ID and Name are required.'); return; }
     try {
-      const response = await axios.get(`${API_URL}/products`);
-      setProducts(response.data);
-    } catch (error) {
-      console.error('Error fetching products:', error);
-    }
+      if (editing === 'new') await axios.post(`${API_URL}/admin/plans`, payload);
+      else await axios.put(`${API_URL}/admin/plans/${editing}`, payload);
+      setMsg('✓ Saved.'); setEditing(null); load();
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not save.'); }
   };
 
-  const addToCart = (product, type) => {
-    setSelectedProducts([
-      ...selectedProducts,
-      { ...product, productType: type, quantity: 1 },
-    ]);
+  const remove = async (id) => {
+    if (!window.confirm('Delete this plan? Customers will no longer see it.')) return;
+    try { await axios.delete(`${API_URL}/admin/plans/${id}`); load(); }
+    catch (e) { setMsg(e?.response?.data?.error || 'Could not delete.'); }
   };
 
-  const removeFromCart = (index) => {
-    setSelectedProducts(selectedProducts.filter((_, i) => i !== index));
-  };
-
-  const updateQuantity = (index, quantity) => {
-    const updated = [...selectedProducts];
-    updated[index].quantity = Math.max(1, quantity);
-    setSelectedProducts(updated);
-  };
-
-  if (!products) return <div className="loading">Loading products...</div>;
+  const inp = { width: '100%', height: 38, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 10 };
+  if (!plans) return <div className="loading">Loading plans…</div>;
 
   return (
     <div className="section">
-      <h2>📦 Google Workspace Products</h2>
+      <h2>📦 Products & Pricing</h2>
+      <p style={{ color: '#5b6075' }}>Set the prices customers see. Changes apply immediately to the customer portal and landing page.</p>
+      {msg && <div style={{ background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 14 }}>{msg}</div>}
 
-      <div className="products-container">
-        <div className="products-list">
-          <h3>Google Workspace Plans</h3>
-          <div className="product-grid">
-            {products.workspace.map((product) => (
-              <div key={product.id} className="product-card">
-                <h4>{product.name}</h4>
-                <p className="price">${product.monthlyPrice}/month</p>
-                <ul className="features">
-                  {product.features.map((feature, idx) => (
-                    <li key={idx}>✓ {feature}</li>
-                  ))}
-                </ul>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => addToCart(product, 'workspace')}
-                >
-                  Add to Cart
-                </button>
-              </div>
-            ))}
+      <button className="btn btn-primary" onClick={startNew} style={{ marginBottom: 16 }}>+ Add product</button>
+
+      {editing && (
+        <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 18, marginBottom: 20 }}>
+          <h3 style={{ marginTop: 0 }}>{editing === 'new' ? 'New product' : 'Edit product'}</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 13 }}>Plan ID (unique, e.g. "starter")</label>
+              <input style={inp} value={form.planId} onChange={e => setForm({ ...form, planId: e.target.value })} disabled={editing !== 'new'} />
+            </div>
+            <div>
+              <label style={{ fontSize: 13 }}>Category</label>
+              <select style={inp} value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
+                <option value="workspace">Workspace</option>
+                <option value="voice">Voice</option>
+                <option value="addon">Add-on</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 13 }}>Display name</label>
+              <input style={inp} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+            </div>
+            <div>
+              <label style={{ fontSize: 13 }}>Price (USD / user / month)</label>
+              <input type="number" step="0.01" style={inp} value={form.monthlyPrice} onChange={e => setForm({ ...form, monthlyPrice: e.target.value })} />
+            </div>
+            <div>
+              <label style={{ fontSize: 13 }}>Google SKU ID</label>
+              <input style={inp} value={form.skuId} onChange={e => setForm({ ...form, skuId: e.target.value })} placeholder="e.g. 1010020027" />
+            </div>
+            <div>
+              <label style={{ fontSize: 13 }}>Sort order</label>
+              <input type="number" style={inp} value={form.sortOrder} onChange={e => setForm({ ...form, sortOrder: e.target.value })} />
+            </div>
           </div>
-
-          <h3>Google Voice</h3>
-          <div className="product-grid">
-            {products.voice.map((product) => (
-              <div key={product.id} className="product-card">
-                <h4>{product.name}</h4>
-                <p className="price">${product.monthlyPrice}/month</p>
-                <ul className="features">
-                  {product.features.map((feature, idx) => (
-                    <li key={idx}>✓ {feature}</li>
-                  ))}
-                </ul>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => addToCart(product, 'voice')}
-                >
-                  Add to Cart
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <h3>Add-ons</h3>
-          <div className="product-grid">
-            {products.addons.map((product) => (
-              <div key={product.id} className="product-card">
-                <h4>{product.name}</h4>
-                <p className="price">${product.monthlyPrice}/month</p>
-                <p className="description">{product.description}</p>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => addToCart(product, 'addon')}
-                >
-                  Add to Cart
-                </button>
-              </div>
-            ))}
+          <label style={{ fontSize: 13 }}>Features (comma-separated)</label>
+          <input style={inp} value={form.features} onChange={e => setForm({ ...form, features: e.target.value })} placeholder="30 GB storage, Custom email, Video meetings" />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Active (visible to customers)
+          </label>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn btn-primary" onClick={save}>Save</button>
+            <button className="btn btn-secondary" onClick={() => setEditing(null)}>Cancel</button>
           </div>
         </div>
+      )}
 
-        <div className="shopping-cart">
-          <h3>🛒 Shopping Cart</h3>
-          {selectedProducts.length === 0 ? (
-            <p className="empty-cart">Your cart is empty</p>
-          ) : (
-            <>
-              <div className="cart-items">
-                {selectedProducts.map((item, idx) => (
-                  <div key={idx} className="cart-item">
-                    <div>
-                      <h5>{item.name}</h5>
-                      <p>${item.monthlyPrice}/month</p>
-                    </div>
-                    <input
-                      type="number"
-                      min="1"
-                      value={item.quantity}
-                      onChange={(e) => updateQuantity(idx, parseInt(e.target.value))}
-                    />
-                    <button
-                      className="btn-remove"
-                      onClick={() => removeFromCart(idx)}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              <div className="cart-summary">
-                <p className="total">
-                  Total: $
-                  {selectedProducts
-                    .reduce((sum, item) => sum + item.monthlyPrice * item.quantity, 0)
-                    .toFixed(2)}
-                  /month
-                </p>
-                <CheckoutModal items={selectedProducts} />
-              </div>
-            </>
-          )}
-        </div>
-      </div>
+      <table className="data-table">
+        <thead><tr><th>Name</th><th>Category</th><th>Price/mo</th><th>SKU</th><th>Active</th><th>Actions</th></tr></thead>
+        <tbody>
+          {plans.length === 0 ? <tr><td colSpan="6">No plans yet. Click "Add product".</td></tr> :
+            plans.map(p => (
+              <tr key={p._id || p.id}>
+                <td>{p.name}</td>
+                <td>{p.category}</td>
+                <td>${Number(p.monthlyPrice ?? 0).toFixed(2)}</td>
+                <td style={{ fontSize: 12 }}>{p.skuId || '—'}</td>
+                <td>{p.active === false ? 'No' : 'Yes'}</td>
+                <td>
+                  <button className="btn btn-secondary" onClick={() => startEdit(p)}>Edit</button>
+                  {' '}
+                  <button className="btn btn-secondary" onClick={() => remove(p._id || p.id)} style={{ color: '#b42318' }}>Delete</button>
+                </td>
+              </tr>
+            ))}
+        </tbody>
+      </table>
     </div>
   );
 };
