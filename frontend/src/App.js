@@ -108,9 +108,15 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
     domain: '',
     businessEmail: '',
     password: '',
+    firstName: '',
+    lastName: '',
     phone: '',
-    country: '',
+    phoneCountryCode: '1',
+    country: 'United States',
     address: '',
+    city: '',
+    state: '',
+    postalCode: '',
     taxId: '',
   });
 
@@ -217,101 +223,75 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
           <form onSubmit={handleRegister} className="auth-form">
             <div className="form-row">
               <div className="form-group">
-                <label>Company Name</label>
-                <input
-                  type="text"
-                  value={registerForm.companyName}
-                  onChange={(e) =>
-                    setRegisterForm({
-                      ...registerForm,
-                      companyName: e.target.value,
-                    })
-                  }
-                  required
-                />
+                <label>First Name</label>
+                <input type="text" value={registerForm.firstName} required
+                  onChange={(e) => setRegisterForm({ ...registerForm, firstName: e.target.value })} />
               </div>
-
               <div className="form-group">
-                <label>Business Email</label>
-                <input
-                  type="email"
-                  value={registerForm.businessEmail}
-                  onChange={(e) =>
-                    setRegisterForm({
-                      ...registerForm,
-                      businessEmail: e.target.value,
-                    })
-                  }
-                  required
-                />
+                <label>Last Name</label>
+                <input type="text" value={registerForm.lastName} required
+                  onChange={(e) => setRegisterForm({ ...registerForm, lastName: e.target.value })} />
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label>Company Name</label>
+                <input type="text" value={registerForm.companyName} required
+                  onChange={(e) => setRegisterForm({ ...registerForm, companyName: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Email</label>
+                <input type="email" value={registerForm.businessEmail} required
+                  onChange={(e) => setRegisterForm({ ...registerForm, businessEmail: e.target.value })} />
               </div>
             </div>
 
             <div className="form-row">
               <div className="form-group">
                 <label>Phone</label>
-                <input
-                  type="tel"
-                  value={registerForm.phone}
-                  onChange={(e) =>
-                    setRegisterForm({
-                      ...registerForm,
-                      phone: e.target.value,
-                    })
-                  }
-                  required
-                />
+                <input type="tel" value={registerForm.phone} required
+                  onChange={(e) => setRegisterForm({ ...registerForm, phone: e.target.value })} />
               </div>
-
               <div className="form-group">
                 <label>Country</label>
-                <input
-                  type="text"
-                  value={registerForm.country}
-                  onChange={(e) =>
-                    setRegisterForm({
-                      ...registerForm,
-                      country: e.target.value,
-                    })
-                  }
-                  required
-                />
+                <select value={registerForm.country}
+                  onChange={(e) => setRegisterForm({ ...registerForm, country: e.target.value })}>
+                  {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
               </div>
             </div>
 
             <div className="form-group">
               <label>Address</label>
-              <input
-                type="text"
-                value={registerForm.address}
-                onChange={(e) =>
-                  setRegisterForm({ ...registerForm, address: e.target.value })
-                }
-                required
-              />
+              <input type="text" value={registerForm.address} required
+                onChange={(e) => setRegisterForm({ ...registerForm, address: e.target.value })} />
             </div>
 
-            <div className="form-group">
-              <label>Tax ID</label>
-              <input
-                type="text"
-                value={registerForm.taxId}
-                onChange={(e) =>
-                  setRegisterForm({ ...registerForm, taxId: e.target.value })
-                }
-              />
+            <div className="form-row">
+              <div className="form-group">
+                <label>City</label>
+                <input type="text" value={registerForm.city} required
+                  onChange={(e) => setRegisterForm({ ...registerForm, city: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>State / Region</label>
+                <input type="text" value={registerForm.state} required
+                  onChange={(e) => setRegisterForm({ ...registerForm, state: e.target.value })} />
+              </div>
             </div>
 
-            <div className="form-group">
-              <label>Password</label>
-              <input
-                type="password"
-                value={registerForm.password}
-                onChange={(e) =>
-                  setRegisterForm({ ...registerForm, password: e.target.value })
-                }
-                required
-              />
+            <div className="form-row">
+              <div className="form-group">
+                <label>Postal Code</label>
+                <input type="text" value={registerForm.postalCode} required
+                  onChange={(e) => setRegisterForm({ ...registerForm, postalCode: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Password</label>
+                <input type="password" value={registerForm.password} required
+                  onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })} />
+              </div>
             </div>
 
             <button type="submit" className="btn btn-primary" disabled={loading}>
@@ -1542,6 +1522,14 @@ const AdminPaymentsSection = () => {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
+  const [balance, setBalance] = useState(null);
+  const [balErr, setBalErr] = useState('');
+
+  const loadBalance = async () => {
+    setBalErr('');
+    try { const r = await axios.get(`${API_URL}/admin/domain-balance`); setBalance(r.data); }
+    catch (e) { setBalErr(e?.response?.data?.error || 'Could not load balance.'); }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -1554,6 +1542,7 @@ const AdminPaymentsSection = () => {
       setPayments(p.data.payments || []);
       setTotalPaid(p.data.totalPaid || 0);
     } catch (_) { } finally { setLoading(false); }
+    loadBalance();
   };
   useEffect(() => { load(); }, []);
 
@@ -1670,6 +1659,21 @@ const AdminPaymentsSection = () => {
           </div>
 
           <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save payment settings'}</button>
+
+          {/* Reseller domain balance */}
+          <div style={{ ...card, marginTop: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>🌐 Domain reseller balance</h3>
+              <button className="btn btn-secondary" onClick={loadBalance}>Refresh</button>
+            </div>
+            <p style={{ color: '#6b7280', fontSize: 14 }}>Your DomainNameAPI deposit balance — domains are charged from here when customers buy.</p>
+            {balErr && <div style={{ color: '#b42318', fontSize: 14 }}>{balErr}</div>}
+            {balance ? (
+              <div style={{ fontSize: 32, fontWeight: 800, color: '#0F766E' }}>
+                {balance.balance != null ? `${balance.currency || ''} ${Number(balance.balance).toFixed(2)}` : 'See details'}
+              </div>
+            ) : !balErr ? <div style={{ color: '#6b7280' }}>Loading…</div> : null}
+          </div>
 
           {/* Billing automation */}
           <div style={{ ...card, marginTop: 18 }}>
@@ -1984,6 +1988,26 @@ const CustomerDomains = () => {
   const [vMsg, setVMsg] = useState('');
   const [vLoading, setVLoading] = useState(false);
 
+  // Domain registration (pay first)
+  const [regBusy, setRegBusy] = useState(false);
+  const [regMsg, setRegMsg] = useState('');
+
+  const buyDomain = async (method) => {
+    if (!result?.available) return;
+    setRegBusy(true); setRegMsg('');
+    try {
+      const res = await axios.post(`${API_URL}/customer/domains/register`, {
+        domainName: result.domainName, period: 1, price: result.price, method,
+      });
+      if (res.data.checkoutUrl) {
+        window.location.href = res.data.checkoutUrl; // pay first; domain registers on payment
+      } else {
+        setRegMsg('Could not start checkout.');
+      }
+    } catch (e) { setRegMsg(e?.response?.data?.error || 'Could not start checkout.'); }
+    finally { setRegBusy(false); }
+  };
+
   const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
 
   const search = async () => {
@@ -2038,9 +2062,22 @@ const CustomerDomains = () => {
               <div style={{ fontSize: 18, fontWeight: 700 }}>{result.domainName}</div>
               <div style={{ color: result.available ? '#166534' : '#b45309', fontWeight: 600 }}>{result.available ? '✓ Available' : '✗ Not available'}</div>
             </div>
-            {result.available && <strong style={{ fontSize: 20, color: TEAL }}>${Number(result.price).toFixed(2)}/yr</strong>}
+            {result.available && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <strong style={{ fontSize: 20, color: TEAL }}>${Number(result.price).toFixed(2)}/yr</strong>
+                <button onClick={() => buyDomain('stripe')} disabled={regBusy}
+                  style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>
+                  {regBusy ? '…' : '💳 Buy by card'}
+                </button>
+                <button onClick={() => buyDomain('nicky')} disabled={regBusy}
+                  style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>
+                  {regBusy ? '…' : '🪙 Buy with crypto'}
+                </button>
+              </div>
+            )}
           </div>
         )}
+        {regMsg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: regMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: regMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{regMsg}</div>}
       </div>
 
       {/* Verification panel */}
@@ -2919,11 +2956,7 @@ function WorkspaceOrderFlow() {
             </div>
           </div>
           <h3 className="wof-subhead">Business address</h3>
-          <div className="wof-field"><label>Country *</label>
-            <select value={form.country} onChange={set('country')}>
-              {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
+          <div className="wof-field"><label>Country *</label><input value="United States" disabled /></div>
           <div className="wof-field">
             <label>Street address *</label>
             <div ref={streetInputRef} className="wof-autocomplete-mount">

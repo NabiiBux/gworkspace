@@ -76,6 +76,13 @@ const CustomerSchema = new mongoose.Schema({
   country: String,
   address: String,
   taxId: String,
+  // Shared profile (used as domain registrant + reused for Workspace order)
+  firstName: String,
+  lastName: String,
+  city: String,
+  state: String,
+  postalCode: String,
+  phoneCountryCode: String,
   resellerCode: String,
   role: { type: String, enum: ['admin', 'customer'], default: 'customer' },
   domain: String,                 // the customer's own Google Workspace domain (links their subscriptions)
@@ -201,6 +208,7 @@ const PaymentSchema = new mongoose.Schema({
   customerEmail: String,
   domain: String,
   orderId: mongoose.Schema.Types.ObjectId,
+  orderType: { type: String, enum: ['workspace', 'domain'], default: 'workspace' },
   amount: Number,
   currency: { type: String, default: 'USD' },
   method: { type: String, enum: ['stripe', 'nicky'], default: 'stripe' },
@@ -212,6 +220,20 @@ const PaymentSchema = new mongoose.Schema({
   paidAt: Date,
 });
 const Payment = mongoose.model('Payment', PaymentSchema);
+
+// Domain order (paid domain registration)
+const DomainOrderSchema = new mongoose.Schema({
+  customerId: mongoose.Schema.Types.ObjectId,
+  orderNumber: { type: String, unique: true },
+  domainName: String,
+  period: { type: Number, default: 1 },
+  price: Number,
+  status: { type: String, enum: ['pending', 'registered', 'failed', 'test_paid'], default: 'pending' },
+  registeredAt: Date,
+  registrationResult: String,
+  createdAt: { type: Date, default: Date.now },
+});
+const DomainOrder = mongoose.model('DomainOrder', DomainOrderSchema);
 
 // Payment settings (which methods are enabled) — keys themselves live in env vars
 const PaymentSettingsSchema = new mongoose.Schema({
@@ -554,7 +576,8 @@ const processPayment = async (customerId, amount, paymentMethod) => {
 // AUTH ROUTES
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { companyName, username, businessEmail, password, phone, country, address, taxId, domain } = req.body;
+    const { companyName, username, businessEmail, password, phone, country, address, taxId, domain,
+      firstName, lastName, city, state, postalCode, phoneCountryCode } = req.body;
 
     if (!businessEmail || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
@@ -575,6 +598,12 @@ app.post('/api/auth/register', async (req, res) => {
       country,
       address,
       taxId,
+      firstName,
+      lastName,
+      city,
+      state,
+      postalCode,
+      phoneCountryCode,
       domain: domain ? domain.toLowerCase().trim() : undefined,
       resellerCode,
       role: 'customer',
@@ -1106,6 +1135,34 @@ async function markPaidAndProvision(payment) {
   payment.status = 'paid';
   payment.paidAt = new Date();
   await payment.save();
+
+  // DOMAIN orders: register the domain on payment
+  if (payment.orderType === 'domain') {
+    try {
+      const dOrder = await DomainOrder.findById(payment.orderId);
+      if (dOrder && dOrder.status === 'pending') {
+        if (payment.isTest) {
+          console.log('TEST PAYMENT — skipping real domain registration for', dOrder.domainName);
+          dOrder.status = 'test_paid';
+          await dOrder.save();
+          return;
+        }
+        const me = await Customer.findById(payment.customerId);
+        const result = await registerDomainViaApi(me, dOrder.domainName, dOrder.period);
+        dOrder.status = 'registered';
+        dOrder.registeredAt = new Date();
+        dOrder.registrationResult = JSON.stringify(result).slice(0, 500);
+        await dOrder.save();
+        // Link this domain to the customer's account
+        if (me && !me.domain) { me.domain = dOrder.domainName; await me.save(); }
+        console.log('DOMAIN REGISTERED on payment:', dOrder.domainName);
+      }
+    } catch (e) {
+      console.error('DOMAIN REGISTRATION FAILED for payment', String(payment._id), e.message);
+    }
+    return;
+  }
+
   // Auto-provision the linked Workspace order + set/refresh the billing cycle
   try {
     if (payment.orderId) {
@@ -1472,6 +1529,133 @@ app.post('/api/customer/domains/verify-check', authenticateCustomer, async (req,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: register a domain (real purchase via DomainNameAPI) using their saved profile
+// Reusable: actually register a domain via DomainNameAPI using a customer's profile
+async function registerDomainViaApi(customer, domainName, period) {
+  const dom = (domainName || '').toLowerCase().trim();
+  const contact = {
+    firstName: customer.firstName || (customer.username || 'Customer'),
+    lastName: customer.lastName || (customer.companyName || 'Owner'),
+    companyName: customer.companyName || '',
+    eMail: customer.businessEmail,
+    address: customer.address || '',
+    phoneCountryCode: customer.phoneCountryCode || '1',
+    phone: customer.phone || '',
+    faxCountryCode: '',
+    fax: '',
+    postalCode: customer.postalCode || '',
+    country: customer.country || '',
+    city: customer.city || '',
+    state: customer.state || '',
+    contactType: 'Registrant',
+    isHidden: true,
+  };
+  const headers = dnaAuthHeaders();
+  headers['accept'] = 'text/plain';
+  const payload = { domainName: dom, period: Number(period) || 1, nameServers: [], contacts: [contact], useTrusteeContact: true };
+  console.log('DNA REGISTER ->', dom, 'period', payload.period);
+  const resp = await fetch(`${DNA_BASE}/api/v1/domains/register-with-contacts`, {
+    method: 'POST', headers, body: JSON.stringify(payload),
+  });
+  const raw = await resp.text();
+  console.log('DNA REGISTER <-', resp.status, raw.slice(0, 400));
+  let data;
+  try { data = JSON.parse(raw); } catch (_) { throw new Error(`Registration response error (${resp.status}): ${raw.slice(0, 150)}`); }
+  if (!resp.ok || data.success === false) {
+    throw new Error(data?.error?.message || data?.reason || `Registration failed (${resp.status})`);
+  }
+  return data;
+}
+
+// Customer: start a PAID domain registration — creates a domain order + checkout (pay first)
+app.post('/api/customer/domains/register', authenticateCustomer, async (req, res) => {
+  try {
+    const { domainName, period, price, method } = req.body;
+    const dom = (domainName || '').toLowerCase().trim();
+    if (!dom) return res.status(400).json({ error: 'Domain required.' });
+    const me = await Customer.findById(req.customerId);
+    if (!me) return res.status(404).json({ error: 'Account not found.' });
+
+    const amount = Number(price || 0);
+    if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid domain price.' });
+
+    const orderNumber = `DM-${Date.now()}`;
+    const order = await DomainOrder.create({
+      customerId: me._id, orderNumber, domainName: dom, period: Number(period) || 1, price: amount, status: 'pending',
+    });
+
+    const payment = await Payment.create({
+      customerId: me._id, customerEmail: me.businessEmail, domain: dom,
+      orderId: order._id, orderType: 'domain', amount, currency: 'USD',
+      method: method === 'nicky' ? 'nicky' : 'stripe', status: 'pending',
+    });
+
+    const orderDesc = `Domain ${dom} (${order.period} year${order.period === 1 ? '' : 's'})`;
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
+
+    if (payment.method === 'stripe') {
+      let stripe;
+      try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const settingsDoc = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (settingsDoc?.stripeMode || 'test') !== 'live';
+      await payment.save();
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        line_items: [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(amount * 100) }, quantity: 1 }],
+        success_url: successUrl, cancel_url: cancelUrl,
+        client_reference_id: String(payment._id),
+        metadata: { paymentId: String(payment._id), orderId: String(order._id), orderType: 'domain' },
+      });
+      payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
+      return res.json({ checkoutUrl: session.url, paymentId: payment._id });
+    }
+
+    // Nicky crypto
+    try {
+      const nickyUrl = await createNickyPayment({
+        amount, currency: 'USD', description: orderDesc, orderNumber,
+        reference: String(payment._id), billDescription: orderDesc,
+        customerEmail: me.businessEmail, customerName: me.firstName ? `${me.firstName} ${me.lastName || ''}`.trim() : me.businessEmail,
+        redirectUrl: successUrl, cancelUrl,
+      });
+      payment.checkoutUrl = nickyUrl; await payment.save();
+      return res.json({ checkoutUrl: nickyUrl, paymentId: payment._id });
+    } catch (e) {
+      return res.status(500).json({ error: 'Crypto checkout not available: ' + e.message });
+    }
+  } catch (e) {
+    res.status(500).json({ error: 'Domain order error: ' + e.message });
+  }
+});
+
+// Admin: reseller account balance from DomainNameAPI
+app.get('/api/admin/domain-balance', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const headers = dnaAuthHeaders();
+    headers['accept'] = 'text/plain';
+    const resp = await fetch(`${DNA_BASE}/api/v1/deposit/accounts/me`, { method: 'GET', headers });
+    const raw = await resp.text();
+    console.log('DNA BALANCE <-', resp.status, raw.slice(0, 300));
+    let data;
+    try { data = JSON.parse(raw); } catch (_) {
+      return res.status(400).json({ error: `Balance response error (${resp.status}): ${raw.slice(0, 150)}` });
+    }
+    if (!resp.ok || data.success === false) {
+      return res.status(400).json({ error: data?.error?.message || data?.reason || `Balance fetch failed (${resp.status})` });
+    }
+    // Return the raw data plus best-guess normalized fields (adjust if field names differ)
+    const info = data.info || data;
+    res.json({
+      balance: info.balance ?? info.amount ?? info.deposit ?? null,
+      currency: info.currency || 'USD',
+      raw: info,
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Balance error: ' + e.message });
   }
 });
 
