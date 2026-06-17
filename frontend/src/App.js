@@ -1653,6 +1653,22 @@ const AdminPaymentsSection = () => {
           </div>
 
           <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save payment settings'}</button>
+
+          {/* Billing automation */}
+          <div style={{ ...card, marginTop: 18 }}>
+            <h3 style={{ marginTop: 0 }}>🔄 Renewal & billing automation</h3>
+            <p style={{ color: '#6b7280', fontSize: 14 }}>
+              Subscriptions renew every 29 days from last payment. Customers are warned ~4 days before, and suspended if unpaid past day 29. Paying reactivates automatically.
+            </p>
+            <p style={{ color: '#6b7280', fontSize: 13 }}>
+              A daily check must ping: <code>/api/cron/billing-check?secret=YOUR_JWT_SECRET</code> — set up a free daily cron (e.g. cron-job.org) pointing here.
+            </p>
+            <button className="btn btn-secondary" onClick={async () => {
+              setMsg('');
+              try { const r = await axios.post(`${API_URL}/admin/run-billing-check`, {}); setMsg(`✓ Checked ${r.data.checked} subs · warned ${r.data.warned.length} · suspended ${r.data.suspended.length}`); }
+              catch (e) { setMsg(e?.response?.data?.error || 'Check failed.'); }
+            }}>Run billing check now</button>
+          </div>
         </>
       )}
 
