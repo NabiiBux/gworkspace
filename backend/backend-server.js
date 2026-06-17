@@ -1159,6 +1159,10 @@ async function markPaidAndProvision(payment) {
       }
     } catch (e) {
       console.error('DOMAIN REGISTRATION FAILED for payment', String(payment._id), e.message);
+      try {
+        const dOrder = await DomainOrder.findById(payment.orderId);
+        if (dOrder) { dOrder.status = 'failed'; dOrder.registrationResult = e.message; await dOrder.save(); }
+      } catch (_) { }
     }
     return;
   }
@@ -1536,26 +1540,40 @@ app.post('/api/customer/domains/verify-check', authenticateCustomer, async (req,
 // Reusable: actually register a domain via DomainNameAPI using a customer's profile
 async function registerDomainViaApi(customer, domainName, period) {
   const dom = (domainName || '').toLowerCase().trim();
+  // DomainNameAPI throws NullReferenceException if any expected field is null — send safe non-empty defaults.
   const contact = {
-    firstName: customer.firstName || (customer.username || 'Customer'),
-    lastName: customer.lastName || (customer.companyName || 'Owner'),
-    companyName: customer.companyName || '',
-    eMail: customer.businessEmail,
-    address: customer.address || '',
-    phoneCountryCode: customer.phoneCountryCode || '1',
-    phone: customer.phone || '',
-    faxCountryCode: '',
-    fax: '',
-    postalCode: customer.postalCode || '',
-    country: customer.country || '',
-    city: customer.city || '',
-    state: customer.state || '',
+    firstName: (customer.firstName || customer.username || 'Customer').trim(),
+    lastName: (customer.lastName || customer.companyName || 'Owner').trim(),
+    companyName: (customer.companyName || customer.firstName || 'N/A').trim(),
+    eMail: customer.businessEmail || 'admin@example.com',
+    address: (customer.address || 'N/A').trim(),
+    phoneCountryCode: (customer.phoneCountryCode || '1').toString().replace(/[^0-9]/g, '') || '1',
+    phone: (customer.phone || '0000000000').toString().replace(/[^0-9]/g, '') || '0000000000',
+    faxCountryCode: '1',
+    fax: '0000000000',
+    postalCode: (customer.postalCode || '00000').trim(),
+    country: (customer.country || 'United States').trim(),
+    city: (customer.city || 'N/A').trim(),
+    state: (customer.state || 'N/A').trim(),
     contactType: 'Registrant',
     isHidden: true,
   };
   const headers = dnaAuthHeaders();
   headers['accept'] = 'text/plain';
-  const payload = { domainName: dom, period: Number(period) || 1, nameServers: [], contacts: [contact], useTrusteeContact: true };
+  const payload = {
+    domainName: dom,
+    period: Number(period) || 1,
+    // Use real default nameservers (empty array triggers NullReferenceException on DNA side)
+    nameServers: ['ns1.domainnameapi.com', 'ns2.domainnameapi.com'],
+    contacts: [
+      { ...contact, contactType: 'Registrant' },
+      { ...contact, contactType: 'Administrative' },
+      { ...contact, contactType: 'Billing' },
+      { ...contact, contactType: 'Technical' },
+    ],
+    tldAttributes: {},
+    useTrusteeContact: true,
+  };
   console.log('DNA REGISTER ->', dom, 'period', payload.period);
   const resp = await fetch(`${DNA_BASE}/api/v1/domains/register-with-contacts`, {
     method: 'POST', headers, body: JSON.stringify(payload),
@@ -1629,6 +1647,39 @@ app.post('/api/customer/domains/register', authenticateCustomer, async (req, res
     }
   } catch (e) {
     res.status(500).json({ error: 'Domain order error: ' + e.message });
+  }
+});
+
+// Admin: list domain orders
+app.get('/api/admin/domain-orders', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const orders = await DomainOrder.find().sort({ createdAt: -1 }).limit(500);
+    res.json({ orders });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: retry a paid-but-unregistered domain (recovers a charge where registration failed)
+app.post('/api/admin/domain-orders/:id/retry', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const order = await DomainOrder.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+    // Confirm it was paid
+    const payment = await Payment.findOne({ orderId: order._id, orderType: 'domain', status: 'paid' });
+    if (!payment) return res.status(400).json({ error: 'No paid payment found for this order.' });
+    if (order.status === 'registered') return res.json({ success: true, message: 'Already registered.' });
+
+    const customer = await Customer.findById(order.customerId);
+    const result = await registerDomainViaApi(customer, order.domainName, order.period);
+    order.status = 'registered';
+    order.registeredAt = new Date();
+    order.registrationResult = JSON.stringify(result).slice(0, 500);
+    await order.save();
+    if (customer && !customer.domain) { customer.domain = order.domainName; await customer.save(); }
+    res.json({ success: true, message: `${order.domainName} registered.` });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
   }
 });
 

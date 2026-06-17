@@ -1524,6 +1524,24 @@ const AdminPaymentsSection = () => {
   const [saving, setSaving] = useState(false);
   const [balance, setBalance] = useState(null);
   const [balErr, setBalErr] = useState('');
+  const [domainOrders, setDomainOrders] = useState([]);
+  const [retryMsg, setRetryMsg] = useState({});
+
+  const loadDomainOrders = async () => {
+    try { const r = await axios.get(`${API_URL}/admin/domain-orders`); setDomainOrders(r.data.orders || []); }
+    catch (_) { }
+  };
+
+  const retryDomain = async (id) => {
+    setRetryMsg(m => ({ ...m, [id]: 'Retrying…' }));
+    try {
+      const r = await axios.post(`${API_URL}/admin/domain-orders/${id}/retry`, {});
+      setRetryMsg(m => ({ ...m, [id]: '✓ ' + (r.data.message || 'Registered') }));
+      loadDomainOrders();
+    } catch (e) {
+      setRetryMsg(m => ({ ...m, [id]: '✗ ' + (e?.response?.data?.error || 'Retry failed') }));
+    }
+  };
 
   const loadBalance = async () => {
     setBalErr('');
@@ -1580,6 +1598,7 @@ const AdminPaymentsSection = () => {
       <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
         <button className={`btn ${tab === 'settings' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('settings')}>Settings</button>
         <button className={`btn ${tab === 'transactions' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('transactions')}>Transactions</button>
+        <button className={`btn ${tab === 'domains' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('domains'); loadDomainOrders(); }}>Domain Orders</button>
       </div>
 
       {tab === 'settings' && (
@@ -1712,6 +1731,39 @@ const AdminPaymentsSection = () => {
                     <td>${Number(p.amount || 0).toFixed(2)}</td>
                     <td>{p.method === 'nicky' ? 'Crypto' : 'Card'}</td>
                     <td><span className={`status ${p.status}`}>{p.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+
+      {tab === 'domains' && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <h3 style={{ margin: 0 }}>Domain orders</h3>
+            <button className="btn btn-secondary" onClick={loadDomainOrders}>Refresh</button>
+          </div>
+          <p style={{ color: '#6b7280', fontSize: 14 }}>Paid domains register automatically. If one shows <strong>failed</strong>, click Retry to re-register it (charges your reseller balance).</p>
+          {domainOrders.length === 0 ? <p>No domain orders yet.</p> : (
+            <table className="data-table">
+              <thead><tr><th>Date</th><th>Domain</th><th>Years</th><th>Price</th><th>Status</th><th>Action</th></tr></thead>
+              <tbody>
+                {domainOrders.map(o => (
+                  <tr key={o._id}>
+                    <td>{new Date(o.createdAt).toLocaleDateString()}</td>
+                    <td>{o.domainName}</td>
+                    <td>{o.period}</td>
+                    <td>${Number(o.price || 0).toFixed(2)}</td>
+                    <td><span className={`status ${o.status === 'registered' ? 'active' : o.status === 'failed' ? 'suspended' : 'pending'}`}>{o.status}</span></td>
+                    <td>
+                      {o.status !== 'registered' && o.status !== 'test_paid' && (
+                        <button className="btn btn-secondary" onClick={() => retryDomain(o._id)}>Retry register</button>
+                      )}
+                      {retryMsg[o._id] && <div style={{ fontSize: 12, marginTop: 4, color: retryMsg[o._id].startsWith('✓') ? '#166534' : '#b42318' }}>{retryMsg[o._id]}</div>}
+                      {o.status === 'failed' && o.registrationResult && <div style={{ fontSize: 11, color: '#b42318', marginTop: 4 }}>{o.registrationResult.slice(0, 80)}</div>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
