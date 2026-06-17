@@ -1393,11 +1393,16 @@ function dnaAuthHeaders() {
 // Safe domain search — handles non-JSON (e.g. "Unauthorized") responses and logs diagnostics.
 async function dnaDomainSearch(dom) {
   const headers = dnaAuthHeaders();
-  console.log('DNA SEARCH ->', dom, '| reseller set:', !!process.env.DNA_RESELLER_ID, '| api-key set:', !!process.env.DNA_API_KEY, '| base:', DNA_BASE);
-  const resp = await fetch(`${DNA_BASE}/api/v1/domains/search`, {
+  const rid = process.env.DNA_RESELLER_ID || '';
+  console.log('DNA SEARCH ->', dom, '| header names:', Object.keys(headers).join(','), '| base:', DNA_BASE);
+  const bodyObj = { domainName: dom };
+  if (rid) { bodyObj.resellerId = rid; bodyObj.ResellerId = rid; bodyObj.reseller = rid; }
+  // Also try as query param (some APIs read it from the query string)
+  const url = `${DNA_BASE}/api/v1/domains/search?ResellerId=${encodeURIComponent(rid)}&reseller=${encodeURIComponent(rid)}`;
+  const resp = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ domainName: dom }),
+    body: JSON.stringify(bodyObj),
   });
   const raw = await resp.text();
   console.log('DNA SEARCH <-', resp.status, raw.slice(0, 300));
