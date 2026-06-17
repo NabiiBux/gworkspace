@@ -1374,15 +1374,12 @@ const DNA_BASE = process.env.DNA_API_BASE || 'https://ote.domainresellerapi.com'
 // Build auth headers for DomainNameAPI.
 // Auth = two headers: "reseller" (your reseller UUID) + "x-api-key" (your API key).
 function dnaAuthHeaders() {
-  const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+  const headers = { 'Content-Type': 'application/json', 'accept': 'text/plain' };
   if (process.env.DNA_RESELLER_ID) {
-    // Send the reseller id under several header name variants to match the API's expectation
-    headers['reseller'] = process.env.DNA_RESELLER_ID;
-    headers['ResellerId'] = process.env.DNA_RESELLER_ID;
-    headers['resellerId'] = process.env.DNA_RESELLER_ID;
-    headers['Reseller'] = process.env.DNA_RESELLER_ID;
+    // DomainNameAPI expects the reseller id under the header "__reseller" (double underscore)
+    headers['__reseller'] = process.env.DNA_RESELLER_ID;
   }
-  if (process.env.DNA_API_KEY) headers['x-api-key'] = process.env.DNA_API_KEY;
+  if (process.env.DNA_API_KEY) headers['X-API-KEY'] = process.env.DNA_API_KEY;
   if (!process.env.DNA_API_KEY && process.env.DNA_USERNAME && process.env.DNA_PASSWORD) {
     const basic = Buffer.from(`${process.env.DNA_USERNAME}:${process.env.DNA_PASSWORD}`).toString('base64');
     headers['Authorization'] = `Basic ${basic}`;
@@ -1393,16 +1390,11 @@ function dnaAuthHeaders() {
 // Safe domain search — handles non-JSON (e.g. "Unauthorized") responses and logs diagnostics.
 async function dnaDomainSearch(dom) {
   const headers = dnaAuthHeaders();
-  const rid = process.env.DNA_RESELLER_ID || '';
-  console.log('DNA SEARCH ->', dom, '| header names:', Object.keys(headers).join(','), '| base:', DNA_BASE);
-  const bodyObj = { domainName: dom };
-  if (rid) { bodyObj.resellerId = rid; bodyObj.ResellerId = rid; bodyObj.reseller = rid; }
-  // Also try as query param (some APIs read it from the query string)
-  const url = `${DNA_BASE}/api/v1/domains/search?ResellerId=${encodeURIComponent(rid)}&reseller=${encodeURIComponent(rid)}`;
-  const resp = await fetch(url, {
+  console.log('DNA SEARCH ->', dom, '| __reseller set:', !!process.env.DNA_RESELLER_ID, '| api-key set:', !!process.env.DNA_API_KEY);
+  const resp = await fetch(`${DNA_BASE}/api/v1/domains/search`, {
     method: 'POST',
     headers,
-    body: JSON.stringify(bodyObj),
+    body: JSON.stringify({ domainName: dom }),
   });
   const raw = await resp.text();
   console.log('DNA SEARCH <-', resp.status, raw.slice(0, 300));
