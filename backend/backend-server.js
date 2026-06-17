@@ -207,6 +207,7 @@ const PaymentSchema = new mongoose.Schema({
   status: { type: String, enum: ['pending', 'paid', 'failed', 'cancelled'], default: 'pending' },
   providerRef: String,     // Stripe session id or Nicky bill/order id
   checkoutUrl: String,     // hosted checkout URL (Stripe or Nicky)
+  isTest: { type: Boolean, default: false },  // true if made in Stripe test mode — does NOT provision real Google subs
   createdAt: { type: Date, default: Date.now },
   paidAt: Date,
 });
@@ -278,13 +279,19 @@ const WorkspaceOrderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'domain_verification', 'provisioned', 'cancelled'],
+      enum: ['pending', 'domain_verification', 'provisioned', 'cancelled', 'test_paid'],
       default: 'pending',
     },
     domainVerified: { type: Boolean, default: false },
     googleProvisioned: { type: Boolean, default: false },
     txtRecord: String,
     voiceEligible: { type: Boolean, default: true }, // one Voice sub per domain (Stage 2)
+    // Billing cycle (29 days from last payment)
+    lastPaymentDate: Date,
+    nextBillingDate: Date,                 // lastPaymentDate + 29 days
+    billingStatus: { type: String, enum: ['active', 'warned', 'suspended'], default: 'active' },
+    renewalWarnedAt: Date,
+    suspendedAt: Date,
   },
   { timestamps: true }
 );
@@ -955,6 +962,11 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
       try { stripe = await getStripeForMode(); }
       catch (e) { return res.status(500).json({ error: e.message }); }
 
+      // Record whether this is a test-mode payment (won't provision real Google subs)
+      const settingsDoc = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (settingsDoc?.stripeMode || 'test') !== 'live';
+      await payment.save();
+
       const line_items = [{
         price_data: {
           currency: 'usd',
@@ -1094,13 +1106,43 @@ async function markPaidAndProvision(payment) {
   payment.status = 'paid';
   payment.paidAt = new Date();
   await payment.save();
-  // Auto-provision the linked Workspace order
+  // Auto-provision the linked Workspace order + set/refresh the billing cycle
   try {
     if (payment.orderId) {
       const order = await WorkspaceOrder.findById(payment.orderId);
-      if (order && !order.googleProvisioned) {
-        await provisionWorkspaceOrder(order);
-        console.log('AUTO-PROVISIONED order', order.orderNumber);
+      if (order) {
+        // TEST-MODE payments must NOT create real Google subscriptions.
+        if (payment.isTest) {
+          console.log('TEST PAYMENT — skipping real Google provisioning for order', order.orderNumber);
+          order.status = 'test_paid';
+          await order.save();
+          return;
+        }
+
+        // Set billing cycle: next bill = now + 29 days
+        const now = new Date();
+        order.lastPaymentDate = now;
+        order.nextBillingDate = new Date(now.getTime() + 29 * 24 * 60 * 60 * 1000);
+        order.renewalWarnedAt = null;
+
+        // First-time provisioning
+        if (!order.googleProvisioned) {
+          await provisionWorkspaceOrder(order);
+          console.log('AUTO-PROVISIONED order', order.orderNumber);
+        }
+
+        // If it was suspended for non-payment, reactivate it in Google
+        if (order.billingStatus === 'suspended') {
+          try {
+            await reactivateSubscription(order);
+            console.log('REACTIVATED order', order.orderNumber);
+          } catch (e) {
+            console.error('REACTIVATE FAILED', order.orderNumber, e.message);
+          }
+        }
+        order.billingStatus = 'active';
+        order.suspendedAt = null;
+        await order.save();
       }
     }
   } catch (e) {
@@ -1108,6 +1150,92 @@ async function markPaidAndProvision(payment) {
     // Payment stays 'paid'; admin can manually provision if auto fails. Don't throw (webhook must 200).
   }
 }
+
+// Suspend a Workspace subscription in Google (Reseller API)
+async function suspendSubscription(order) {
+  const auth = await getResellerAuth();
+  const reseller = google.reseller({ version: 'v1', auth });
+  const domain = (order.organization?.domain || '').toLowerCase();
+  const planDoc = await Plan.findOne({ planId: order.plan?.id });
+  if (!planDoc?.skuId) throw new Error('Plan SKU missing');
+  await reseller.subscriptions.suspend({ customerId: domain, subscriptionId: planDoc.skuId });
+}
+
+// Reactivate a suspended Workspace subscription in Google
+async function reactivateSubscription(order) {
+  const auth = await getResellerAuth();
+  const reseller = google.reseller({ version: 'v1', auth });
+  const domain = (order.organization?.domain || '').toLowerCase();
+  const planDoc = await Plan.findOne({ planId: order.plan?.id });
+  if (!planDoc?.skuId) throw new Error('Plan SKU missing');
+  await reseller.subscriptions.activate({ customerId: domain, subscriptionId: planDoc.skuId });
+}
+
+// The daily billing check: warn at day 25-ish, suspend past day 29 if unpaid.
+async function runBillingCheck() {
+  const now = new Date();
+  const results = { warned: [], suspended: [], checked: 0 };
+  // Only provisioned, active/warned subscriptions with a billing date
+  const orders = await WorkspaceOrder.find({
+    googleProvisioned: true,
+    billingStatus: { $in: ['active', 'warned'] },
+    nextBillingDate: { $ne: null },
+  });
+  for (const order of orders) {
+    results.checked++;
+    const due = new Date(order.nextBillingDate).getTime();
+    const msLeft = due - now.getTime();
+    const daysLeft = msLeft / (24 * 60 * 60 * 1000);
+
+    // Warn when within 4 days of billing (≈ day 25 of a 29-day cycle) and not already warned
+    if (daysLeft <= 4 && daysLeft > 0 && order.billingStatus === 'active') {
+      order.billingStatus = 'warned';
+      order.renewalWarnedAt = now;
+      await order.save();
+      results.warned.push(order.orderNumber);
+      // (Optional) send a reminder email here if email is configured
+    }
+
+    // Suspend when past the billing date (day 29+) and still unpaid
+    if (daysLeft <= 0 && order.billingStatus !== 'suspended') {
+      try {
+        await suspendSubscription(order);
+        order.billingStatus = 'suspended';
+        order.suspendedAt = now;
+        await order.save();
+        results.suspended.push(order.orderNumber);
+        console.log('SUSPENDED (non-payment)', order.orderNumber);
+      } catch (e) {
+        console.error('SUSPEND FAILED', order.orderNumber, e.message);
+      }
+    }
+  }
+  return results;
+}
+
+// Secured cron endpoint — point an external daily cron (e.g. cron-job.org) here.
+app.get('/api/cron/billing-check', async (req, res) => {
+  if (!req.query.secret || req.query.secret !== process.env.JWT_SECRET) {
+    return res.status(403).json({ error: 'Invalid secret.' });
+  }
+  try {
+    const results = await runBillingCheck();
+    console.log('BILLING CHECK:', JSON.stringify(results));
+    res.json({ success: true, ...results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin manual trigger (to test the billing check on demand)
+app.post('/api/admin/run-billing-check', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const results = await runBillingCheck();
+    res.json({ success: true, ...results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // Nicky webhook — Nicky notifies us when crypto payment completes
 app.post('/api/webhooks/nicky', async (req, res) => {
