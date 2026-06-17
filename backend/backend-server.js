@@ -1055,11 +1055,7 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
       const pid = session.metadata?.paymentId || session.client_reference_id;
       if (pid) {
         const payment = await Payment.findById(pid);
-        if (payment && payment.status !== 'paid') {
-          payment.status = 'paid';
-          payment.paidAt = new Date();
-          await payment.save();
-        }
+        await markPaidAndProvision(payment);
       }
     }
     res.json({ received: true });
@@ -1068,23 +1064,54 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
   }
 });
 
+// Mark a payment paid and auto-provision its Workspace order (pay-first flow)
+async function markPaidAndProvision(payment) {
+  if (!payment || payment.status === 'paid') return;
+  payment.status = 'paid';
+  payment.paidAt = new Date();
+  await payment.save();
+  // Auto-provision the linked Workspace order
+  try {
+    if (payment.orderId) {
+      const order = await WorkspaceOrder.findById(payment.orderId);
+      if (order && !order.googleProvisioned) {
+        await provisionWorkspaceOrder(order);
+        console.log('AUTO-PROVISIONED order', order.orderNumber);
+      }
+    }
+  } catch (e) {
+    console.error('AUTO-PROVISION FAILED for payment', String(payment._id), e.message);
+    // Payment stays 'paid'; admin can manually provision if auto fails. Don't throw (webhook must 200).
+  }
+}
+
 // Nicky webhook — Nicky notifies us when crypto payment completes
 app.post('/api/webhooks/nicky', async (req, res) => {
   try {
-    // Adjust to Nicky's webhook payload: it should include the reference (our payment id) and a status.
-    const ref = req.body?.reference || req.body?.orderReference || req.body?.metadata?.reference;
-    const status = (req.body?.status || '').toLowerCase();
-    if (ref && (status === 'paid' || status === 'completed' || status === 'success')) {
-      const payment = await Payment.findById(ref);
-      if (payment && payment.status !== 'paid') {
-        payment.status = 'paid';
-        payment.paidAt = new Date();
-        await payment.save();
+    console.log('NICKY WEBHOOK:', JSON.stringify(req.body));  // log payload to confirm/adjust fields
+    // Nicky sends the bill/payment info. invoiceReference = our order number; also try our payment id.
+    const b = req.body || {};
+    const invoiceRef = b.invoiceReference || b.bill?.invoiceReference || b.reference;
+    const status = (b.status || b.bill?.status || '').toString().toLowerCase();
+    const paid = /paid|completed|success|confirmed/.test(status);
+
+    if (paid) {
+      let payment = null;
+      // Match by order number (invoiceReference) first
+      if (invoiceRef) {
+        const order = await WorkspaceOrder.findOne({ orderNumber: invoiceRef });
+        if (order) payment = await Payment.findOne({ orderId: order._id }).sort({ createdAt: -1 });
       }
+      // Fallback: maybe reference is our payment id
+      if (!payment && invoiceRef) {
+        try { payment = await Payment.findById(invoiceRef); } catch (_) { }
+      }
+      await markPaidAndProvision(payment);
     }
     res.json({ received: true });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    console.error('NICKY WEBHOOK ERROR', e.message);
+    res.json({ received: true }); // always 200 so Nicky doesn't retry-storm
   }
 });
 
@@ -1555,6 +1582,95 @@ app.post('/api/admin/backfill-skus', async (req, res) => {
 });
 
 // Provision a workspace order into Google: create customer + create subscription
+// Reusable provisioning: creates Google customer + admin user + Workspace subscription.
+// Returns { success, message } or throws. Used by the manual endpoint AND auto-provision-on-payment.
+async function provisionWorkspaceOrder(order) {
+  const planDoc = await Plan.findOne({ planId: order.plan?.id });
+  if (!planDoc || !planDoc.skuId) throw new Error('Plan is missing a Google SKU.');
+
+  const auth = await getResellerAuth();
+  const reseller = google.reseller({ version: 'v1', auth });
+  const org = order.organization || {};
+  const contact = order.contact || {};
+  const domain = (org.domain || '').toLowerCase();
+
+  // Plan type: FLEXIBLE (monthly) or ANNUAL_MONTHLY_PAY (annual commitment, paid monthly)
+  const planType = order.planType === 'annual' ? 'ANNUAL_MONTHLY_PAY' : 'FLEXIBLE';
+  const seatsBody = planType === 'FLEXIBLE'
+    ? { maximumNumberOfSeats: order.seats }
+    : { numberOfSeats: order.seats };
+
+  // 1) Create customer
+  try {
+    await reseller.customers.insert({
+      requestBody: {
+        customerDomain: domain,
+        alternateEmail: contact.alternateEmail,
+        customerDomainVerified: !!order.domainVerified,
+        phoneNumber: contact.phone || undefined,
+        postalAddress: {
+          contactName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
+          organizationName: org.name,
+          addressLine1: org.streetAddress,
+          addressLine2: org.streetAddress2 || undefined,
+          locality: org.city,
+          region: org.state,
+          postalCode: org.zip,
+          countryCode: 'US',
+        },
+      },
+    });
+  } catch (custErr) {
+    const msg = custErr?.errors?.[0]?.message || custErr?.message || '';
+    if (!/already exists|entity already|duplicate/i.test(msg)) throw new Error('Customer creation failed: ' + msg);
+  }
+
+  // 2) Create admin user
+  try {
+    const rawUser = (org.desiredAdminUsername || 'admin').toString().trim();
+    const localPart = rawUser.includes('@') ? rawUser.split('@')[0] : rawUser;
+    const adminEmail = `${localPart}@${domain}`;
+    const password = org.tempPassword && org.tempPassword.length >= 8
+      ? org.tempPassword
+      : Math.random().toString(36).slice(2) + 'A1!';
+    const directory = google.admin({ version: 'directory_v1', auth });
+    await directory.users.insert({
+      requestBody: {
+        primaryEmail: adminEmail,
+        name: { givenName: contact.firstName || 'Admin', familyName: contact.lastName || org.name || 'User' },
+        password,
+        changePasswordAtNextLogin: true,
+      },
+    });
+    await directory.users.makeAdmin({ userKey: adminEmail, requestBody: { status: true } });
+  } catch (userErr) {
+    const msg = userErr?.errors?.[0]?.message || userErr?.message || '';
+    if (!/already exists|entity already|duplicate|409/i.test(msg)) throw new Error('Admin user creation failed: ' + msg);
+  }
+
+  // 3) Create subscription
+  try {
+    await reseller.subscriptions.insert({
+      customerId: domain,
+      requestBody: {
+        customerId: domain,
+        skuId: planDoc.skuId,
+        plan: { planName: planType },
+        seats: seatsBody,
+        purchaseOrderId: order.orderNumber,
+      },
+    });
+  } catch (subErr) {
+    const msg = subErr?.errors?.[0]?.message || subErr?.message || '';
+    throw new Error('Subscription creation failed: ' + msg);
+  }
+
+  order.status = 'provisioned';
+  order.googleProvisioned = true;
+  await order.save();
+  return { success: true, message: 'Provisioned in Google.' };
+}
+
 app.post('/api/workspace-orders/:id/provision', authenticateCustomer, async (req, res) => {
   try {
     const order = await WorkspaceOrder.findOne({ _id: req.params.id, customerId: req.customerId });

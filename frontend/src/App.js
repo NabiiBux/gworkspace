@@ -2495,6 +2495,24 @@ function WorkspaceOrderFlow() {
     }
   };
 
+  const payNow = async (method) => {
+    if (!orderDone?.id) return;
+    setProvisioning(true); setProvisionMsg('');
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API_URL}/customer/checkout`,
+        { orderId: orderDone.id, method },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (res.data.checkoutUrl) {
+        window.location.href = res.data.checkoutUrl; // Stripe or Nicky hosted checkout
+      } else {
+        setProvisionMsg('Could not start checkout.');
+      }
+    } catch (e) {
+      setProvisionMsg(e?.response?.data?.error || 'Could not start checkout.');
+    } finally { setProvisioning(false); }
+  };
+
   const provisionOrder = async () => {
     if (!orderDone?.id) return;
     setProvisioning(true); setProvisionMsg('');
@@ -2691,83 +2709,27 @@ function WorkspaceOrderFlow() {
             {orderDone.orderNumber && <p className="wof-muted">Order number: {orderDone.orderNumber}</p>}
           </div>
 
-          {!verification?.verified && (
-            <div className="wof-verify">
-              <h4>Step 1 — Verify your domain</h4>
-              <p className="wof-muted">
-                To activate Workspace on <strong>{form.domain}</strong>, prove you own the domain.
-              </p>
-              <ol className="wof-verify-steps">
-                <li>Open <a href="https://admin.google.com" target="_blank" rel="noreferrer">admin.google.com</a> in a new tab.</li>
-                <li>Add this TXT record to your domain's DNS at your registrar:</li>
-              </ol>
-
-              {verification?.txtRecord ? (
-                <div className="wof-txt">
-                  <code>{verification.txtRecord}</code>
-                  <button type="button" className="wof-btn ghost" onClick={copyTxt}>Copy</button>
-                </div>
-              ) : (
-                <div className="wof-muted">Preparing your verification record…</div>
-              )}
-
-              <ol className="wof-verify-steps" start="3">
-                <li>Wait for DNS to update (minutes to a few hours).</li>
-                <li>Verify the domain inside the Google Admin console.</li>
-                <li>Return here and confirm below.</li>
-              </ol>
-
-              {verifyMsg && <div className="wof-verify-msg">{verifyMsg}</div>}
-
-              <div className="wof-actions">
-                <button type="button" className="wof-btn primary" onClick={confirmVerify} disabled={verifying}>
-                  {verifying ? 'Confirming…' : "I've verified my domain"}
-                </button>
-              </div>
+          <div className="wof-verify">
+            <h4>Next — Complete your payment</h4>
+            <p className="wof-muted">
+              Pay for <strong>{form.domain}</strong> ({form.plan?.name || 'your plan'}, {form.seats} seat{form.seats === 1 ? '' : 's'}).
+              As soon as your payment is confirmed, your Google Workspace is set up automatically and we'll show your
+              admin sign-in details.
+            </p>
+            {provisionMsg && <div className="wof-verify-msg">{provisionMsg}</div>}
+            <div className="wof-actions" style={{ gap: 12 }}>
+              <button type="button" className="wof-btn primary" onClick={() => payNow('stripe')} disabled={provisioning}>
+                {provisioning ? 'Starting…' : '💳 Pay by card'}
+              </button>
+              <button type="button" className="wof-btn" onClick={() => payNow('nicky')} disabled={provisioning}>
+                {provisioning ? 'Starting…' : '🪙 Pay with crypto'}
+              </button>
             </div>
-          )}
-
-          {verification?.verified && (
-            <div className="wof-verified-ok">
-              <div className="wof-verify-badge">✓ Domain verified</div>
-              <p className="wof-muted">{form.domain} is verified.</p>
-              <div className="wof-next">
-                <h4>Create in Google</h4>
-                <p className="wof-muted">Create this customer and Workspace subscription on your reseller account.</p>
-                {provisionMsg && <div className="wof-verify-msg">{provisionMsg}</div>}
-                {!provisionSuccess && (
-                  <div className="wof-actions" style={{ justifyContent: 'center' }}>
-                    <button type="button" className="wof-btn primary" onClick={provisionOrder} disabled={provisioning}>
-                      {provisioning ? 'Creating in Google…' : 'Provision to Google'}
-                    </button>
-                  </div>
-                )}
-                {provisionSuccess && (
-                  <div className="wof-finish">
-                    <h4>✓ Your Workspace is ready</h4>
-                    <p className="wof-muted">
-                      Your administrator account has been created. Sign in to manage <strong>{form.domain}</strong>:
-                    </p>
-                    {loginInfo && (
-                      <div className="wof-creds">
-                        <div className="wof-cred-row"><span>Admin email</span><code>{loginInfo.email}</code></div>
-                        <div className="wof-cred-row"><span>Temp password</span><code>{loginInfo.password}</code></div>
-                      </div>
-                    )}
-                    <div className="wof-actions" style={{ justifyContent: 'center', marginTop: 12 }}>
-                      <a className="wof-btn primary" href="https://admin.google.com" target="_blank" rel="noreferrer"
-                        style={{ textDecoration: 'none' }}>
-                        Open Admin Console
-                      </a>
-                    </div>
-                    <p className="wof-muted" style={{ fontSize: 13, marginTop: 10 }}>
-                      You'll be asked to change the password on first sign-in, then verify your domain to activate Gmail.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+            <p className="wof-muted" style={{ fontSize: 13, marginTop: 12 }}>
+              After payment you'll return here. Your Workspace (admin account + subscription) is created automatically —
+              then you'll finish by verifying your domain inside your Google Admin console to activate Gmail.
+            </p>
+          </div>
         </section>
       )}
     </div>
