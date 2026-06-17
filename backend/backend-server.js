@@ -1374,15 +1374,53 @@ const DNA_BASE = process.env.DNA_API_BASE || 'https://ote.domainresellerapi.com'
 // Build auth headers for DomainNameAPI.
 // Auth = two headers: "reseller" (your reseller UUID) + "x-api-key" (your API key).
 function dnaAuthHeaders() {
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
   if (process.env.DNA_RESELLER_ID) headers['reseller'] = process.env.DNA_RESELLER_ID;
   if (process.env.DNA_API_KEY) headers['x-api-key'] = process.env.DNA_API_KEY;
-  // Fallback: some accounts also accept Basic auth (username/password)
   if (!process.env.DNA_API_KEY && process.env.DNA_USERNAME && process.env.DNA_PASSWORD) {
     const basic = Buffer.from(`${process.env.DNA_USERNAME}:${process.env.DNA_PASSWORD}`).toString('base64');
     headers['Authorization'] = `Basic ${basic}`;
   }
   return headers;
+}
+
+// Safe domain search — handles non-JSON (e.g. "Unauthorized") responses and logs diagnostics.
+async function dnaDomainSearch(dom) {
+  const headers = dnaAuthHeaders();
+  console.log('DNA SEARCH ->', dom, '| reseller set:', !!process.env.DNA_RESELLER_ID, '| api-key set:', !!process.env.DNA_API_KEY, '| base:', DNA_BASE);
+  const resp = await fetch(`${DNA_BASE}/api/v1/domains/search`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ domainName: dom }),
+  });
+  const raw = await resp.text();
+  console.log('DNA SEARCH <-', resp.status, raw.slice(0, 300));
+  let data;
+  try { data = JSON.parse(raw); }
+  catch (_) {
+    // Non-JSON response (e.g. "Unauthorized") — surface a clean message
+    if (resp.status === 401 || /unauthor/i.test(raw)) {
+      throw new Error('DomainNameAPI rejected the credentials (401). Check DNA_RESELLER_ID and DNA_API_KEY in Railway, and that the key matches the environment (test key → ote server).');
+    }
+    throw new Error(`DomainNameAPI returned a non-JSON response (${resp.status}): ${raw.slice(0, 120)}`);
+  }
+  if (!resp.ok || data.success === false) {
+    const msg = data?.error?.message || data?.reason || `Search failed (${resp.status})`;
+    throw new Error(msg);
+  }
+  const info = data.info || {};
+  const markup = Number(process.env.DNA_MARKUP_PERCENT || 0);
+  const sellPrice = Math.round(Number(info.price || 0) * (1 + markup / 100) * 100) / 100;
+  return {
+    domainName: info.domainName || dom,
+    tld: info.tld,
+    available: (info.status || '').toUpperCase() === 'AVAILABLE',
+    isPremium: !!info.isPremium,
+    currency: info.currency || 'USD',
+    period: info.period || 1,
+    price: sellPrice,
+    basePrice: Number(info.price || 0),
+  };
 }
 
 // Customer: get/check domain verification (TXT or CNAME) for Workspace
@@ -1442,28 +1480,16 @@ app.post('/api/public/domains/search', async (req, res) => {
     if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) {
       return res.status(400).json({ error: 'Please enter a valid domain like example.com' });
     }
-    const resp = await fetch(`${DNA_BASE}/api/v1/domains/search`, {
-      method: 'POST',
-      headers: dnaAuthHeaders(),
-      body: JSON.stringify({ domainName: dom }),
-    });
-    const data = await resp.json();
-    if (!resp.ok || data.success === false) {
-      const msg = data?.error?.message || data?.reason || `Search failed (${resp.status})`;
-      return res.status(400).json({ error: msg });
-    }
-    const info = data.info || {};
-    const markup = Number(process.env.DNA_MARKUP_PERCENT || 0);
-    const sellPrice = Math.round(Number(info.price || 0) * (1 + markup / 100) * 100) / 100;
+    const result = await dnaDomainSearch(dom);
     res.json({
-      domainName: info.domainName || dom,
-      available: (info.status || '').toUpperCase() === 'AVAILABLE',
-      currency: info.currency || 'USD',
-      period: info.period || 1,
-      price: sellPrice,
+      domainName: result.domainName,
+      available: result.available,
+      currency: result.currency,
+      period: result.period,
+      price: result.price,
     });
   } catch (e) {
-    res.status(500).json({ error: 'Domain search error: ' + e.message });
+    res.status(400).json({ error: e.message });
   }
 });
 
@@ -1475,33 +1501,10 @@ app.post('/api/customer/domains/search', authenticateCustomer, async (req, res) 
     if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) {
       return res.status(400).json({ error: 'Please enter a valid domain like example.com' });
     }
-    const resp = await fetch(`${DNA_BASE}/api/v1/domains/search`, {
-      method: 'POST',
-      headers: dnaAuthHeaders(),
-      body: JSON.stringify({ domainName: dom }),
-    });
-    const data = await resp.json();
-    if (!resp.ok || data.success === false) {
-      const msg = data?.error?.message || data?.reason || `Search failed (${resp.status})`;
-      return res.status(400).json({ error: msg });
-    }
-    const info = data.info || {};
-    // Apply optional markup so you can resell above cost (set DNA_MARKUP_PERCENT, e.g. 20)
-    const markup = Number(process.env.DNA_MARKUP_PERCENT || 0);
-    const basePrice = Number(info.price || 0);
-    const sellPrice = Math.round(basePrice * (1 + markup / 100) * 100) / 100;
-    res.json({
-      domainName: info.domainName || dom,
-      tld: info.tld,
-      available: (info.status || '').toUpperCase() === 'AVAILABLE',
-      isPremium: !!info.isPremium,
-      currency: info.currency || 'USD',
-      period: info.period || 1,
-      price: sellPrice,
-      basePrice,
-    });
+    const result = await dnaDomainSearch(dom);
+    res.json(result);
   } catch (e) {
-    res.status(500).json({ error: 'Domain search error: ' + e.message });
+    res.status(400).json({ error: e.message });
   }
 });
 
