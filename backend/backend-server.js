@@ -1,2267 +1,2915 @@
 /**
- * Google Workspace Reseller Portal - Backend Server
- * Complete API with Google Workspace Admin SDK & Voice Integration
+ * Google Workspace Reseller Portal - Frontend
+ * Complete React Application
  */
 
-const express = require('express');
-const mongoose = require('mongoose');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const axios = require('axios');
-const { google } = require('googleapis');
-const nodemailer = require('nodemailer');
-const cors = require('cors');
-const dotenv = require('dotenv');
+import React, { useState, useEffect, useContext, createContext, useRef } from 'react';
+import axios from 'axios';
+import './App.css';
 
-dotenv.config();
+// API Config
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const MAPS_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '';
 
-const app = express();
+// ====== EDIT THIS: allowed countries for the address autocomplete ======
+// Use lowercase 2-letter country codes. Examples:
+//   ['us']            -> United States only
+//   ['us', 'ca']      -> United States + Canada
+//   ['us', 'gb', 'au']-> US + United Kingdom + Australia
+// Full list of codes: https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2
+const ALLOWED_COUNTRIES = ['us'];
+// =======================================================================
 
-// Middleware
-app.use(cors());
-// Stripe webhook needs the raw body for signature verification — skip JSON parsing for it
-app.use((req, res, next) => {
-  if (req.originalUrl === '/api/webhooks/stripe') return next();
-  express.json()(req, res, next);
-});
-app.use((req, res, next) => {
-  if (req.originalUrl === '/api/webhooks/stripe') return next();
-  express.urlencoded({ extended: true })(req, res, next);
-});
+// Auth Context
+const AuthContext = createContext();
 
-// ==================== DATABASE CONNECTION ====================
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(localStorage.getItem('token'));
+  const [loading, setLoading] = useState(true);
 
-mongoose.connection.once('open', () => {
-  console.log('✅ MongoDB connected');
-  seedPlans().then(() => backfillPlanSkus());
-});
-mongoose.connection.on('error', (err) => {
-  console.error('MongoDB connection error:', err.message);
-});
-
-// Backfill Google SKU IDs onto existing workspace plans (safe to run every boot)
-async function backfillPlanSkus() {
-  try {
-    const skuMap = {
-      starter: '1010020027',
-      standard: '1010020028',
-      plus: '1010020025',
-      frontline: '1010020030',
-      'voice-starter': '1010330003',
-      'voice-standard': '1010330004',
-      'voice-premier': '1010330002',
-    };
-    for (const [planId, skuId] of Object.entries(skuMap)) {
-      await Plan.updateOne({ planId, $or: [{ skuId: { $exists: false } }, { skuId: null }, { skuId: '' }] }, { $set: { skuId } });
-    }
-    console.log('✅ Plan SKUs backfilled');
-  } catch (e) {
-    console.error('SKU backfill error:', e.message);
-  }
-}
-
-// ==================== SCHEMAS ====================
-
-// Customer Schema
-const CustomerSchema = new mongoose.Schema({
-  companyName: String,
-  username: String,
-  businessEmail: String,
-  password: String,
-  phone: String,
-  country: String,
-  address: String,
-  taxId: String,
-  resellerCode: String,
-  role: { type: String, enum: ['admin', 'customer'], default: 'customer' },
-  domain: String,                 // the customer's own Google Workspace domain (links their subscriptions)
-  account: { type: String, default: 'pk' }, // which reseller account their domain lives on: 'pk' or 'usa'
-  registrationIp: String,         // IP captured at signup
-  lastLoginIp: String,            // IP captured at last login
-  status: { type: String, enum: ['active', 'inactive', 'suspended'], default: 'active' },
-  totalUsers: { type: Number, default: 0 },
-  totalCost: { type: Number, default: 0 },
-  createdAt: { type: Date, default: Date.now },
-  lastLogin: Date,
-});
-
-// Order Schema
-const OrderSchema = new mongoose.Schema({
-  customerId: mongoose.Schema.Types.ObjectId,
-  orderNumber: String,
-  items: [{
-    productType: String, // 'workspace', 'voice', 'addon'
-    productName: String,
-    quantity: Number,
-    monthlyPrice: Number,
-    totalPrice: Number,
-  }],
-  totalAmount: Number,
-  status: { type: String, enum: ['pending', 'active', 'expired', 'cancelled'], default: 'pending' },
-  paymentStatus: { type: String, enum: ['unpaid', 'paid', 'refunded'], default: 'unpaid' },
-  paymentMethod: String,
-  transactionId: String,
-  startDate: Date,
-  renewalDate: Date,
-  createdAt: { type: Date, default: Date.now },
-  notes: String,
-});
-
-// Subscription Schema
-const SubscriptionSchema = new mongoose.Schema({
-  customerId: mongoose.Schema.Types.ObjectId,
-  orderId: mongoose.Schema.Types.ObjectId,
-  subscriptionId: String,
-  type: String, // 'workspace', 'voice'
-  plan: String, // 'business_starter', 'business_standard', 'business_plus'
-  seats: Number,
-  monthlyPrice: Number,
-  status: { type: String, enum: ['active', 'suspended', 'cancelled'], default: 'active' },
-  googleWorkspaceSkuId: String,
-  autoRenew: { type: Boolean, default: true },
-  nextBillingDate: Date,
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now },
-});
-
-// User (End-user) Schema
-const UserSchema = new mongoose.Schema({
-  customerId: mongoose.Schema.Types.ObjectId,
-  firstName: String,
-  lastName: String,
-  email: String,
-  role: String, // 'admin', 'user'
-  status: { type: String, enum: ['active', 'inactive', 'suspended'], default: 'active' },
-  googleWorkspaceId: String,
-  voiceNumber: String,
-  forwardingNumber: String,
-  createdAt: { type: Date, default: Date.now },
-});
-
-// Invoice Schema
-const InvoiceSchema = new mongoose.Schema({
-  customerId: mongoose.Schema.Types.ObjectId,
-  invoiceNumber: String,
-  orderId: mongoose.Schema.Types.ObjectId,
-  amount: Number,
-  tax: Number,
-  total: Number,
-  status: { type: String, enum: ['draft', 'sent', 'paid', 'overdue'], default: 'draft' },
-  issueDate: Date,
-  dueDate: Date,
-  paidDate: Date,
-  paymentMethod: String,
-  createdAt: { type: Date, default: Date.now },
-});
-
-// Domain Schema
-const DomainSchema = new mongoose.Schema({
-  customerId: mongoose.Schema.Types.ObjectId,
-  domainName: String,
-  verified: { type: Boolean, default: false },
-  verificationMethod: String,
-  txtRecord: String,
-  createdAt: { type: Date, default: Date.now },
-});
-
-// Support Ticket Schema
-const TicketSchema = new mongoose.Schema({
-  customerId: mongoose.Schema.Types.ObjectId,
-  customerEmail: String,
-  customerDomain: String,
-  subject: String,
-  status: { type: String, enum: ['open', 'in_progress', 'resolved', 'closed'], default: 'open' },
-  priority: { type: String, enum: ['low', 'normal', 'high'], default: 'normal' },
-  messages: [{
-    fromRole: String,        // 'customer' or 'admin'
-    fromName: String,
-    body: String,
-    createdAt: { type: Date, default: Date.now },
-  }],
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now },
-});
-
-// Models
-const Customer = mongoose.model('Customer', CustomerSchema);
-const Order = mongoose.model('Order', OrderSchema);
-const Subscription = mongoose.model('Subscription', SubscriptionSchema);
-const User = mongoose.model('User', UserSchema);
-const Invoice = mongoose.model('Invoice', InvoiceSchema);
-const Domain = mongoose.model('Domain', DomainSchema);
-const Ticket = mongoose.model('Ticket', TicketSchema);
-
-// Payment record
-const PaymentSchema = new mongoose.Schema({
-  customerId: mongoose.Schema.Types.ObjectId,
-  customerEmail: String,
-  domain: String,
-  orderId: mongoose.Schema.Types.ObjectId,
-  amount: Number,
-  currency: { type: String, default: 'USD' },
-  method: { type: String, enum: ['stripe', 'nicky'], default: 'stripe' },
-  status: { type: String, enum: ['pending', 'paid', 'failed', 'cancelled'], default: 'pending' },
-  providerRef: String,     // Stripe session id or Nicky bill/order id
-  checkoutUrl: String,     // hosted checkout URL (Stripe or Nicky)
-  createdAt: { type: Date, default: Date.now },
-  paidAt: Date,
-});
-const Payment = mongoose.model('Payment', PaymentSchema);
-
-// Payment settings (which methods are enabled) — keys themselves live in env vars
-const PaymentSettingsSchema = new mongoose.Schema({
-  singleton: { type: String, default: 'main', unique: true },
-  stripeEnabled: { type: Boolean, default: true },
-  nickyEnabled: { type: Boolean, default: true },
-  currency: { type: String, default: 'USD' },
-  updatedAt: { type: Date, default: Date.now },
-});
-const PaymentSettings = mongoose.model('PaymentSettings', PaymentSettingsSchema);
-
-// ==================== STAGE 1: EDITABLE PLANS + WORKSPACE ORDERS ====================
-
-// Plan Schema — prices stored in DB so they are editable without code changes
-const PlanSchema = new mongoose.Schema(
-  {
-    planId: { type: String, required: true, unique: true }, // e.g. 'starter'
-    category: { type: String, enum: ['workspace', 'voice', 'addon'], required: true },
-    name: { type: String, required: true },
-    monthlyPrice: { type: Number, required: true }, // your selling price /user/mo
-    skuId: String, // Google Reseller API SKU id (for provisioning)
-    features: [String],
-    active: { type: Boolean, default: true },
-    sortOrder: { type: Number, default: 0 },
-  },
-  { timestamps: true }
-);
-const Plan = mongoose.model('Plan', PlanSchema);
-
-// Workspace Order Schema — customer-facing order intake (USA only)
-const WorkspaceOrderSchema = new mongoose.Schema(
-  {
-    customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
-    orderNumber: { type: String, unique: true },
-    type: { type: String, default: 'workspace' },
-    plan: { id: String, name: String, monthlyPrice: Number },
-    seats: Number,
-    monthlyTotal: Number,
-    organization: {
-      name: String,
-      domain: String,
-      desiredAdminUsername: String,
-      tempPassword: String,
-      country: { type: String, default: 'US' },
-      streetAddress: String,
-      streetAddress2: String,
-      city: String,
-      state: String,
-      zip: String,
-    },
-    contact: {
-      firstName: String,
-      lastName: String,
-      email: String,
-      alternateEmail: String,
-      phone: String,
-    },
-    status: {
-      type: String,
-      enum: ['pending', 'domain_verification', 'provisioned', 'cancelled'],
-      default: 'pending',
-    },
-    domainVerified: { type: Boolean, default: false },
-    googleProvisioned: { type: Boolean, default: false },
-    txtRecord: String,
-    voiceEligible: { type: Boolean, default: true }, // one Voice sub per domain (Stage 2)
-  },
-  { timestamps: true }
-);
-const WorkspaceOrder = mongoose.model('WorkspaceOrder', WorkspaceOrderSchema);
-
-// Stores the reseller's Google OAuth connection (refresh token) — set once by admin
-const GoogleConnectionSchema = new mongoose.Schema(
-  {
-    account: { type: String, default: 'pk', index: true }, // 'pk' (Pakistan) or 'usa'
-    name: { type: String, default: 'Reseller Google Connection' },
-    refreshToken: String,
-    accessToken: String,
-    tokenExpiry: Date,
-    connectedEmail: String,
-    scopes: [String],
-    active: { type: Boolean, default: true },
-  },
-  { timestamps: true }
-);
-const GoogleConnection = mongoose.model('GoogleConnection', GoogleConnectionSchema);
-
-// Build a configured OAuth2 client (Pakistan / default)
-function makeOAuthClient() {
-  return new google.auth.OAuth2(
-    process.env.GOOGLE_OAUTH_CLIENT_ID,
-    process.env.GOOGLE_OAUTH_CLIENT_SECRET,
-    process.env.GOOGLE_OAUTH_REDIRECT_URI
-  );
-}
-
-// Build a configured OAuth2 client for the USA reseller account
-function makeUsaOAuthClient() {
-  return new google.auth.OAuth2(
-    process.env.GOOGLE_OAUTH_CLIENT_ID_USA,
-    process.env.GOOGLE_OAUTH_CLIENT_SECRET_USA,
-    process.env.GOOGLE_OAUTH_REDIRECT_URI_USA
-  );
-}
-
-const RESELLER_SCOPES = [
-  'https://www.googleapis.com/auth/admin.directory.user',
-  'https://www.googleapis.com/auth/admin.directory.domain',
-  'https://www.googleapis.com/auth/apps.order',
-];
-
-// Seed placeholder plans once (won't overwrite later edits)
-async function seedPlans() {
-  try {
-    const count = await Plan.countDocuments();
-    if (count > 0) return;
-    await Plan.insertMany([
-      {
-        planId: 'starter', category: 'workspace', name: 'Business Starter', monthlyPrice: 7.20, sortOrder: 1, skuId: '1010020027',
-        features: ['30 GB pooled storage', 'Custom business email', 'Meet (100 participants)', 'Security & management controls']
-      },
-      {
-        planId: 'standard', category: 'workspace', name: 'Business Standard', monthlyPrice: 14.40, sortOrder: 2, skuId: '1010020028',
-        features: ['2 TB pooled storage', 'Custom business email', 'Meet (150 participants) + recording', 'eSignature in Docs']
-      },
-      {
-        planId: 'plus', category: 'workspace', name: 'Business Plus', monthlyPrice: 21.60, sortOrder: 3, skuId: '1010020025',
-        features: ['5 TB pooled storage', 'Enhanced security & Vault', 'Meet (500 participants) + attendance', 'Advanced endpoint management']
-      },
-      {
-        planId: 'frontline', category: 'workspace', name: 'Frontline Starter', monthlyPrice: 6.00, sortOrder: 4, skuId: '1010020030',
-        features: ['Business email', 'Shared device support', 'Meet (100 participants)', 'For frontline workers']
-      },
-      {
-        planId: 'voice-starter', category: 'voice', name: 'Voice Starter', monthlyPrice: 12.00, sortOrder: 1, skuId: '1010330003',
-        features: ['1 user / domain region', 'Voicemail & SMS', 'Call forwarding']
-      },
-      {
-        planId: 'voice-standard', category: 'voice', name: 'Voice Standard', monthlyPrice: 24.00, sortOrder: 2, skuId: '1010330004',
-        features: ['Unlimited US regions', 'Multi-level auto attendant', 'Ring groups']
-      },
-      {
-        planId: 'voice-premier', category: 'voice', name: 'Voice Premier', monthlyPrice: 36.00, sortOrder: 3, skuId: '1010330002',
-        features: ['Unlimited international', 'Advanced reporting', 'Desk phone support']
-      },
-    ]);
-    console.log('✅ Seeded placeholder plans');
-  } catch (e) {
-    console.error('Plan seed error:', e.message);
-  }
-}
-
-// ==================== EMAIL SERVICE ====================
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD,
-  },
-});
-
-const sendEmail = async (to, subject, htmlContent) => {
-  try {
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to,
-      subject,
-      html: htmlContent,
-    });
-  } catch (error) {
-    console.error('Email send error:', error);
-  }
-};
-
-// ==================== GOOGLE WORKSPACE INTEGRATION ====================
-const getGoogleAuth = () => {
-  return new google.auth.JWT({
-    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    scopes: [
-      'https://www.googleapis.com/auth/admin.directory.customer',
-      'https://www.googleapis.com/auth/admin.directory.user',
-      'https://www.googleapis.com/auth/admin.directory.domain',
-    ],
-  });
-};
-
-const createGoogleWorkspaceUser = async (email, firstName, lastName, customerId) => {
-  try {
-    const auth = getGoogleAuth();
-    const admin = google.admin({ version: 'directory_v1', auth });
-
-    const result = await admin.users.insert({
-      customer: 'my_customer',
-      requestBody: {
-        primaryEmail: email,
-        firstName,
-        lastName,
-        password: generateRandomPassword(),
-      },
-    });
-
-    // Create user record in database
-    await User.create({
-      customerId,
-      firstName,
-      lastName,
-      email,
-      googleWorkspaceId: result.data.id,
-      role: 'user',
-    });
-
-    // Send welcome email
-    const welcomeHTML = `
-      <h2>Welcome to Google Workspace</h2>
-      <p>Your Google Workspace account has been created!</p>
-      <p><strong>Email:</strong> ${email}</p>
-      <p>You can access your account at <a href="https://mail.google.com">mail.google.com</a></p>
-    `;
-    await sendEmail(email, 'Welcome to Google Workspace', welcomeHTML);
-
-    return result.data;
-  } catch (error) {
-    console.error('Google Workspace user creation error:', error);
-    throw error;
-  }
-};
-
-// ==================== GOOGLE VOICE INTEGRATION ====================
-const createGoogleVoiceNumber = async (userId, forwardingNumber) => {
-  try {
-    // Using Google Voice API via partner endpoint
-    const response = await axios.post(
-      `https://www.googleapis.com/voice/v1/accounts/${process.env.GOOGLE_ACCOUNT_ID}/phones`,
-      {
-        phoneNumber: userId,
-        forwardingNumbers: [forwardingNumber],
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${await getGoogleToken()}`,
-        },
+  useEffect(() => {
+    const loadMe = async () => {
+      if (token) {
+        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        try {
+          const res = await axios.get(`${API_URL}/auth/me`);
+          setUser(res.data);
+        } catch (e) {
+          // token invalid/expired
+          setToken(null);
+          setUser(null);
+          localStorage.removeItem('token');
+          delete axios.defaults.headers.common['Authorization'];
+        }
       }
-    );
-
-    return response.data;
-  } catch (error) {
-    console.error('Google Voice creation error:', error);
-    throw error;
-  }
-};
-
-// ==================== UTILITY FUNCTIONS ====================
-const generateRandomPassword = () => {
-  return Math.random().toString(36).slice(-12) + 'Aa@1';
-};
-
-const generateToken = (id, email, role = 'customer') => {
-  return jwt.sign({ id, email, role }, process.env.JWT_SECRET, { expiresIn: '7d' });
-};
-
-const verifyToken = (token) => {
-  try {
-    return jwt.verify(token, process.env.JWT_SECRET);
-  } catch (error) {
-    return null;
-  }
-};
-
-// Middleware for authentication
-// Capture the real client IP (works behind Railway/Vercel proxies)
-function getClientIp(req) {
-  const xf = req.headers['x-forwarded-for'];
-  if (xf) return String(xf).split(',')[0].trim();
-  return req.socket?.remoteAddress || req.ip || '';
-}
-
-const authenticateCustomer = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'No token provided' });
-
-  const decoded = verifyToken(token);
-  if (!decoded) return res.status(401).json({ error: 'Invalid token' });
-
-  req.customerId = decoded.id;
-  req.userRole = decoded.role || 'customer';
-  next();
-};
-
-// Require admin role for admin-only endpoints
-const requireAdmin = async (req, res, next) => {
-  try {
-    const me = await Customer.findById(req.customerId);
-    if (!me || me.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required.' });
-    }
-    next();
-  } catch (e) {
-    res.status(500).json({ error: 'Authorization check failed.' });
-  }
-};
-
-// ==================== PAYMENT PROCESSING ====================
-const processPayment = async (customerId, amount, paymentMethod) => {
-  try {
-    // Stripe or PayPal integration
-    if (paymentMethod === 'stripe') {
-      const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: Math.round(amount * 100),
-        currency: 'usd',
-        metadata: { customerId },
-      });
-      return { success: true, transactionId: paymentIntent.id };
-    }
-    // Add PayPal integration similarly
-    return { success: true };
-  } catch (error) {
-    console.error('Payment error:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-// ==================== API ENDPOINTS ====================
-
-// AUTH ROUTES
-app.post('/api/auth/register', async (req, res) => {
-  try {
-    const { companyName, username, businessEmail, password, phone, country, address, taxId, domain } = req.body;
-
-    if (!businessEmail || !password) {
-      return res.status(400).json({ error: 'Email and password are required.' });
-    }
-    const existing = await Customer.findOne({ businessEmail: businessEmail.toLowerCase() });
-    if (existing) return res.status(400).json({ error: 'An account with this email already exists.' });
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const resellerCode = `RSL-${Date.now()}`;
-    const ip = getClientIp(req);
-
-    const customer = await Customer.create({
-      companyName,
-      username: username || (businessEmail.split('@')[0]),
-      businessEmail: businessEmail.toLowerCase(),
-      password: hashedPassword,
-      phone,
-      country,
-      address,
-      taxId,
-      domain: domain ? domain.toLowerCase().trim() : undefined,
-      resellerCode,
-      role: 'customer',
-      registrationIp: ip,
-      lastLoginIp: ip,
-    });
-
-    const token = generateToken(customer._id, customer.businessEmail, customer.role);
-
-    res.status(201).json({
-      success: true,
-      message: 'Registration successful',
-      customer: {
-        id: customer._id,
-        companyName: customer.companyName,
-        username: customer.username,
-        businessEmail: customer.businessEmail,
-        domain: customer.domain,
-        role: customer.role,
-        resellerCode: customer.resellerCode,
-      },
-      token,
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { businessEmail, password } = req.body;
-
-    const emailLc = (businessEmail || '').trim().toLowerCase();
-    // case-insensitive lookup so accounts created with any casing still log in
-    let customer = await Customer.findOne({ businessEmail: emailLc });
-    if (!customer) {
-      customer = await Customer.findOne({ businessEmail: new RegExp('^' + emailLc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
-    }
-    if (!customer) return res.status(404).json({ error: 'Customer not found' });
-
-    const isValid = await bcrypt.compare(password, customer.password);
-    if (!isValid) return res.status(401).json({ error: 'Invalid password' });
-
-    // Safeguard: the configured admin email is always admin (prevents lockout)
-    const adminEmail = (process.env.ADMIN_EMAIL || 'admin@gnbmentor.com').trim().toLowerCase();
-    const myEmail = (customer.businessEmail || '').trim().toLowerCase();
-    if (myEmail === adminEmail && customer.role !== 'admin') {
-      customer.role = 'admin';
-      // normalize stored email to lowercase so future lookups are consistent
-      customer.businessEmail = myEmail;
-    }
-
-    customer.lastLogin = new Date();
-    customer.lastLoginIp = getClientIp(req);
-    await customer.save();
-
-    const token = generateToken(customer._id, customer.businessEmail, customer.role || 'customer');
-
-    res.json({
-      success: true,
-      token,
-      customer: {
-        id: customer._id,
-        companyName: customer.companyName,
-        username: customer.username,
-        businessEmail: customer.businessEmail,
-        domain: customer.domain,
-        role: customer.role || 'customer',
-        resellerCode: customer.resellerCode,
-      },
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// One-time admin promotion by secret (diagnoses + fixes admin role).
-// Visit: /api/admin/fix-admin?secret=YOUR_JWT_SECRET&email=admin@gnbmentor.com
-app.get('/api/admin/fix-admin', async (req, res) => {
-  try {
-    const { secret, email } = req.query;
-    if (!secret || secret !== process.env.JWT_SECRET) {
-      return res.status(403).json({ error: 'Invalid secret.' });
-    }
-    const target = (email || process.env.ADMIN_EMAIL || 'admin@gnbmentor.com').trim().toLowerCase();
-    const customer = await Customer.findOne({
-      businessEmail: new RegExp('^' + target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i'),
-    });
-    if (!customer) {
-      const all = await Customer.find().select('businessEmail role').limit(50);
-      return res.status(404).json({
-        error: 'No account found with that email.',
-        searchedFor: target,
-        existingAccounts: all.map((c) => ({ email: c.businessEmail, role: c.role })),
-      });
-    }
-    customer.role = 'admin';
-    customer.businessEmail = target;
-    await customer.save();
-    res.json({ success: true, message: `${target} is now admin. Log out and log back in.`, role: customer.role });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Who am I (role, domain) — used by frontend to route admin vs customer
-app.get('/api/auth/me', authenticateCustomer, async (req, res) => {
-  try {
-    const me = await Customer.findById(req.customerId).select('-password');
-    if (!me) return res.status(404).json({ error: 'Not found' });
-    res.json({
-      id: me._id,
-      companyName: me.companyName,
-      username: me.username,
-      businessEmail: me.businessEmail,
-      domain: me.domain,
-      role: me.role || 'customer',
-      resellerCode: me.resellerCode,
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ==================== CUSTOMER SELF-SERVICE ====================
-// Update own profile (username / email)
-app.patch('/api/customer/profile', authenticateCustomer, async (req, res) => {
-  try {
-    const { username, businessEmail } = req.body;
-    const me = await Customer.findById(req.customerId);
-    if (!me) return res.status(404).json({ error: 'Not found' });
-
-    if (businessEmail && businessEmail.toLowerCase() !== me.businessEmail) {
-      const taken = await Customer.findOne({ businessEmail: businessEmail.toLowerCase() });
-      if (taken) return res.status(400).json({ error: 'That email is already in use.' });
-      me.businessEmail = businessEmail.toLowerCase();
-    }
-    if (username) me.username = username;
-    await me.save();
-    res.json({ success: true, username: me.username, businessEmail: me.businessEmail });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Change own password (must provide current password)
-app.post('/api/customer/change-password', authenticateCustomer, async (req, res) => {
-  try {
-    const { currentPassword, newPassword } = req.body;
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: 'New password must be at least 6 characters.' });
-    }
-    const me = await Customer.findById(req.customerId);
-    if (!me) return res.status(404).json({ error: 'Not found' });
-    const ok = await bcrypt.compare(currentPassword || '', me.password);
-    if (!ok) return res.status(401).json({ error: 'Current password is incorrect.' });
-    me.password = await bcrypt.hash(newPassword, 10);
-    await me.save();
-    res.json({ success: true, message: 'Password changed.' });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Customer's OWN subscriptions (isolated to their domain only)
-app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res) => {
-  try {
-    const me = await Customer.findById(req.customerId);
-    if (!me) return res.status(404).json({ error: 'Not found' });
-    if (!me.domain) return res.json({ subscriptions: [], domain: null, note: 'No domain linked to your account yet.' });
-
-    // Look up this domain on the correct reseller account
-    const account = (me.account || 'pk');
-    let auth;
-    try {
-      auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
-    } catch (e) {
-      return res.status(400).json({ error: 'Reseller not connected for your account.' });
-    }
-    const reseller = google.reseller({ version: 'v1', auth });
-
-    let subs = [];
-    try {
-      const resp = await reseller.subscriptions.list({ customerId: me.domain });
-      subs = resp.data.subscriptions || [];
-    } catch (e) {
-      if (e?.code === 404) return res.json({ subscriptions: [], domain: me.domain });
-      throw e;
-    }
-
-    const rows = subs.map((s) => ({
-      domain: s.customerDomain || me.domain,
-      skuId: s.skuId,
-      skuName: s.skuName || s.skuId,
-      planName: s.plan?.planName,
-      seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
-      status: s.status,
-      creationTime: s.creationTime ? Number(s.creationTime) : null,
-    }));
-    res.json({ subscriptions: rows, domain: me.domain });
-  } catch (e) {
-    const msg = e?.errors?.[0]?.message || e?.message || 'Could not load your subscriptions.';
-    res.status(500).json({ error: msg });
-  }
-});
-
-// ==================== ADMIN: CUSTOMERS VIEW ====================
-// List all portal customers with their info (admin only)
-app.get('/api/admin/customers', authenticateCustomer, requireAdmin, async (req, res) => {
-  try {
-    const customers = await Customer.find({ role: { $ne: 'admin' } })
-      .select('-password')
-      .sort({ createdAt: -1 });
-    const rows = customers.map((c) => ({
-      id: c._id,
-      companyName: c.companyName,
-      username: c.username,
-      email: c.businessEmail,
-      domain: c.domain,
-      account: c.account,
-      registrationIp: c.registrationIp,
-      lastLoginIp: c.lastLoginIp,
-      status: c.status,
-      createdAt: c.createdAt,
-      lastLogin: c.lastLogin,
-    }));
-    res.json({ customers: rows, total: rows.length });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Admin: reset a customer's portal password
-app.post('/api/admin/customers/:id/reset-password', authenticateCustomer, requireAdmin, async (req, res) => {
-  try {
-    const { newPassword } = req.body;
-    const pwd = newPassword && newPassword.length >= 6 ? newPassword : `Temp-${Math.random().toString(36).slice(2, 10)}`;
-    const c = await Customer.findById(req.params.id);
-    if (!c) return res.status(404).json({ error: 'Customer not found' });
-    c.password = await bcrypt.hash(pwd, 10);
-    await c.save();
-    res.json({ success: true, message: 'Password reset.', temporaryPassword: pwd });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ==================== SUPPORT TICKETS ====================
-// Customer: open a ticket
-app.post('/api/customer/tickets', authenticateCustomer, async (req, res) => {
-  try {
-    const { subject, message, priority } = req.body;
-    if (!subject || !message) return res.status(400).json({ error: 'Subject and message are required.' });
-    const me = await Customer.findById(req.customerId);
-    const ticket = await Ticket.create({
-      customerId: me._id,
-      customerEmail: me.businessEmail,
-      customerDomain: me.domain,
-      subject,
-      priority: ['low', 'normal', 'high'].includes(priority) ? priority : 'normal',
-      status: 'open',
-      messages: [{ fromRole: 'customer', fromName: me.username || me.businessEmail, body: message }],
-    });
-    res.status(201).json({ success: true, ticket });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Customer: list own tickets
-app.get('/api/customer/tickets', authenticateCustomer, async (req, res) => {
-  try {
-    const tickets = await Ticket.find({ customerId: req.customerId }).sort({ updatedAt: -1 });
-    res.json({ tickets });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Customer: reply to own ticket
-app.post('/api/customer/tickets/:id/reply', authenticateCustomer, async (req, res) => {
-  try {
-    const { message } = req.body;
-    const ticket = await Ticket.findOne({ _id: req.params.id, customerId: req.customerId });
-    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-    if (!message) return res.status(400).json({ error: 'Message required.' });
-    const me = await Customer.findById(req.customerId);
-    ticket.messages.push({ fromRole: 'customer', fromName: me.username || me.businessEmail, body: message });
-    if (ticket.status === 'resolved' || ticket.status === 'closed') ticket.status = 'open';
-    ticket.updatedAt = new Date();
-    await ticket.save();
-    res.json({ success: true, ticket });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Admin: list all tickets (optionally filter by status)
-app.get('/api/admin/tickets', authenticateCustomer, requireAdmin, async (req, res) => {
-  try {
-    const filter = {};
-    if (req.query.status) filter.status = req.query.status;
-    const tickets = await Ticket.find(filter).sort({ updatedAt: -1 });
-    const counts = {
-      open: await Ticket.countDocuments({ status: 'open' }),
-      in_progress: await Ticket.countDocuments({ status: 'in_progress' }),
-      resolved: await Ticket.countDocuments({ status: 'resolved' }),
-      closed: await Ticket.countDocuments({ status: 'closed' }),
+      setLoading(false);
     };
-    res.json({ tickets, counts });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+    loadMe();
+  }, [token]);
 
-// Admin: reply to a ticket
-app.post('/api/admin/tickets/:id/reply', authenticateCustomer, requireAdmin, async (req, res) => {
-  try {
-    const { message } = req.body;
-    const ticket = await Ticket.findById(req.params.id);
-    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-    if (!message) return res.status(400).json({ error: 'Message required.' });
-    const me = await Customer.findById(req.customerId);
-    ticket.messages.push({ fromRole: 'admin', fromName: me.username || 'Support', body: message });
-    if (ticket.status === 'open') ticket.status = 'in_progress';
-    ticket.updatedAt = new Date();
-    await ticket.save();
-    res.json({ success: true, ticket });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Admin: change ticket status (resolve / close / reopen)
-app.patch('/api/admin/tickets/:id/status', authenticateCustomer, requireAdmin, async (req, res) => {
-  try {
-    const { status } = req.body;
-    if (!['open', 'in_progress', 'resolved', 'closed'].includes(status)) {
-      return res.status(400).json({ error: 'Invalid status.' });
-    }
-    const ticket = await Ticket.findById(req.params.id);
-    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-    ticket.status = status;
-    ticket.updatedAt = new Date();
-    await ticket.save();
-    res.json({ success: true, ticket });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ==================== PAYMENTS ====================
-const FRONTEND_URL = process.env.CORS_ORIGIN || 'https://gworkspaceresellere.vercel.app';
-
-// Customer: create a checkout for an order (method = 'stripe' | 'nicky')
-app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
-  try {
-    const { orderId, method } = req.body;
-    const me = await Customer.findById(req.customerId);
-    const order = await WorkspaceOrder.findOne({ _id: orderId, customerId: req.customerId });
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
-
-    const amount = Number(order.monthlyTotal || 0);
-    if (!amount || amount <= 0) return res.status(400).json({ error: 'Order amount is invalid.' });
-
-    const payment = await Payment.create({
-      customerId: me._id,
-      customerEmail: me.businessEmail,
-      domain: order.organization?.domain,
-      orderId: order._id,
-      amount,
-      currency: 'USD',
-      method: method === 'nicky' ? 'nicky' : 'stripe',
-      status: 'pending',
-    });
-
-    // Human-readable description carrying the order number + what was bought
-    const orderDesc = `Order ${order.orderNumber} — ${order.plan?.name || order.type} (${order.seats || 1} seat${(order.seats || 1) === 1 ? '' : 's'}) for ${order.organization?.domain || ''}`;
-
-    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
-    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
-
-    if (payment.method === 'stripe') {
-      if (!process.env.STRIPE_SECRET_KEY) return res.status(500).json({ error: 'Stripe not configured.' });
-      const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-      const session = await stripe.checkout.sessions.create({
-        mode: 'payment',
-        line_items: [{
-          price_data: {
-            currency: 'usd',
-            product_data: { name: orderDesc },
-            unit_amount: Math.round(amount * 100),
-          },
-          quantity: 1,
-        }],
-        success_url: successUrl,
-        cancel_url: cancelUrl,
-        client_reference_id: String(payment._id),
-        metadata: { paymentId: String(payment._id), orderId: String(order._id), orderNumber: order.orderNumber },
-      });
-      payment.providerRef = session.id;
-      payment.checkoutUrl = session.url;
-      await payment.save();
-      return res.json({ checkoutUrl: session.url, paymentId: payment._id });
-    }
-
-    // ===== NICKY (crypto) =====
-    try {
-      const nickyUrl = await createNickyPayment({
-        amount,
-        currency: 'USD',
-        description: orderDesc,
-        orderNumber: order.orderNumber,
-        reference: String(payment._id),
-        billDescription: orderDesc,
-        customerEmail: me.businessEmail,
-        customerName: me.username || me.companyName || me.businessEmail,
-        redirectUrl: successUrl,
-        cancelUrl: cancelUrl,
-      });
-      payment.checkoutUrl = nickyUrl;
-      await payment.save();
-      return res.json({ checkoutUrl: nickyUrl, paymentId: payment._id });
-    } catch (e) {
-      return res.status(500).json({ error: 'Crypto checkout not available yet: ' + e.message });
-    }
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Nicky create-payment — fill exact endpoint/body from your Nicky Swagger / gnbmentor.com code.
-async function createNickyPayment({ amount, currency, description, orderNumber, reference, billDescription, customerEmail, customerName, redirectUrl, cancelUrl }) {
-  const token = process.env.NICKY_API_TOKEN;
-  if (!token) throw new Error('NICKY_API_TOKEN not set');
-  const base = process.env.NICKY_API_BASE || 'https://api-public.pay.nicky.me';
-  // The pricing/settlement asset id from your Nicky account (e.g. a USD or stablecoin asset id).
-  const assetId = process.env.NICKY_ASSET_ID || '';
-
-  // Real Nicky CreateForUser schema
-  const body = {
-    blockchainAssetId: assetId,
-    amountExpectedNative: Number(amount),
-    billDetails: {
-      invoiceReference: orderNumber || reference || '',
-      description: billDescription || description || '',
-    },
-    requester: {
-      email: customerEmail || '',
-      name: customerName || '',
-    },
-    sendNotification: true,
-    successUrl: redirectUrl,
-    cancelUrl: cancelUrl || redirectUrl,
+  const login = (email, token, userData) => {
+    setToken(token);
+    setUser(userData);
+    localStorage.setItem('token', token);
+    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
   };
 
-  const resp = await fetch(`${base}/api/public/PaymentRequestPublicApi/create`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-API-KEY': token },
-    body: JSON.stringify(body),
+  const logout = () => {
+    setToken(null);
+    setUser(null);
+    localStorage.removeItem('token');
+    delete axios.defaults.headers.common['Authorization'];
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, token, login, logout, loading }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+const useAuth = () => useContext(AuthContext);
+
+// ==================== LOGIN PAGE ====================
+const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
+  const { login } = useAuth();
+  const [activeTab, setActiveTab] = useState(startTab);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  // Login Form
+  const [loginForm, setLoginForm] = useState({
+    businessEmail: '',
+    password: '',
   });
-  if (!resp.ok) {
-    const t = await resp.text();
-    console.error('NICKY ERROR', resp.status, t);
-    throw new Error(`Nicky error ${resp.status}: ${t.slice(0, 300)}`);
-  }
-  const data = await resp.json();
-  console.log('NICKY RESPONSE:', JSON.stringify(data));
-  // Nicky checkout URL format (confirmed): https://pay.nicky.me/home?paymentId=<shortId>
-  const shortId = data.bill?.shortId || data.shortId || data.requestShortId;
-  const url =
-    data.checkoutUrl || data.url || data.paymentUrl || data.hostedUrl ||
-    (shortId ? `https://pay.nicky.me/home?paymentId=${shortId}` : null);
-  if (!url) {
-    throw new Error('Nicky created the request but no checkout URL was found. Response keys: ' + Object.keys(data).join(', ') + (shortId ? ` (shortId=${shortId})` : ''));
-  }
-  return url;
-}
 
-// Stripe webhook — confirms payment truly completed
-app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
-  try {
-    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-    const sig = req.headers['stripe-signature'];
-    let event;
-    if (process.env.STRIPE_WEBHOOK_SECRET) {
-      event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-    } else {
-      event = JSON.parse(req.body.toString());
-    }
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      const pid = session.metadata?.paymentId || session.client_reference_id;
-      if (pid) {
-        const payment = await Payment.findById(pid);
-        await markPaidAndProvision(payment);
-      }
-    }
-    res.json({ received: true });
-  } catch (e) {
-    res.status(400).send(`Webhook Error: ${e.message}`);
-  }
-});
+  // Register Form
+  const [registerForm, setRegisterForm] = useState({
+    companyName: '',
+    username: '',
+    domain: '',
+    businessEmail: '',
+    password: '',
+    phone: '',
+    country: '',
+    address: '',
+    taxId: '',
+  });
 
-// Mark a payment paid and auto-provision its Workspace order (pay-first flow)
-async function markPaidAndProvision(payment) {
-  if (!payment || payment.status === 'paid') return;
-  payment.status = 'paid';
-  payment.paidAt = new Date();
-  await payment.save();
-  // Auto-provision the linked Workspace order
-  try {
-    if (payment.orderId) {
-      const order = await WorkspaceOrder.findById(payment.orderId);
-      if (order && !order.googleProvisioned) {
-        await provisionWorkspaceOrder(order);
-        console.log('AUTO-PROVISIONED order', order.orderNumber);
-      }
-    }
-  } catch (e) {
-    console.error('AUTO-PROVISION FAILED for payment', String(payment._id), e.message);
-    // Payment stays 'paid'; admin can manually provision if auto fails. Don't throw (webhook must 200).
-  }
-}
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
 
-// Nicky webhook — Nicky notifies us when crypto payment completes
-app.post('/api/webhooks/nicky', async (req, res) => {
-  try {
-    console.log('NICKY WEBHOOK:', JSON.stringify(req.body));  // log payload to confirm/adjust fields
-    // Nicky sends the bill/payment info. invoiceReference = our order number; also try our payment id.
-    const b = req.body || {};
-    const invoiceRef = b.invoiceReference || b.bill?.invoiceReference || b.reference;
-    const status = (b.status || b.bill?.status || '').toString().toLowerCase();
-    const paid = /paid|completed|success|confirmed/.test(status);
-
-    if (paid) {
-      let payment = null;
-      // Match by order number (invoiceReference) first
-      if (invoiceRef) {
-        const order = await WorkspaceOrder.findOne({ orderNumber: invoiceRef });
-        if (order) payment = await Payment.findOne({ orderId: order._id }).sort({ createdAt: -1 });
-      }
-      // Fallback: maybe reference is our payment id
-      if (!payment && invoiceRef) {
-        try { payment = await Payment.findById(invoiceRef); } catch (_) { }
-      }
-      await markPaidAndProvision(payment);
-    }
-    res.json({ received: true });
-  } catch (e) {
-    console.error('NICKY WEBHOOK ERROR', e.message);
-    res.json({ received: true }); // always 200 so Nicky doesn't retry-storm
-  }
-});
-
-// Payment status (customer polls after returning from checkout)
-app.get('/api/customer/payment/:id', authenticateCustomer, async (req, res) => {
-  try {
-    const payment = await Payment.findOne({ _id: req.params.id, customerId: req.customerId });
-    if (!payment) return res.status(404).json({ error: 'Payment not found.' });
-    res.json({ status: payment.status, amount: payment.amount, method: payment.method });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Customer: list own payments
-app.get('/api/customer/payments', authenticateCustomer, async (req, res) => {
-  try {
-    const payments = await Payment.find({ customerId: req.customerId }).sort({ createdAt: -1 });
-    res.json({ payments });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Admin: payment settings (which methods enabled) + which keys are configured
-app.get('/api/admin/payment-settings', authenticateCustomer, requireAdmin, async (req, res) => {
-  try {
-    let s = await PaymentSettings.findOne({ singleton: 'main' });
-    if (!s) s = await PaymentSettings.create({ singleton: 'main' });
-    res.json({
-      stripeEnabled: s.stripeEnabled,
-      nickyEnabled: s.nickyEnabled,
-      currency: s.currency,
-      stripeConfigured: !!process.env.STRIPE_SECRET_KEY,
-      stripeWebhookConfigured: !!process.env.STRIPE_WEBHOOK_SECRET,
-      nickyConfigured: !!process.env.NICKY_API_TOKEN,
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.patch('/api/admin/payment-settings', authenticateCustomer, requireAdmin, async (req, res) => {
-  try {
-    let s = await PaymentSettings.findOne({ singleton: 'main' });
-    if (!s) s = await PaymentSettings.create({ singleton: 'main' });
-    const { stripeEnabled, nickyEnabled, currency } = req.body;
-    if (stripeEnabled !== undefined) s.stripeEnabled = !!stripeEnabled;
-    if (nickyEnabled !== undefined) s.nickyEnabled = !!nickyEnabled;
-    if (currency) s.currency = currency;
-    s.updatedAt = new Date();
-    await s.save();
-    res.json({ success: true, stripeEnabled: s.stripeEnabled, nickyEnabled: s.nickyEnabled, currency: s.currency });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Admin: all payments
-app.get('/api/admin/payments', authenticateCustomer, requireAdmin, async (req, res) => {
-  try {
-    const payments = await Payment.find().sort({ createdAt: -1 }).limit(500);
-    const totalPaid = payments.filter(p => p.status === 'paid').reduce((s, p) => s + (p.amount || 0), 0);
-    res.json({ payments, totalPaid, count: payments.length });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// PRODUCTS & PRICING (DB-backed, editable via /api/admin/plans)
-app.get('/api/products', async (req, res) => {
-  try {
-    const plans = await Plan.find({ active: true }).sort({ category: 1, sortOrder: 1 });
-    const shape = (cat) =>
-      plans
-        .filter((p) => p.category === cat)
-        .map((p) => ({ id: p.planId, name: p.name, monthlyPrice: p.monthlyPrice, features: p.features }));
-    res.json({ workspace: shape('workspace'), voice: shape('voice'), addons: shape('addon') });
-  } catch (error) {
-    res.status(500).json({ error: 'Could not load products' });
-  }
-});
-
-// ADMIN: manage plans/prices
-app.get('/api/admin/plans', async (req, res) => {
-  try {
-    const plans = await Plan.find().sort({ category: 1, sortOrder: 1 });
-    res.json(plans);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/admin/plans', authenticateCustomer, requireAdmin, async (req, res) => {
-  try {
-    const plan = await Plan.create(req.body);
-    res.json(plan);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-app.put('/api/admin/plans/:id', authenticateCustomer, requireAdmin, async (req, res) => {
-  try {
-    const plan = await Plan.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!plan) return res.status(404).json({ error: 'Plan not found' });
-    res.json(plan);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-app.delete('/api/admin/plans/:id', authenticateCustomer, requireAdmin, async (req, res) => {
-  try {
-    await Plan.findByIdAndDelete(req.params.id);
-    res.json({ deleted: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// WORKSPACE ORDERS (Stage 1 customer order intake)
-app.post('/api/workspace-orders', authenticateCustomer, async (req, res) => {
-  try {
-    const body = req.body || {};
-    if (!body.organization?.domain || !body.plan?.id || !body.seats) {
-      return res.status(400).json({ error: 'Missing required order fields' });
-    }
-    const orderNumber = `WS-${Date.now()}`;
-    const order = await WorkspaceOrder.create({
-      customerId: req.customerId,
-      orderNumber,
-      type: 'workspace',
-      plan: body.plan,
-      seats: body.seats,
-      monthlyTotal: body.monthlyTotal,
-      organization: body.organization,
-      contact: body.contact,
-      status: 'pending',
-    });
-
-    // Link this domain to the customer's account so their "My Subscriptions" can find it
     try {
-      const dom = (body.organization.domain || '').toLowerCase().trim();
-      if (dom) {
-        await Customer.findByIdAndUpdate(req.customerId, { domain: dom });
-      }
-    } catch (_) { }
-
-    res.json({ orderNumber: order.orderNumber, id: order._id, status: order.status });
-  } catch (error) {
-    res.status(500).json({ error: 'Could not create order' });
-  }
-});
-
-app.get('/api/workspace-orders', authenticateCustomer, async (req, res) => {
-  try {
-    const orders = await WorkspaceOrder.find({ customerId: req.customerId }).sort({ createdAt: -1 });
-    res.json(orders);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Check whether a domain is already taken (DB-level now; Google API check added in Stage 2c)
-app.get('/api/workspace-orders/check-domain/:domain', authenticateCustomer, async (req, res) => {
-  try {
-    const domain = (req.params.domain || '').toLowerCase().trim();
-    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain)) {
-      return res.status(400).json({ available: false, reason: 'invalid', message: 'Enter a valid domain (e.g. example.com).' });
+      const response = await axios.post(`${API_URL}/auth/login`, loginForm);
+      const { token, customer } = response.data;
+      login(customer.businessEmail, token, customer);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Login failed');
+    } finally {
+      setLoading(false);
     }
-    // Has this domain already been ordered through this portal?
-    const existing = await WorkspaceOrder.findOne({ 'organization.domain': domain });
-    if (existing) {
-      return res.json({
-        available: false,
-        reason: 'taken',
-        message: 'This domain already has a Workspace order. Use the existing customer to purchase add-ons.',
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    try {
+      const response = await axios.post(`${API_URL}/auth/register`, registerForm);
+      const { token, customer } = response.data;
+      login(customer.businessEmail, token, customer);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Registration failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-container">
+      <div className="auth-card">
+        <div className="auth-header">
+          <h1>🚀 Google Workspace Portal</h1>
+          <p>Reseller Management Platform</p>
+        </div>
+
+        <div className="auth-tabs">
+          <button
+            className={`tab ${activeTab === 'login' ? 'active' : ''}`}
+            onClick={() => setActiveTab('login')}
+          >
+            Login
+          </button>
+          {!adminMode && (
+            <button
+              className={`tab ${activeTab === 'register' ? 'active' : ''}`}
+              onClick={() => setActiveTab('register')}
+            >
+              Register
+            </button>
+          )}
+        </div>
+
+        {adminMode && (
+          <p style={{ textAlign: 'center', color: '#6b7280', fontSize: 13, margin: '8px 0 0' }}>
+            Administrator login
+          </p>
+        )}
+
+        {error && <div className="error-message">{error}</div>}
+
+        {activeTab === 'login' && (
+          <form onSubmit={handleLogin} className="auth-form">
+            <div className="form-group">
+              <label>Business Email</label>
+              <input
+                type="email"
+                placeholder="your@company.com"
+                value={loginForm.businessEmail}
+                onChange={(e) =>
+                  setLoginForm({ ...loginForm, businessEmail: e.target.value })
+                }
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Password</label>
+              <input
+                type="password"
+                placeholder="••••••••"
+                value={loginForm.password}
+                onChange={(e) =>
+                  setLoginForm({ ...loginForm, password: e.target.value })
+                }
+                required
+              />
+            </div>
+
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? 'Logging in...' : 'Login'}
+            </button>
+          </form>
+        )}
+
+        {activeTab === 'register' && (
+          <form onSubmit={handleRegister} className="auth-form">
+            <div className="form-row">
+              <div className="form-group">
+                <label>Company Name</label>
+                <input
+                  type="text"
+                  value={registerForm.companyName}
+                  onChange={(e) =>
+                    setRegisterForm({
+                      ...registerForm,
+                      companyName: e.target.value,
+                    })
+                  }
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Business Email</label>
+                <input
+                  type="email"
+                  value={registerForm.businessEmail}
+                  onChange={(e) =>
+                    setRegisterForm({
+                      ...registerForm,
+                      businessEmail: e.target.value,
+                    })
+                  }
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label>Phone</label>
+                <input
+                  type="tel"
+                  value={registerForm.phone}
+                  onChange={(e) =>
+                    setRegisterForm({
+                      ...registerForm,
+                      phone: e.target.value,
+                    })
+                  }
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Country</label>
+                <input
+                  type="text"
+                  value={registerForm.country}
+                  onChange={(e) =>
+                    setRegisterForm({
+                      ...registerForm,
+                      country: e.target.value,
+                    })
+                  }
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>Address</label>
+              <input
+                type="text"
+                value={registerForm.address}
+                onChange={(e) =>
+                  setRegisterForm({ ...registerForm, address: e.target.value })
+                }
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Tax ID</label>
+              <input
+                type="text"
+                value={registerForm.taxId}
+                onChange={(e) =>
+                  setRegisterForm({ ...registerForm, taxId: e.target.value })
+                }
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Password</label>
+              <input
+                type="password"
+                value={registerForm.password}
+                onChange={(e) =>
+                  setRegisterForm({ ...registerForm, password: e.target.value })
+                }
+                required
+              />
+            </div>
+
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? 'Creating Account...' : 'Create Account'}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ==================== DASHBOARD ====================
+const Dashboard = () => {
+  const { user, logout } = useAuth();
+  const [activeSection, setActiveSection] = useState('overview');
+  const [stats, setStats] = useState(null);
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  const fetchDashboard = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/dashboard`);
+      setStats(response.data);
+    } catch (error) {
+      console.error('Error fetching dashboard:', error);
+    }
+  };
+
+  return (
+    <div className="dashboard">
+      <nav className="sidebar">
+        <div className="sidebar-header">
+          <h2>📊 Workspace Portal</h2>
+          <p>{user?.companyName}</p>
+        </div>
+
+        <ul className="sidebar-menu">
+          <li>
+            <button
+              className={`menu-item ${activeSection === 'overview' ? 'active' : ''}`}
+              onClick={() => setActiveSection('overview')}
+            >
+              📈 Overview
+            </button>
+          </li>
+          <li>
+            <button
+              className={`menu-item ${activeSection === 'order-workspace' ? 'active' : ''}`}
+              onClick={() => setActiveSection('order-workspace')}
+            >
+              ✨ Order Workspace
+            </button>
+          </li>
+          <li>
+            <button
+              className={`menu-item ${activeSection === 'products' ? 'active' : ''}`}
+              onClick={() => setActiveSection('products')}
+            >
+              📦 Products
+            </button>
+          </li>
+          <li>
+            <button
+              className={`menu-item ${activeSection === 'orders' ? 'active' : ''}`}
+              onClick={() => setActiveSection('orders')}
+            >
+              🛒 Orders
+            </button>
+          </li>
+          <li>
+            <button
+              className={`menu-item ${activeSection === 'subs-pk' ? 'active' : ''}`}
+              onClick={() => setActiveSection('subs-pk')}
+            >
+              🇵🇰 Pakistan Workspace
+            </button>
+          </li>
+          <li>
+            <button
+              className={`menu-item ${activeSection === 'subs-usa' ? 'active' : ''}`}
+              onClick={() => setActiveSection('subs-usa')}
+            >
+              🇺🇸 USA Voice
+            </button>
+          </li>
+          <li>
+            <button
+              className={`menu-item ${activeSection === 'customers' ? 'active' : ''}`}
+              onClick={() => setActiveSection('customers')}
+            >
+              👥 Customers
+            </button>
+          </li>
+          <li>
+            <button
+              className={`menu-item ${activeSection === 'tickets' ? 'active' : ''}`}
+              onClick={() => setActiveSection('tickets')}
+            >
+              🎫 Tickets
+            </button>
+          </li>
+          <li>
+            <button
+              className={`menu-item ${activeSection === 'payments' ? 'active' : ''}`}
+              onClick={() => setActiveSection('payments')}
+            >
+              💳 Payments
+            </button>
+          </li>
+        </ul>
+
+        <button onClick={logout} className="btn btn-logout">
+          🚪 Logout
+        </button>
+      </nav>
+
+      <main className="dashboard-content">
+        {activeSection === 'overview' && <OverviewSection stats={stats} />}
+        {activeSection === 'order-workspace' && <WorkspaceOrderFlow />}
+        {activeSection === 'products' && <ProductsSection />}
+        {activeSection === 'orders' && <OrdersSection />}
+        {activeSection === 'subs-pk' && <SubscriptionsSection account="PK" />}
+        {activeSection === 'subs-usa' && <SubscriptionsSection account="USA" />}
+        {activeSection === 'customers' && <AdminCustomersSection />}
+        {activeSection === 'tickets' && <AdminTicketsSection />}
+        {activeSection === 'payments' && <AdminPaymentsSection />}
+      </main>
+    </div>
+  );
+};
+
+// ==================== OVERVIEW SECTION ====================
+const OverviewSection = ({ stats }) => {
+  const [live, setLive] = useState(null);
+  const [liveErr, setLiveErr] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await axios.get(`${API_URL}/admin/google/dashboard`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        setLive(res.data);
+      } catch (e) {
+        setLiveErr(e?.response?.data?.error || 'Could not load live Google data.');
+      }
+    })();
+  }, []);
+
+  if (!stats) return <div className="loading">Loading...</div>;
+
+  return (
+    <div className="section">
+      <h2>Dashboard Overview</h2>
+
+      {liveErr && <div style={{ background: '#fff7ed', color: '#9a3412', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{liveErr}</div>}
+
+      <div className="stats-grid">
+        <div className="stat-card">
+          <h3>Customers (Google)</h3>
+          <p className="stat-value">{live ? live.totalCustomers : '…'}</p>
+        </div>
+
+        <div className="stat-card">
+          <h3>Active Subscriptions</h3>
+          <p className="stat-value">{live ? live.activeSubscriptions : '…'}</p>
+        </div>
+
+        <div className="stat-card">
+          <h3>Total Seats</h3>
+          <p className="stat-value">{live ? live.totalSeats : '…'}</p>
+        </div>
+
+        <div className="stat-card">
+          <h3>All Subscriptions</h3>
+          <p className="stat-value">{live ? live.totalSubscriptions : '…'}</p>
+        </div>
+
+        <div className="stat-card">
+          <h3>Suspended</h3>
+          <p className="stat-value">{live ? live.suspendedSubscriptions : '…'}</p>
+        </div>
+
+        <div className="stat-card">
+          <h3>Reseller Code</h3>
+          <p className="stat-value code">{stats.customerInfo.resellerCode}</p>
+        </div>
+      </div>
+
+      <div className="recent-orders">
+        <h3>Recent Orders</h3>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Order #</th>
+              <th>Date</th>
+              <th>Amount</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stats.recentOrders.map((order) => (
+              <tr key={order._id}>
+                <td>{order.orderNumber}</td>
+                <td>{new Date(order.createdAt).toLocaleDateString()}</td>
+                <td>${order.totalAmount.toFixed(2)}</td>
+                <td>
+                  <span className={`status ${order.status}`}>{order.status}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+// ==================== PRODUCTS SECTION ====================
+const ProductsSection = () => {
+  const [plans, setPlans] = useState(null);
+  const [editing, setEditing] = useState(null); // plan being edited (or 'new')
+  const [form, setForm] = useState({ planId: '', category: 'workspace', name: '', monthlyPrice: 0, skuId: '', features: '', active: true, sortOrder: 0 });
+  const [msg, setMsg] = useState('');
+
+  const load = async () => {
+    try { const res = await axios.get(`${API_URL}/admin/plans`); setPlans(res.data); }
+    catch (_) { try { const r = await axios.get(`${API_URL}/products`); setPlans([...(r.data.workspace || []), ...(r.data.voice || []), ...(r.data.addon || [])]); } catch (__) { setPlans([]); } }
+  };
+  useEffect(() => { load(); }, []);
+
+  const startNew = () => {
+    setForm({ planId: '', category: 'workspace', name: '', monthlyPrice: 0, skuId: '', features: '', active: true, sortOrder: 0 });
+    setEditing('new');
+  };
+  const startEdit = (p) => {
+    setForm({
+      planId: p.planId || '', category: p.category || 'workspace', name: p.name || '',
+      monthlyPrice: p.monthlyPrice ?? 0, skuId: p.skuId || '',
+      features: (p.features || []).join(', '), active: p.active !== false, sortOrder: p.sortOrder || 0,
+    });
+    setEditing(p._id || p.id);
+  };
+
+  const save = async () => {
+    setMsg('');
+    const payload = {
+      planId: form.planId.trim(),
+      category: form.category,
+      name: form.name.trim(),
+      monthlyPrice: Number(form.monthlyPrice),
+      skuId: form.skuId.trim(),
+      features: form.features ? form.features.split(',').map(s => s.trim()).filter(Boolean) : [],
+      active: !!form.active,
+      sortOrder: Number(form.sortOrder) || 0,
+    };
+    if (!payload.planId || !payload.name) { setMsg('Plan ID and Name are required.'); return; }
+    try {
+      if (editing === 'new') await axios.post(`${API_URL}/admin/plans`, payload);
+      else await axios.put(`${API_URL}/admin/plans/${editing}`, payload);
+      setMsg('✓ Saved.'); setEditing(null); load();
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not save.'); }
+  };
+
+  const remove = async (id) => {
+    if (!window.confirm('Delete this plan? Customers will no longer see it.')) return;
+    try { await axios.delete(`${API_URL}/admin/plans/${id}`); load(); }
+    catch (e) { setMsg(e?.response?.data?.error || 'Could not delete.'); }
+  };
+
+  const inp = { width: '100%', height: 38, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 10 };
+  if (!plans) return <div className="loading">Loading plans…</div>;
+
+  return (
+    <div className="section">
+      <h2>📦 Products & Pricing</h2>
+      <p style={{ color: '#5b6075' }}>Set the prices customers see. Changes apply immediately to the customer portal and landing page.</p>
+      {msg && <div style={{ background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 14 }}>{msg}</div>}
+
+      <button className="btn btn-primary" onClick={startNew} style={{ marginBottom: 16 }}>+ Add product</button>
+
+      {editing && (
+        <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 18, marginBottom: 20 }}>
+          <h3 style={{ marginTop: 0 }}>{editing === 'new' ? 'New product' : 'Edit product'}</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 13 }}>Plan ID (unique, e.g. "starter")</label>
+              <input style={inp} value={form.planId} onChange={e => setForm({ ...form, planId: e.target.value })} disabled={editing !== 'new'} />
+            </div>
+            <div>
+              <label style={{ fontSize: 13 }}>Category</label>
+              <select style={inp} value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
+                <option value="workspace">Workspace</option>
+                <option value="voice">Voice</option>
+                <option value="addon">Add-on</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 13 }}>Display name</label>
+              <input style={inp} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+            </div>
+            <div>
+              <label style={{ fontSize: 13 }}>Price (USD / user / month)</label>
+              <input type="number" step="0.01" style={inp} value={form.monthlyPrice} onChange={e => setForm({ ...form, monthlyPrice: e.target.value })} />
+            </div>
+            <div>
+              <label style={{ fontSize: 13 }}>Google SKU ID</label>
+              <input style={inp} value={form.skuId} onChange={e => setForm({ ...form, skuId: e.target.value })} placeholder="e.g. 1010020027" />
+            </div>
+            <div>
+              <label style={{ fontSize: 13 }}>Sort order</label>
+              <input type="number" style={inp} value={form.sortOrder} onChange={e => setForm({ ...form, sortOrder: e.target.value })} />
+            </div>
+          </div>
+          <label style={{ fontSize: 13 }}>Features (comma-separated)</label>
+          <input style={inp} value={form.features} onChange={e => setForm({ ...form, features: e.target.value })} placeholder="30 GB storage, Custom email, Video meetings" />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Active (visible to customers)
+          </label>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn btn-primary" onClick={save}>Save</button>
+            <button className="btn btn-secondary" onClick={() => setEditing(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <table className="data-table">
+        <thead><tr><th>Name</th><th>Category</th><th>Price/mo</th><th>SKU</th><th>Active</th><th>Actions</th></tr></thead>
+        <tbody>
+          {plans.length === 0 ? <tr><td colSpan="6">No plans yet. Click "Add product".</td></tr> :
+            plans.map(p => (
+              <tr key={p._id || p.id}>
+                <td>{p.name}</td>
+                <td>{p.category}</td>
+                <td>${Number(p.monthlyPrice ?? 0).toFixed(2)}</td>
+                <td style={{ fontSize: 12 }}>{p.skuId || '—'}</td>
+                <td>{p.active === false ? 'No' : 'Yes'}</td>
+                <td>
+                  <button className="btn btn-secondary" onClick={() => startEdit(p)}>Edit</button>
+                  {' '}
+                  <button className="btn btn-secondary" onClick={() => remove(p._id || p.id)} style={{ color: '#b42318' }}>Delete</button>
+                </td>
+              </tr>
+            ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+// ==================== CHECKOUT MODAL ====================
+const CheckoutModal = ({ items }) => {
+  const [showModal, setShowModal] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('stripe');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleCheckout = async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const orderItems = items.map((item) => ({
+        productType: item.productType,
+        productName: item.name,
+        quantity: item.quantity,
+        monthlyPrice: item.monthlyPrice,
+        totalPrice: item.monthlyPrice * item.quantity,
+      }));
+
+      const totalAmount = orderItems.reduce((sum, item) => sum + item.totalPrice, 0);
+
+      const response = await axios.post(`${API_URL}/orders`, {
+        items: orderItems,
+        paymentMethod,
       });
-    }
 
-    // Ask Google: does this domain already have a Workspace customer on our reseller account?
+      alert(`Order placed successfully! Order #${response.data.order.orderNumber}`);
+      setShowModal(false);
+      window.location.reload();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Checkout failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        className="btn btn-primary"
+        onClick={() => setShowModal(true)}
+        style={{ width: '100%' }}
+      >
+        Proceed to Checkout
+      </button>
+
+      {showModal && (
+        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Checkout</h3>
+            {error && <div className="error-message">{error}</div>}
+
+            <div className="form-group">
+              <label>Payment Method</label>
+              <select
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+              >
+                <option value="stripe">Credit Card (Stripe)</option>
+                <option value="paypal">PayPal</option>
+                <option value="bank">Bank Transfer</option>
+              </select>
+            </div>
+
+            <div className="modal-actions">
+              <button
+                className="btn btn-primary"
+                onClick={handleCheckout}
+                disabled={loading}
+              >
+                {loading ? 'Processing...' : 'Complete Order'}
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowModal(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+// ==================== ORDERS SECTION ====================
+const OrdersSection = () => {
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchOrders();
+  }, []);
+
+  const fetchOrders = async () => {
     try {
-      const auth = await getResellerAuth();
-      const reseller = google.reseller({ version: 'v1', auth });
-      // customers.get with a domain returns the customer if it exists, else 404
-      await reseller.customers.get({ customerId: domain });
-      // If we got here, the customer EXISTS on Google -> domain already has Workspace
-      return res.json({
-        available: false,
-        reason: 'google_taken',
-        message: 'This domain already has Google Workspace. Please use a different domain.',
+      const response = await axios.get(`${API_URL}/orders`);
+      setOrders(response.data);
+    } catch (error) {
+      console.error('Error fetching orders:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) return <div className="loading">Loading orders...</div>;
+
+  return (
+    <div className="section">
+      <h2>🛒 Orders</h2>
+
+      {orders.length === 0 ? (
+        <p>No orders yet.</p>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Order #</th>
+              <th>Date</th>
+              <th>Items</th>
+              <th>Amount</th>
+              <th>Payment</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.map((order) => (
+              <tr key={order._id}>
+                <td>{order.orderNumber}</td>
+                <td>{new Date(order.createdAt).toLocaleDateString()}</td>
+                <td>{order.items.length}</td>
+                <td>${order.totalAmount.toFixed(2)}</td>
+                <td>
+                  <span className={`status ${order.paymentStatus}`}>
+                    {order.paymentStatus}
+                  </span>
+                </td>
+                <td>
+                  <span className={`status ${order.status}`}>{order.status}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+};
+
+// ==================== SUBSCRIPTIONS SECTION (per-account, paginated) ====================
+const SubscriptionsSection = ({ account = 'PK' }) => {
+  const [rows, setRows] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [notConnected, setNotConnected] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [voicePlans, setVoicePlans] = useState([]);
+  const [vForm, setVForm] = useState({ domain: '', voicePlanId: '', seats: 1 });
+  const [vMsg, setVMsg] = useState('');
+  const [vBusy, setVBusy] = useState(false);
+
+  const isUSA = account === 'USA';
+
+  useEffect(() => { setPage(1); }, [account]);
+  useEffect(() => { fetchSubs(); }, [account, page]);
+  useEffect(() => { if (isUSA) fetchVoicePlans(); }, [isUSA]);
+
+  const fetchVoicePlans = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/products`);
+      const v = res.data.voice || [];
+      setVoicePlans(v);
+      if (v.length) setVForm((f) => ({ ...f, voicePlanId: v[0].id }));
+    } catch (_) { }
+  };
+
+  const fetchSubs = async () => {
+    setLoading(true); setError(''); setNotConnected(false);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API_URL}/admin/google/subscriptions?account=${account}&page=${page}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-    } catch (gErr) {
-      const code = gErr?.code || gErr?.response?.status;
-      if (code === 404) {
-        // 404 = no customer for this domain on Google -> it's free to use
-        return res.json({ available: true, message: 'Domain is available.' });
-      }
-      if (String(gErr.message || '').includes('not connected')) {
-        // Google not connected — fall back to DB-only result (don't hard-block)
-        return res.json({ available: true, message: 'Domain is available (Google check unavailable).' });
-      }
-      // Other Google errors: be safe, let them proceed but note it
-      return res.json({ available: true, message: 'Domain is available.' });
+      setRows(res.data.subscriptions || []);
+      setSummary(res.data.summary || null);
+      setTotalPages(res.data.totalPages || 1);
+    } catch (e) {
+      if (e?.response?.data?.notConnected) setNotConnected(true);
+      setError(e?.response?.data?.error || 'Could not load subscriptions from Google.');
+    } finally {
+      setLoading(false);
     }
-  } catch (error) {
-    res.status(500).json({ available: false, reason: 'error', message: 'Could not check domain right now.' });
-  }
-});
+  };
 
-// Get one workspace order (for the verification screen)
-app.get('/api/workspace-orders/:id', authenticateCustomer, async (req, res) => {
-  try {
-    const order = await WorkspaceOrder.findOne({ _id: req.params.id, customerId: req.customerId });
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    res.json(order);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get (or create) the domain verification TXT record for an order
-app.get('/api/workspace-orders/:id/verification', authenticateCustomer, async (req, res) => {
-  try {
-    const order = await WorkspaceOrder.findOne({ _id: req.params.id, customerId: req.customerId });
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    if (!order.txtRecord) {
-      // Generate a verification token (placeholder format until Stage 2c wires real Google verification)
-      order.txtRecord = `google-site-verification=${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-      order.status = 'domain_verification';
-      await order.save();
-    }
-    res.json({
-      domain: order.organization?.domain,
-      txtRecord: order.txtRecord,
-      verified: order.domainVerified,
-      status: order.status,
-      steps: [
-        'Open admin.google.com and start setup for your domain',
-        'Add the TXT record below to your domain DNS (at your registrar)',
-        'Wait for DNS to propagate (can take minutes to a few hours)',
-        'Verify the domain in the Google Admin console',
-        'Come back here and mark it verified',
-      ],
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Mark the domain verified (customer confirms after verifying at admin.google.com)
-// NOTE: In Stage 2c this will actually CHECK with Google. For now it records the customer's confirmation.
-app.post('/api/workspace-orders/:id/verify', authenticateCustomer, async (req, res) => {
-  try {
-    const order = await WorkspaceOrder.findOne({ _id: req.params.id, customerId: req.customerId });
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    order.domainVerified = true;
-    if (order.status !== 'provisioned') order.status = 'domain_verification';
-    await order.save();
-    res.json({ success: true, domainVerified: true, status: order.status });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ==================== GOOGLE OAUTH CONNECTION (Stage 2c) ====================
-
-// Step A: Admin starts the connect flow -> redirects to Google sign-in
-app.get('/api/google/connect', (req, res) => {
-  try {
-    if (!process.env.GOOGLE_OAUTH_CLIENT_ID) {
-      return res.status(500).send('Google OAuth not configured. Set GOOGLE_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI.');
-    }
-    const oauth2 = makeOAuthClient();
-    const url = oauth2.generateAuthUrl({
-      access_type: 'offline',     // get a refresh token
-      prompt: 'consent',          // force refresh token on every connect
-      scope: RESELLER_SCOPES,
-    });
-    res.redirect(url);
-  } catch (e) {
-    res.status(500).send('Could not start Google connection: ' + e.message);
-  }
-});
-
-// Step B: Google redirects back here with a code -> exchange for tokens, store them
-app.get('/api/google/callback', async (req, res) => {
-  try {
-    const { code } = req.query;
-    if (!code) return res.status(400).send('Missing authorization code.');
-    const oauth2 = makeOAuthClient();
-    const { tokens } = await oauth2.getToken(code);
-    oauth2.setCredentials(tokens);
-
-    // Find out which account connected
-    let email = '';
+  const addVoice = async () => {
+    if (!vForm.domain || !vForm.voicePlanId) { setVMsg('Pick a domain and a Voice plan.'); return; }
+    setVBusy(true); setVMsg('');
     try {
-      const oauth2api = google.oauth2({ version: 'v2', auth: oauth2 });
-      const info = await oauth2api.userinfo.get();
-      email = info.data.email || '';
-    } catch (_) { }
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API_URL}/admin/add-voice`, vForm, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      setVMsg('✓ ' + (res.data.message || 'Voice added.') + ' It may take a few minutes to appear in Google.');
+      fetchSubs();
+    } catch (e) {
+      setVMsg(e?.response?.data?.error || 'Could not add Voice.');
+    } finally { setVBusy(false); }
+  };
 
-    // Upsert the Pakistan connection record
-    let conn = await GoogleConnection.findOne({ account: 'pk' });
-    if (!conn) conn = new GoogleConnection({ account: 'pk' });
-    if (tokens.refresh_token) conn.refreshToken = tokens.refresh_token;
-    conn.accessToken = tokens.access_token;
-    conn.tokenExpiry = tokens.expiry_date ? new Date(tokens.expiry_date) : null;
-    conn.connectedEmail = email;
-    conn.scopes = RESELLER_SCOPES;
-    conn.name = 'Pakistan Reseller';
-    conn.active = true;
-    await conn.save();
+  // USA Voice eligibility: USA-account domains without a Voice sub yet
+  const voiceSkus = ['1010330003', '1010330004', '1010330002', '1010330005', '1010330006'];
+  const domainsWithVoice = new Set(rows.filter(r => voiceSkus.includes(String(r.skuId))).map(r => r.domain));
+  const eligibleDomains = [...new Set(rows.map(r => r.domain))].filter(d => !domainsWithVoice.has(d));
 
-    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px">
-      <h2>✅ Pakistan reseller connected</h2>
-      <p>Connected as <b>${email || 'your reseller account'}</b>.</p>
-      <p>You can close this tab and return to your portal.</p>
-      </body></html>`);
-  } catch (e) {
-    res.status(500).send('Google connection failed: ' + e.message);
+  const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString() : '—';
+  const planLabel = (p) => ({
+    FLEXIBLE: 'Flexible (monthly)',
+    ANNUAL_MONTHLY_PAY: 'Annual (monthly pay)',
+    ANNUAL_YEARLY_PAY: 'Annual (yearly pay)',
+    TRIAL: 'Trial', FREE: 'Free',
+  }[p] || p || '—');
+
+  const title = isUSA ? '🇺🇸 USA Voice Subscriptions' : '🇵🇰 Pakistan Workspace Subscriptions';
+
+  if (loading) return <div className="loading">Loading {isUSA ? 'USA' : 'Pakistan'} subscriptions from Google…</div>;
+
+  if (notConnected) {
+    return (
+      <div className="section">
+        <h2>{title}</h2>
+        <div style={{ background: '#fff7ed', color: '#9a3412', padding: '14px 16px', borderRadius: 10 }}>
+          {isUSA
+            ? 'USA reseller is not connected. Connect it by visiting /api/google/usa/connect on the backend.'
+            : 'Pakistan reseller is not connected.'}
+        </div>
+      </div>
+    );
   }
-});
 
-// ===== USA reseller OAuth (for Google Voice) =====
-app.get('/api/google/usa/connect', (req, res) => {
-  try {
-    if (!process.env.GOOGLE_OAUTH_CLIENT_ID_USA) {
-      return res.status(500).send('USA OAuth not configured. Set GOOGLE_OAUTH_CLIENT_ID_USA / SECRET_USA / REDIRECT_URI_USA.');
-    }
-    const oauth2 = makeUsaOAuthClient();
-    const url = oauth2.generateAuthUrl({
-      access_type: 'offline',
-      prompt: 'consent',
-      scope: ['https://www.googleapis.com/auth/apps.order'], // Voice subscription only needs apps.order
-    });
-    res.redirect(url);
-  } catch (e) {
-    res.status(500).send('Could not start USA connection: ' + e.message);
-  }
-});
+  return (
+    <div className="section">
+      <h2>{title}</h2>
 
-app.get('/api/google/usa/callback', async (req, res) => {
-  try {
-    const { code } = req.query;
-    if (!code) return res.status(400).send('Missing authorization code.');
-    const oauth2 = makeUsaOAuthClient();
-    const { tokens } = await oauth2.getToken(code);
-    oauth2.setCredentials(tokens);
+      {error && <div className="error-banner" style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
 
-    let email = '';
+      {summary && (
+        <div className="stats-grid" style={{ marginBottom: 20 }}>
+          <div className="stat-card"><h3>Customers</h3><p className="stat-value">{summary.totalCustomers}</p></div>
+          <div className="stat-card"><h3>Subscriptions</h3><p className="stat-value">{summary.totalSubscriptions}</p></div>
+          <div className="stat-card"><h3>Active</h3><p className="stat-value">{summary.activeSubscriptions}</p></div>
+          <div className="stat-card"><h3>Suspended</h3><p className="stat-value">{summary.suspendedSubscriptions}</p></div>
+        </div>
+      )}
+
+      {isUSA && (
+        <div className="add-voice-card" style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <h3 style={{ margin: '0 0 4px' }}>📞 Add Google Voice (USA only)</h3>
+          <p style={{ margin: '0 0 12px', color: '#5b6075', fontSize: 14 }}>
+            Voice is available only in supported countries (US, Canada, UK, and parts of Europe). One Voice subscription per domain.
+          </p>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Domain (type to search)</label>
+              <input list="usa-domains-list" value={vForm.domain}
+                onChange={(e) => setVForm({ ...vForm, domain: e.target.value })}
+                placeholder="Search USA domains…"
+                style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', minWidth: 240 }} />
+              <datalist id="usa-domains-list">
+                {eligibleDomains.map(d => <option key={d} value={d} />)}
+              </datalist>
+              <div style={{ fontSize: 12, color: '#7a809a', marginTop: 4 }}>{eligibleDomains.length} eligible domains</div>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Voice plan</label>
+              <select value={vForm.voicePlanId} onChange={(e) => setVForm({ ...vForm, voicePlanId: e.target.value })}
+                style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', minWidth: 160 }}>
+                {voicePlans.map(p => <option key={p.id} value={p.id}>{p.name} (${p.monthlyPrice}/mo)</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Seats</label>
+              <input type="number" min="1" value={vForm.seats}
+                onChange={(e) => setVForm({ ...vForm, seats: Math.max(1, parseInt(e.target.value) || 1) })}
+                style={{ height: 40, width: 80, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }} />
+            </div>
+            <button className="btn btn-primary" onClick={addVoice} disabled={vBusy} style={{ height: 40 }}>
+              {vBusy ? 'Adding…' : 'Add Voice'}
+            </button>
+          </div>
+          {vMsg && <div style={{ marginTop: 12, fontSize: 14, color: vMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{vMsg}</div>}
+        </div>
+      )}
+
+      <button className="btn btn-secondary" onClick={fetchSubs} style={{ marginBottom: 12 }}>↻ Refresh</button>
+
+      {rows.length === 0 ? (
+        <p>No subscriptions found on this account.</p>
+      ) : (
+        <>
+          <table className="data-table">
+            <thead>
+              <tr><th>Domain</th><th>Product</th><th>Plan</th><th>Seats</th><th>Status</th><th>Created</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((s, i) => (
+                <tr key={`${s.customerId}-${s.skuId}-${i}`}>
+                  <td>{s.domain}</td>
+                  <td>{s.skuName}</td>
+                  <td>{planLabel(s.planName)}</td>
+                  <td>{s.seats ?? s.licensedSeats ?? '—'}</td>
+                  <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
+                  <td>{fmtDate(s.creationTime)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center', marginTop: 16 }}>
+            <button className="btn btn-secondary" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}>← Previous</button>
+            <span style={{ fontSize: 14, color: '#5b6075' }}>Page {page} of {totalPages}</span>
+            <button className="btn btn-secondary" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>Next →</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+// ==================== USERS SECTION ====================
+const UsersSection = () => {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [newUser, setNewUser] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    voiceNumber: '',
+    forwardingNumber: '',
+  });
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const fetchUsers = async () => {
     try {
-      const oauth2api = google.oauth2({ version: 'v2', auth: oauth2 });
-      const info = await oauth2api.userinfo.get();
-      email = info.data.email || '';
-    } catch (_) { }
+      const response = await axios.get(`${API_URL}/users`);
+      setUsers(response.data);
+    } catch (error) {
+      console.error('Error fetching users:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    let conn = await GoogleConnection.findOne({ account: 'usa' });
-    if (!conn) conn = new GoogleConnection({ account: 'usa' });
-    if (tokens.refresh_token) conn.refreshToken = tokens.refresh_token;
-    conn.accessToken = tokens.access_token;
-    conn.tokenExpiry = tokens.expiry_date ? new Date(tokens.expiry_date) : null;
-    conn.connectedEmail = email;
-    conn.scopes = ['https://www.googleapis.com/auth/apps.order'];
-    conn.name = 'USA Reseller (Voice)';
-    conn.active = true;
-    await conn.save();
+  const handleAddUser = async (e) => {
+    e.preventDefault();
+    try {
+      await axios.post(`${API_URL}/users`, newUser);
+      setNewUser({
+        firstName: '',
+        lastName: '',
+        email: '',
+        voiceNumber: '',
+        forwardingNumber: '',
+      });
+      setShowAddUser(false);
+      fetchUsers();
+      alert('User created successfully!');
+    } catch (error) {
+      alert('Failed to create user');
+    }
+  };
 
-    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px">
-      <h2>✅ USA reseller connected (Voice)</h2>
-      <p>Connected as <b>${email || 'your USA reseller account'}</b>.</p>
-      <p>You can close this tab and return to your portal.</p>
-      </body></html>`);
-  } catch (e) {
-    res.status(500).send('USA connection failed: ' + e.message);
-  }
-});
+  const handleDeleteUser = async (id) => {
+    if (window.confirm('Are you sure?')) {
+      try {
+        await axios.delete(`${API_URL}/users/${id}`);
+        fetchUsers();
+        alert('User disabled!');
+      } catch (error) {
+        alert('Failed to delete user');
+      }
+    }
+  };
 
-// Status: is the reseller Google account connected?
-app.get('/api/google/status', authenticateCustomer, async (req, res) => {
-  try {
-    const pk = await GoogleConnection.findOne({ account: 'pk' });
-    const usa = await GoogleConnection.findOne({ account: 'usa' });
-    res.json({
-      connected: !!(pk && pk.refreshToken && pk.active) || !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
-      email: pk?.connectedEmail || null,
-      usa: {
-        connected: !!(usa && usa.refreshToken && usa.active),
-        email: usa?.connectedEmail || null,
-      },
-    });
-  } catch (e) {
-    res.status(500).json({ connected: false });
-  }
-});
+  if (loading) return <div className="loading">Loading users...</div>;
 
-// Auth client for the USA reseller (OAuth refresh token) — used for Voice
-async function getUsaAuth() {
-  const conn = await GoogleConnection.findOne({ account: 'usa' });
-  if (!conn || !conn.refreshToken) throw new Error('USA reseller not connected. Connect it to sell Voice.');
-  const oauth2 = makeUsaOAuthClient();
-  oauth2.setCredentials({ refresh_token: conn.refreshToken });
-  return oauth2;
+  return (
+    <div className="section">
+      <div className="section-header">
+        <h2>👥 Users</h2>
+        <button
+          className="btn btn-primary"
+          onClick={() => setShowAddUser(true)}
+        >
+          + Add User
+        </button>
+      </div>
+
+      {showAddUser && (
+        <div className="modal-overlay" onClick={() => setShowAddUser(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Add New User</h3>
+            <form onSubmit={handleAddUser}>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>First Name</label>
+                  <input
+                    type="text"
+                    value={newUser.firstName}
+                    onChange={(e) =>
+                      setNewUser({ ...newUser, firstName: e.target.value })
+                    }
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Last Name</label>
+                  <input
+                    type="text"
+                    value={newUser.lastName}
+                    onChange={(e) =>
+                      setNewUser({ ...newUser, lastName: e.target.value })
+                    }
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>Email</label>
+                <input
+                  type="email"
+                  value={newUser.email}
+                  onChange={(e) =>
+                    setNewUser({ ...newUser, email: e.target.value })
+                  }
+                  required
+                />
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Google Voice Number</label>
+                  <input
+                    type="tel"
+                    value={newUser.voiceNumber}
+                    onChange={(e) =>
+                      setNewUser({ ...newUser, voiceNumber: e.target.value })
+                    }
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Forwarding Number</label>
+                  <input
+                    type="tel"
+                    value={newUser.forwardingNumber}
+                    onChange={(e) =>
+                      setNewUser({
+                        ...newUser,
+                        forwardingNumber: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="modal-actions">
+                <button type="submit" className="btn btn-primary">
+                  Create User
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowAddUser(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {users.length === 0 ? (
+        <p>No users yet.</p>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Status</th>
+              <th>Voice</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((user) => (
+              <tr key={user._id}>
+                <td>
+                  {user.firstName} {user.lastName}
+                </td>
+                <td>{user.email}</td>
+                <td>
+                  <span className={`status ${user.status}`}>{user.status}</span>
+                </td>
+                <td>{user.voiceNumber || '-'}</td>
+                <td>
+                  <button
+                    className="btn-remove"
+                    onClick={() => handleDeleteUser(user._id)}
+                  >
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+};
+
+// ==================== INVOICES SECTION ====================
+const InvoicesSection = () => {
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchInvoices();
+  }, []);
+
+  const fetchInvoices = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/invoices`);
+      setInvoices(response.data);
+    } catch (error) {
+      console.error('Error fetching invoices:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) return <div className="loading">Loading invoices...</div>;
+
+  return (
+    <div className="section">
+      <h2>📄 Invoices</h2>
+
+      {invoices.length === 0 ? (
+        <p>No invoices yet.</p>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Invoice #</th>
+              <th>Date</th>
+              <th>Amount</th>
+              <th>Status</th>
+              <th>Due Date</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {invoices.map((invoice) => (
+              <tr key={invoice._id}>
+                <td>{invoice.invoiceNumber}</td>
+                <td>{new Date(invoice.issueDate).toLocaleDateString()}</td>
+                <td>${invoice.total.toFixed(2)}</td>
+                <td>
+                  <span className={`status ${invoice.status}`}>
+                    {invoice.status}
+                  </span>
+                </td>
+                <td>{new Date(invoice.dueDate).toLocaleDateString()}</td>
+                <td>
+                  <button className="btn-download">📥 Download</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+};
+
+// ==================== DOMAINS SECTION ====================
+const DomainsSection = () => {
+  const [domains, setDomains] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddDomain, setShowAddDomain] = useState(false);
+  const [newDomain, setNewDomain] = useState('');
+
+  useEffect(() => {
+    fetchDomains();
+  }, []);
+
+  const fetchDomains = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/domains`);
+      setDomains(response.data);
+    } catch (error) {
+      console.error('Error fetching domains:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddDomain = async (e) => {
+    e.preventDefault();
+    try {
+      await axios.post(`${API_URL}/domains`, { domainName: newDomain });
+      setNewDomain('');
+      setShowAddDomain(false);
+      fetchDomains();
+      alert('Domain added! Follow the verification steps.');
+    } catch (error) {
+      alert('Failed to add domain');
+    }
+  };
+
+  const handleVerify = async (id) => {
+    try {
+      await axios.post(`${API_URL}/domains/${id}/verify`);
+      fetchDomains();
+      alert('Domain verified!');
+    } catch (error) {
+      alert('Verification failed. Please check DNS records.');
+    }
+  };
+
+  if (loading) return <div className="loading">Loading domains...</div>;
+
+  return (
+    <div className="section">
+      <div className="section-header">
+        <h2>🌐 Domains</h2>
+        <button className="btn btn-primary" onClick={() => setShowAddDomain(true)}>
+          + Add Domain
+        </button>
+      </div>
+
+      {showAddDomain && (
+        <div className="modal-overlay" onClick={() => setShowAddDomain(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Add Domain</h3>
+            <form onSubmit={handleAddDomain}>
+              <div className="form-group">
+                <label>Domain Name</label>
+                <input
+                  type="text"
+                  placeholder="example.com"
+                  value={newDomain}
+                  onChange={(e) => setNewDomain(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="modal-actions">
+                <button type="submit" className="btn btn-primary">
+                  Add Domain
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowAddDomain(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {domains.length === 0 ? (
+        <p>No domains added yet.</p>
+      ) : (
+        <div className="domains-grid">
+          {domains.map((domain) => (
+            <div key={domain._id} className="domain-card">
+              <h4>{domain.domainName}</h4>
+              <p>
+                Status:{' '}
+                <span className={domain.verified ? 'verified' : 'pending'}>
+                  {domain.verified ? '✓ Verified' : '⏳ Pending'}
+                </span>
+              </p>
+
+              {!domain.verified && (
+                <div className="verification-info">
+                  <p>
+                    <strong>TXT Record:</strong>
+                  </p>
+                  <code>{domain.txtRecord}</code>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => handleVerify(domain._id)}
+                  >
+                    Verify Domain
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ==================== ADMIN: CUSTOMERS SECTION ====================
+const AdminCustomersSection = () => {
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [resetMsg, setResetMsg] = useState({});
+
+  const load = async () => {
+    setLoading(true); setError('');
+    try { const res = await axios.get(`${API_URL}/admin/customers`); setCustomers(res.data.customers || []); }
+    catch (e) { setError(e?.response?.data?.error || 'Could not load customers.'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const resetPassword = async (id) => {
+    try {
+      const res = await axios.post(`${API_URL}/admin/customers/${id}/reset-password`, {});
+      setResetMsg(m => ({ ...m, [id]: `New temp password: ${res.data.temporaryPassword}` }));
+    } catch (e) {
+      setResetMsg(m => ({ ...m, [id]: e?.response?.data?.error || 'Reset failed.' }));
+    }
+  };
+
+  if (loading) return <div className="loading">Loading customers…</div>;
+
+  return (
+    <div className="section">
+      <h2>👥 Customers</h2>
+      {error && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
+      <p style={{ color: '#5b6075' }}>{customers.length} registered customer{customers.length === 1 ? '' : 's'}</p>
+      {customers.length === 0 ? <p>No customers have registered yet.</p> : (
+        <table className="data-table">
+          <thead><tr><th>Username</th><th>Email</th><th>Domain</th><th>Reg. IP</th><th>Last login IP</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody>
+            {customers.map(c => (
+              <tr key={c.id}>
+                <td>{c.username || '—'}</td>
+                <td>{c.email}</td>
+                <td>{c.domain || '—'}</td>
+                <td style={{ fontSize: 12 }}>{c.registrationIp || '—'}</td>
+                <td style={{ fontSize: 12 }}>{c.lastLoginIp || '—'}</td>
+                <td><span className={`status ${c.status}`}>{c.status}</span></td>
+                <td>
+                  <button className="btn btn-secondary" onClick={() => resetPassword(c.id)}>Reset password</button>
+                  {resetMsg[c.id] && <div style={{ fontSize: 12, color: '#166534', marginTop: 4 }}>{resetMsg[c.id]}</div>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+};
+
+// ==================== ADMIN: TICKETS SECTION ====================
+const AdminTicketsSection = () => {
+  const [tickets, setTickets] = useState([]);
+  const [counts, setCounts] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('');
+  const [openId, setOpenId] = useState(null);
+  const [reply, setReply] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const q = filter ? `?status=${filter}` : '';
+      const res = await axios.get(`${API_URL}/admin/tickets${q}`);
+      setTickets(res.data.tickets || []); setCounts(res.data.counts || {});
+    } catch (_) { } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, [filter]);
+
+  const sendReply = async (id) => {
+    if (!reply) return;
+    try { await axios.post(`${API_URL}/admin/tickets/${id}/reply`, { message: reply }); setReply(''); load(); }
+    catch (_) { }
+  };
+  const setStatus = async (id, status) => {
+    try { await axios.patch(`${API_URL}/admin/tickets/${id}/status`, { status }); load(); }
+    catch (_) { }
+  };
+
+  return (
+    <div className="section">
+      <h2>🎫 Support Tickets</h2>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        {['', 'open', 'in_progress', 'resolved', 'closed'].map(s => (
+          <button key={s || 'all'} className={`btn ${filter === s ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFilter(s)}>
+            {s === '' ? 'All' : s.replace('_', ' ')} {s && counts[s] !== undefined ? `(${counts[s]})` : ''}
+          </button>
+        ))}
+      </div>
+
+      {loading ? <p>Loading…</p> : tickets.length === 0 ? <p>No tickets.</p> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {tickets.map(t => (
+            <div key={t._id} style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <strong>{t.subject}</strong>
+                  <div style={{ fontSize: 12, color: '#6b7280' }}>{t.customerEmail} {t.customerDomain ? `• ${t.customerDomain}` : ''} • {t.priority}</div>
+                </div>
+                <span className={`status ${t.status}`}>{t.status.replace('_', ' ')}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                <button className="btn btn-secondary" onClick={() => setOpenId(openId === t._id ? null : t._id)}>
+                  {openId === t._id ? 'Hide' : 'View'}
+                </button>
+                <button className="btn btn-secondary" onClick={() => setStatus(t._id, 'resolved')}>Mark resolved</button>
+                <button className="btn btn-secondary" onClick={() => setStatus(t._id, 'closed')}>Close</button>
+                <button className="btn btn-secondary" onClick={() => setStatus(t._id, 'open')}>Reopen</button>
+              </div>
+              {openId === t._id && (
+                <div style={{ marginTop: 12 }}>
+                  {t.messages.map((m, i) => (
+                    <div key={i} style={{
+                      marginBottom: 8, padding: '8px 12px', borderRadius: 8,
+                      background: m.fromRole === 'admin' ? '#eef2ff' : '#f3f4f6'
+                    }}>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>
+                        {m.fromRole === 'admin' ? 'Support' : 'Customer'} • {new Date(m.createdAt).toLocaleString()}
+                      </div>
+                      <div>{m.body}</div>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <input placeholder="Type a reply…" value={reply} onChange={e => setReply(e.target.value)}
+                      style={{ flex: 1, height: 38, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }} />
+                    <button className="btn btn-primary" onClick={() => sendReply(t._id)}>Reply</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+// ==================== ADMIN: PAYMENTS SECTION ====================
+// ==================== ADMIN: PAYMENTS + SETTINGS ====================
+const AdminPaymentsSection = () => {
+  const [tab, setTab] = useState('settings'); // 'settings' | 'transactions'
+  const [s, setS] = useState(null);
+  const [payments, setPayments] = useState([]);
+  const [totalPaid, setTotalPaid] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [st, p] = await Promise.all([
+        axios.get(`${API_URL}/admin/payment-settings`),
+        axios.get(`${API_URL}/admin/payments`).catch(() => ({ data: { payments: [], totalPaid: 0 } })),
+      ]);
+      setS(st.data);
+      setPayments(p.data.payments || []);
+      setTotalPaid(p.data.totalPaid || 0);
+    } catch (_) { } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const set = (k, v) => setS(prev => ({ ...prev, [k]: v }));
+
+  const save = async () => {
+    setSaving(true); setMsg('');
+    try {
+      await axios.patch(`${API_URL}/admin/payment-settings`, {
+        stripeEnabled: s.stripeEnabled,
+        nickyEnabled: s.nickyEnabled,
+        stripeMode: s.stripeMode,
+        stripePublishableTest: s.stripePublishableTest,
+        stripePublishableLive: s.stripePublishableLive,
+        feeEnabled: s.feeEnabled,
+        feeFixed: s.feeFixed,
+        feePercent: s.feePercent,
+      });
+      setMsg('✓ Settings saved.');
+      load();
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not save.'); }
+    finally { setSaving(false); }
+  };
+
+  const card = { background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 18 };
+  const inp = { width: '100%', height: 38, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12, fontFamily: 'monospace', fontSize: 13 };
+  const chip = (ok) => ({ fontSize: 12, fontWeight: 600, color: ok ? '#166534' : '#b45309' });
+
+  if (loading || !s) return <div className="loading">Loading payment settings…</div>;
+
+  return (
+    <div className="section">
+      <h2>💳 Payments</h2>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+        <button className={`btn ${tab === 'settings' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('settings')}>Settings</button>
+        <button className={`btn ${tab === 'transactions' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('transactions')}>Transactions</button>
+      </div>
+
+      {tab === 'settings' && (
+        <>
+          {msg && <div style={{ background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 14 }}>{msg}</div>}
+
+          {/* STRIPE */}
+          <div style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>💳 Stripe Checkout</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                <input type="checkbox" checked={!!s.stripeEnabled} onChange={e => set('stripeEnabled', e.target.checked)} /> Enabled
+              </label>
+            </div>
+            <p style={{ color: '#6b7280', fontSize: 14 }}>Hosted Stripe Checkout. Customers are redirected to Stripe, then returned to your site. Currently active mode: <strong style={{ color: s.stripeMode === 'live' ? '#166534' : '#b45309' }}>{(s.stripeMode || 'test').toUpperCase()}</strong></p>
+
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Payment environment</label>
+            <div style={{ display: 'flex', gap: 16, margin: '8px 0 16px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="radio" name="mode" checked={s.stripeMode !== 'live'} onChange={() => set('stripeMode', 'test')} /> Test (sandbox)
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="radio" name="mode" checked={s.stripeMode === 'live'} onChange={() => set('stripeMode', 'live')} /> Live (real charges)
+              </label>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <h4 style={{ margin: '0 0 8px' }}>Test keys</h4>
+                <label style={{ fontSize: 13 }}>Publishable key (pk_test_…)</label>
+                <input style={inp} value={s.stripePublishableTest || ''} onChange={e => set('stripePublishableTest', e.target.value)} placeholder="pk_test_..." />
+                <div style={chip(s.stripeTestSecretConfigured)}>Secret key (test): {s.stripeTestSecretConfigured ? 'configured in Railway ✓' : 'set STRIPE_SECRET_KEY_TEST in Railway'}</div>
+              </div>
+              <div>
+                <h4 style={{ margin: '0 0 8px' }}>Live keys</h4>
+                <label style={{ fontSize: 13 }}>Publishable key (pk_live_…)</label>
+                <input style={inp} value={s.stripePublishableLive || ''} onChange={e => set('stripePublishableLive', e.target.value)} placeholder="pk_live_..." />
+                <div style={chip(s.stripeLiveSecretConfigured)}>Secret key (live): {s.stripeLiveSecretConfigured ? 'configured in Railway ✓' : 'set STRIPE_SECRET_KEY in Railway'}</div>
+              </div>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
+              🔒 Secret keys are stored securely in Railway environment variables, never in the database. Webhook: {s.stripeWebhookConfigured ? 'configured ✓' : 'set STRIPE_WEBHOOK_SECRET'}
+            </div>
+          </div>
+
+          {/* PROCESSING FEE */}
+          <div style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>Processing fee (customer-paid)</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                <input type="checkbox" checked={!!s.feeEnabled} onChange={e => set('feeEnabled', e.target.checked)} /> Enable
+              </label>
+            </div>
+            <p style={{ color: '#6b7280', fontSize: 14 }}>Added as a separate line item on top of the order subtotal. Fee = fixed (USD) + percentage × subtotal.</p>
+            <div style={{ display: 'flex', gap: 16 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 13 }}>Fixed amount (USD)</label>
+                <input type="number" step="0.01" style={{ ...inp, fontFamily: 'inherit' }} value={s.feeFixed} onChange={e => set('feeFixed', e.target.value)} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 13 }}>Percentage of subtotal (%)</label>
+                <input type="number" step="0.1" style={{ ...inp, fontFamily: 'inherit' }} value={s.feePercent} onChange={e => set('feePercent', e.target.value)} />
+              </div>
+            </div>
+          </div>
+
+          {/* NICKY */}
+          <div style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>🪙 Crypto (Nicky)</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                <input type="checkbox" checked={!!s.nickyEnabled} onChange={e => set('nickyEnabled', e.target.checked)} /> Enabled
+              </label>
+            </div>
+            <p style={{ color: '#6b7280', fontSize: 14 }}>Customers pay in crypto via Nicky's hosted checkout, settled to your account.</p>
+            <div style={chip(s.nickyConfigured)}>API key: {s.nickyConfigured ? 'configured in Railway ✓' : 'set NICKY_API_TOKEN in Railway'}</div>
+          </div>
+
+          <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save payment settings'}</button>
+        </>
+      )}
+
+      {tab === 'transactions' && (
+        <>
+          <div className="stats-grid" style={{ marginBottom: 18 }}>
+            <div className="stat-card"><h3>Total received</h3><p className="stat-value">${Number(totalPaid).toFixed(2)}</p></div>
+            <div className="stat-card"><h3>Payments</h3><p className="stat-value">{payments.length}</p></div>
+            <div className="stat-card"><h3>Paid</h3><p className="stat-value">{payments.filter(p => p.status === 'paid').length}</p></div>
+          </div>
+          {payments.length === 0 ? <p>No payments yet.</p> : (
+            <table className="data-table">
+              <thead><tr><th>Date</th><th>Customer</th><th>Domain</th><th>Amount</th><th>Method</th><th>Status</th></tr></thead>
+              <tbody>
+                {payments.map(p => (
+                  <tr key={p._id}>
+                    <td>{new Date(p.createdAt).toLocaleDateString()}</td>
+                    <td>{p.customerEmail}</td>
+                    <td>{p.domain || '—'}</td>
+                    <td>${Number(p.amount || 0).toFixed(2)}</td>
+                    <td>{p.method === 'nicky' ? 'Crypto' : 'Card'}</td>
+                    <td><span className={`status ${p.status}`}>{p.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+
+// ==================== CUSTOMER PORTAL ====================
+// Shared theme tokens for the customer portal (matches portal.gnbmentor.com)
+const TEAL = '#0F766E';
+const TEAL_DARK = '#115E56';
+const INK = '#1f2937';
+const MUTE = '#6b7280';
+
+const CustomerPortal = () => {
+  const { user, logout } = useAuth();
+  const [section, setSection] = useState('overview');
+
+  const navItems = [
+    { key: 'overview', label: 'Overview', icon: '🏠' },
+    { key: 'dashboard', label: 'My subscriptions', icon: '📚' },
+    { key: 'order', label: 'New subscription', icon: '✨' },
+    { key: 'voice', label: 'Google Voice', icon: '📞' },
+    { key: 'payments', label: 'Payments', icon: '💳' },
+    { key: 'support', label: 'Support', icon: '🎫' },
+    { key: 'settings', label: 'Account settings', icon: '⚙️' },
+  ];
+
+  const name = user?.username || (user?.businessEmail || '').split('@')[0];
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#f6f8f7', color: INK, fontFamily: 'Inter, system-ui, sans-serif' }}>
+      {/* Top bar */}
+      <header style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '14px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 8, background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>A</div>
+          <strong style={{ fontSize: 18, color: TEAL }}>Artisan Drywall LLC</strong>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <span style={{ color: MUTE }}>Welcome, <strong style={{ color: INK }}>{name}</strong></span>
+          <span style={{ background: '#e6f4f1', color: TEAL, padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600 }}>Customer</span>
+          <button onClick={logout} style={{ border: '1px solid #e5e7eb', background: '#fff', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', color: INK }}>Logout</button>
+        </div>
+      </header>
+
+      <div style={{ display: 'flex', gap: 24, padding: 24, maxWidth: 1200, margin: '0 auto', alignItems: 'flex-start' }}>
+        {/* Sidebar card */}
+        <aside style={{ width: 240, background: '#fff', borderRadius: 16, padding: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', flexShrink: 0 }}>
+          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700, padding: '6px 12px' }}>ACCOUNT</div>
+          {navItems.map((it) => {
+            const active = section === it.key;
+            return (
+              <button key={it.key} onClick={() => setSection(it.key)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left',
+                  padding: '12px 14px', marginTop: 6, borderRadius: 12, cursor: 'pointer', border: 'none',
+                  background: active ? TEAL : 'transparent',
+                  color: active ? '#fff' : INK, fontSize: 15, fontWeight: active ? 600 : 500,
+                }}>
+                <span>{it.icon}</span>{it.label}
+              </button>
+            );
+          })}
+        </aside>
+
+        {/* Main content */}
+        <main style={{ flex: 1, minWidth: 0 }}>
+          {section === 'overview' && <CustomerOverview onNavigate={setSection} />}
+          {section === 'dashboard' && <CustomerSubscriptions />}
+          {section === 'order' && <WorkspaceOrderFlow />}
+          {section === 'voice' && <CustomerVoice />}
+          {section === 'payments' && <CustomerPayments />}
+          {section === 'support' && <CustomerSupport />}
+          {section === 'settings' && <CustomerSettings />}
+        </main>
+      </div>
+    </div>
+  );
+};
+
+// Customer Overview — stat cards + recent subscriptions (matches screenshot)
+const CustomerOverview = ({ onNavigate }) => {
+  const { user } = useAuth();
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try { const res = await axios.get(`${API_URL}/customer/my-subscriptions`); setData(res.data); }
+      catch (_) { setData({ subscriptions: [] }); }
+      finally { setLoading(false); }
+    })();
+  }, []);
+
+  const name = user?.username || (user?.businessEmail || '').split('@')[0];
+  const subs = data?.subscriptions || [];
+  const active = subs.filter(s => s.status === 'ACTIVE').length;
+  const pending = subs.filter(s => s.status !== 'ACTIVE').length;
+
+  const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
+  const pill = (color, bg) => ({ background: bg, color, padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600 });
+
+  return (
+    <div>
+      <h1 style={{ fontSize: 32, margin: '0 0 6px', color: INK }}>Welcome back, {name}</h1>
+      <p style={{ color: MUTE, margin: '0 0 24px' }}>Your Workspace orders, payments, and mailboxes in one place.</p>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, marginBottom: 24 }}>
+        <div style={card}>
+          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>SUBSCRIPTIONS</div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: INK, margin: '6px 0' }}>{loading ? '…' : subs.length}</div>
+          <div style={{ color: MUTE, fontSize: 14 }}>Total orders</div>
+        </div>
+        <div style={card}>
+          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>ACTIVE</div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: TEAL, margin: '6px 0' }}>{loading ? '…' : active}</div>
+          <div style={{ color: MUTE, fontSize: 14 }}>Live Workspace</div>
+        </div>
+        <div style={card}>
+          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>NEEDS PAYMENT</div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: '#b45309', margin: '6px 0' }}>{loading ? '…' : pending}</div>
+          <div style={{ color: MUTE, fontSize: 14 }}>Awaiting checkout</div>
+        </div>
+      </div>
+
+      <div style={{ ...card, padding: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid #f0f0f0' }}>
+          <h3 style={{ margin: 0 }}>Recent subscriptions</h3>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => onNavigate('payments')} style={{ border: '1px solid #e5e7eb', background: '#fff', borderRadius: 999, padding: '8px 18px', cursor: 'pointer', color: INK }}>Payments</button>
+            <button onClick={() => onNavigate('order')} style={{ border: 'none', background: TEAL, color: '#fff', borderRadius: 999, padding: '8px 18px', cursor: 'pointer', fontWeight: 600 }}>New subscription</button>
+          </div>
+        </div>
+        {loading ? <div style={{ padding: 24 }}>Loading…</div> : subs.length === 0 ? (
+          <div style={{ padding: 24, color: MUTE }}>No subscriptions yet. Click <strong>New subscription</strong> to order Workspace.</div>
+        ) : subs.map((s, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', borderBottom: i < subs.length - 1 ? '1px solid #f5f5f5' : 'none' }}>
+            <div>
+              <div style={{ fontWeight: 700, color: INK }}>{s.domain}</div>
+              <div style={{ color: MUTE, fontSize: 14 }}>{s.skuName} · {s.seats ?? 1} seat{(s.seats ?? 1) === 1 ? '' : 's'}</div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <span style={s.status === 'ACTIVE' ? pill('#166534', '#dcfce7') : pill('#92600a', '#fef3c7')}>{s.status === 'ACTIVE' ? 'Active' : 'Pending'}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Customer Payments page (placeholder until Stripe is wired in Step 2)
+const CustomerPayments = () => {
+  const [orders, setOrders] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState('');
+
+  const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [o, p] = await Promise.all([
+        axios.get(`${API_URL}/workspace-orders`),
+        axios.get(`${API_URL}/customer/payments`).catch(() => ({ data: { payments: [] } })),
+      ]);
+      setOrders(o.data || []);
+      setPayments(p.data.payments || []);
+    } catch (_) { } finally { setLoading(false); }
+  };
+  useEffect(() => {
+    load();
+    // If returning from checkout, show a message
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('payment') === 'success') setMsg('✓ Payment received — thank you! It may take a moment to confirm.');
+    if (params.get('payment') === 'cancelled') setMsg('Payment was cancelled. You can try again anytime.');
+  }, []);
+
+  const pay = async (orderId, method) => {
+    setBusy(orderId + method); setMsg('');
+    try {
+      const res = await axios.post(`${API_URL}/customer/checkout`, { orderId, method });
+      if (res.data.checkoutUrl) {
+        window.location.href = res.data.checkoutUrl; // redirect to Stripe or Nicky hosted checkout
+      } else {
+        setMsg('Could not start checkout.');
+      }
+    } catch (e) {
+      setMsg(e?.response?.data?.error || 'Could not start checkout.');
+    } finally { setBusy(''); }
+  };
+
+  const paidOrderIds = new Set(payments.filter(p => p.status === 'paid').map(p => String(p.orderId)));
+
+  if (loading) return <div className="loading">Loading your payments…</div>;
+
+  return (
+    <div>
+      <h1 style={{ fontSize: 28, margin: '0 0 6px' }}>💳 Payments</h1>
+      <p style={{ color: MUTE, margin: '0 0 20px' }}>Pay for your orders by card or crypto.</p>
+
+      {msg && <div style={{ background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a', padding: '12px 16px', borderRadius: 10, marginBottom: 20 }}>{msg}</div>}
+
+      <h3>Orders awaiting payment</h3>
+      {orders.filter(o => !paidOrderIds.has(String(o._id))).length === 0 ? (
+        <div style={{ ...card, color: MUTE }}>No orders awaiting payment.</div>
+      ) : orders.filter(o => !paidOrderIds.has(String(o._id))).map(o => (
+        <div key={o._id} style={{ ...card, marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>{o.organization?.domain}</div>
+              <div style={{ color: MUTE, fontSize: 14 }}>Order {o.orderNumber} · {o.plan?.name} · {o.seats} seat{o.seats === 1 ? '' : 's'}</div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <strong style={{ fontSize: 20 }}>${Number(o.monthlyTotal || 0).toFixed(2)}</strong>
+              <button onClick={() => pay(o._id, 'stripe')} disabled={!!busy}
+                style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: 'pointer' }}>
+                {busy === o._id + 'stripe' ? '…' : '💳 Pay by card'}
+              </button>
+              <button onClick={() => pay(o._id, 'nicky')} disabled={!!busy}
+                style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: 'pointer' }}>
+                {busy === o._id + 'nicky' ? '…' : '🪙 Pay with crypto'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      <h3 style={{ marginTop: 28 }}>Payment history</h3>
+      {payments.length === 0 ? (
+        <div style={{ ...card, color: MUTE }}>No payments yet.</div>
+      ) : (
+        <div style={card}>
+          <table className="data-table" style={{ width: '100%' }}>
+            <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Status</th></tr></thead>
+            <tbody>
+              {payments.map(p => (
+                <tr key={p._id}>
+                  <td>{new Date(p.createdAt).toLocaleDateString()}</td>
+                  <td>${Number(p.amount || 0).toFixed(2)}</td>
+                  <td>{p.method === 'nicky' ? 'Crypto' : 'Card'}</td>
+                  <td><span className={`status ${p.status}`}>{p.status}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Customer: their own subscriptions
+const CustomerSubscriptions = () => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await axios.get(`${API_URL}/customer/my-subscriptions`);
+        setData(res.data);
+      } catch (e) { setError(e?.response?.data?.error || 'Could not load your subscriptions.'); }
+      finally { setLoading(false); }
+    })();
+  }, []);
+
+  if (loading) return <div className="loading">Loading your subscriptions…</div>;
+
+  const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString() : '—';
+
+  return (
+    <div className="section">
+      <h2>📊 My Subscriptions</h2>
+      {error && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
+      {data?.domain && <p style={{ color: '#5b6075' }}>Domain: <strong>{data.domain}</strong></p>}
+      {(!data?.subscriptions || data.subscriptions.length === 0) ? (
+        <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 20 }}>
+          <p style={{ margin: 0 }}>You don't have any subscriptions yet. Use <strong>Order Workspace</strong> to get started.</p>
+        </div>
+      ) : (
+        <table className="data-table">
+          <thead><tr><th>Product</th><th>Plan</th><th>Seats</th><th>Status</th><th>Started</th></tr></thead>
+          <tbody>
+            {data.subscriptions.map((s, i) => (
+              <tr key={i}>
+                <td>{s.skuName}</td>
+                <td>{s.planName || '—'}</td>
+                <td>{s.seats ?? '—'}</td>
+                <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
+                <td>{fmtDate(s.creationTime)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+};
+
+// Customer: Google Voice info + guidance (number assignment happens in their Admin console)
+const CustomerVoice = () => {
+  const { user } = useAuth();
+  return (
+    <div className="section">
+      <h2>📞 Google Voice</h2>
+      <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 20, marginBottom: 16 }}>
+        <p style={{ marginTop: 0 }}>
+          Google Voice adds business phone numbers to your Workspace. Voice is available in supported countries
+          (US, Canada, UK, and parts of Europe). One Voice subscription per account.
+        </p>
+        <p style={{ marginBottom: 0, color: '#5b6075' }}>
+          To request Voice for your domain, please open a support ticket and our team will provision it for you.
+        </p>
+      </div>
+
+      <div style={{ background: '#fffbea', border: '1px solid #fde68a', borderRadius: 12, padding: 20 }}>
+        <h3 style={{ marginTop: 0 }}>📋 After Voice is active: assign your phone numbers</h3>
+        <p>Once your Voice subscription is active, phone numbers are assigned in <strong>your own Google Admin console</strong> (this step is required by Google and can't be done from this portal):</p>
+        <ol style={{ lineHeight: 1.8 }}>
+          <li>Go to your Google Admin console</li>
+          <li>Open <strong>Apps → Google Workspace → Google Voice</strong></li>
+          <li>Add a <strong>Voice location</strong> (service address — required for emergency calling)</li>
+          <li>Assign a <strong>Voice license</strong> to each user</li>
+          <li>Assign or request a <strong>phone number</strong> for each user</li>
+        </ol>
+        <a href="https://admin.google.com/ac/apps/voice" target="_blank" rel="noreferrer"
+          className="btn btn-primary" style={{ display: 'inline-block', marginTop: 8, textDecoration: 'none' }}>
+          Open Google Admin console →
+        </a>
+        <p style={{ marginBottom: 0, marginTop: 12, fontSize: 13, color: '#92600a' }}>
+          Need help? <a href="https://knowledge.workspace.google.com/admin/voice/assign-voice-numbers-to-users" target="_blank" rel="noreferrer">Google's guide to assigning numbers</a>.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// Customer: support tickets
+const CustomerSupport = () => {
+  const [tickets, setTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ subject: '', message: '', priority: 'normal' });
+  const [msg, setMsg] = useState('');
+  const [openId, setOpenId] = useState(null);
+  const [reply, setReply] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try { const res = await axios.get(`${API_URL}/customer/tickets`); setTickets(res.data.tickets || []); }
+    catch (_) { } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const submit = async () => {
+    if (!form.subject || !form.message) { setMsg('Please enter a subject and message.'); return; }
+    try {
+      await axios.post(`${API_URL}/customer/tickets`, form);
+      setForm({ subject: '', message: '', priority: 'normal' }); setMsg('✓ Ticket submitted.');
+      load();
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not submit ticket.'); }
+  };
+
+  const sendReply = async (id) => {
+    if (!reply) return;
+    try { await axios.post(`${API_URL}/customer/tickets/${id}/reply`, { message: reply }); setReply(''); load(); }
+    catch (_) { }
+  };
+
+  return (
+    <div className="section">
+      <h2>🎫 Support</h2>
+
+      <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+        <h3 style={{ marginTop: 0 }}>Open a new ticket</h3>
+        <input placeholder="Subject" value={form.subject} onChange={e => setForm({ ...form, subject: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 10 }} />
+        <textarea placeholder="Describe your issue…" value={form.message} onChange={e => setForm({ ...form, message: e.target.value })}
+          style={{ width: '100%', minHeight: 90, borderRadius: 8, border: '1px solid #d8dbe6', padding: 10, marginBottom: 10 }} />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <select value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })}
+            style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }}>
+            <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
+          </select>
+          <button className="btn btn-primary" onClick={submit}>Submit ticket</button>
+          {msg && <span style={{ fontSize: 14, color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</span>}
+        </div>
+      </div>
+
+      <h3>My tickets</h3>
+      {loading ? <p>Loading…</p> : tickets.length === 0 ? <p>No tickets yet.</p> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {tickets.map(t => (
+            <div key={t._id} style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong>{t.subject}</strong>
+                <span className={`status ${t.status}`}>{t.status.replace('_', ' ')}</span>
+              </div>
+              <button className="btn btn-secondary" style={{ marginTop: 8 }}
+                onClick={() => setOpenId(openId === t._id ? null : t._id)}>
+                {openId === t._id ? 'Hide' : 'View conversation'}
+              </button>
+              {openId === t._id && (
+                <div style={{ marginTop: 12 }}>
+                  {t.messages.map((m, i) => (
+                    <div key={i} style={{
+                      marginBottom: 8, padding: '8px 12px', borderRadius: 8,
+                      background: m.fromRole === 'admin' ? '#eef2ff' : '#f3f4f6'
+                    }}>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>
+                        {m.fromRole === 'admin' ? 'Support' : 'You'} • {new Date(m.createdAt).toLocaleString()}
+                      </div>
+                      <div>{m.body}</div>
+                    </div>
+                  ))}
+                  {t.status !== 'closed' && (
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <input placeholder="Type a reply…" value={reply} onChange={e => setReply(e.target.value)}
+                        style={{ flex: 1, height: 38, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }} />
+                      <button className="btn btn-primary" onClick={() => sendReply(t._id)}>Reply</button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Customer: account settings (username/email, password)
+const CustomerSettings = () => {
+  const { user } = useAuth();
+  const [profile, setProfile] = useState({ username: user?.username || '', businessEmail: user?.businessEmail || '' });
+  const [pMsg, setPMsg] = useState('');
+  const [pwd, setPwd] = useState({ currentPassword: '', newPassword: '' });
+  const [pwdMsg, setPwdMsg] = useState('');
+
+  const saveProfile = async () => {
+    setPMsg('');
+    try { await axios.patch(`${API_URL}/customer/profile`, profile); setPMsg('✓ Saved.'); }
+    catch (e) { setPMsg(e?.response?.data?.error || 'Could not save.'); }
+  };
+  const changePwd = async () => {
+    setPwdMsg('');
+    try { const r = await axios.post(`${API_URL}/customer/change-password`, pwd); setPwdMsg('✓ ' + (r.data.message || 'Password changed.')); setPwd({ currentPassword: '', newPassword: '' }); }
+    catch (e) { setPwdMsg(e?.response?.data?.error || 'Could not change password.'); }
+  };
+
+  return (
+    <div className="section">
+      <h2>⚙️ Account Settings</h2>
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20, marginBottom: 20, maxWidth: 480 }}>
+        <h3 style={{ marginTop: 0 }}>Profile</h3>
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Username</label>
+        <input value={profile.username} onChange={e => setProfile({ ...profile, username: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Email</label>
+        <input value={profile.businessEmail} onChange={e => setProfile({ ...profile, businessEmail: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
+        <button className="btn btn-primary" onClick={saveProfile}>Save profile</button>
+        {pMsg && <span style={{ marginLeft: 10, fontSize: 14, color: pMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{pMsg}</span>}
+      </div>
+
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20, maxWidth: 480 }}>
+        <h3 style={{ marginTop: 0 }}>Change password</h3>
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Current password</label>
+        <input type="password" value={pwd.currentPassword} onChange={e => setPwd({ ...pwd, currentPassword: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>New password</label>
+        <input type="password" value={pwd.newPassword} onChange={e => setPwd({ ...pwd, newPassword: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
+        <button className="btn btn-primary" onClick={changePwd}>Change password</button>
+        {pwdMsg && <span style={{ marginLeft: 10, fontSize: 14, color: pwdMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{pwdMsg}</span>}
+      </div>
+    </div>
+  );
+};
+
+
+// ==================== PUBLIC LANDING PAGE ====================
+const LandingPage = () => {
+  const [plans, setPlans] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try { const res = await axios.get(`${API_URL}/products`); setPlans(res.data.workspace || []); } catch (_) { }
+    })();
+  }, []);
+
+  const T = '#0F766E', TD = '#115E56', INKL = '#1f2937', MUTEL = '#6b7280';
+  const go = (p) => { window.location.href = p; };
+
+  return (
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg,#ffffff 0%,#f0f7f5 60%,#eef4fb 100%)', fontFamily: 'Inter, system-ui, sans-serif', color: INKL }}>
+      {/* Nav */}
+      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 40px', maxWidth: 1200, margin: '0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>A</div>
+          <strong style={{ fontSize: 22, color: T }}>Artisan Drywall LLC</strong>
+        </div>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button onClick={() => go('/login')} style={{ background: 'transparent', border: 'none', color: INKL, fontSize: 16, cursor: 'pointer', padding: '10px 16px' }}>↪ Login</button>
+          <button onClick={() => go('/register')} style={{ background: T, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 20px', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>+ Sign Up</button>
+        </div>
+      </header>
+
+      {/* Hero */}
+      <section style={{ display: 'flex', gap: 40, padding: '40px 40px 60px', maxWidth: 1200, margin: '0 auto', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ flex: 1, minWidth: 320 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: '#fff', borderRadius: 999, padding: '8px 18px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
+            <span style={{ display: 'flex', gap: 4 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: '#3b82f6' }} />
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: '#ef4444' }} />
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: '#f59e0b' }} />
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: '#22c55e' }} />
+            </span>
+            <strong style={{ fontSize: 14 }}>Business email & apps in one place</strong>
+          </div>
+          <h1 style={{ fontSize: 56, lineHeight: 1.05, margin: '0 0 20px', fontWeight: 800 }}>
+            Get <span style={{ color: T }}>professional email</span> for your team
+          </h1>
+          <p style={{ fontSize: 18, color: MUTEL, lineHeight: 1.6, margin: '0 0 28px', maxWidth: 520 }}>
+            The same Gmail, Calendar, Drive, and Meet experience you know — set up for your company domain. Choose how many mailboxes you need, pay online, and follow simple steps to go live.
+          </p>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 28 }}>
+            <div style={tag(T)}><span style={{ fontWeight: 700 }}>G</span> Search & Workspace</div>
+            <div style={tag(T)}>📞 Voice & calling</div>
+            <div style={tag(T)}>📧 Gmail, Meet & Drive</div>
+          </div>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+            <button onClick={() => go('/register')} style={{ background: T, color: '#fff', border: 'none', borderRadius: 12, padding: '16px 28px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>See plans & prices ↓</button>
+            <button onClick={() => go('/register')} style={{ background: '#fff', color: INKL, border: '1px solid #e5e7eb', borderRadius: 12, padding: '16px 28px', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>Create a free account</button>
+          </div>
+        </div>
+
+        {/* What you get card */}
+        <div style={{ flex: '0 0 440px', background: '#fff', borderRadius: 24, padding: 32, boxShadow: '0 10px 40px rgba(0,0,0,0.08)' }}>
+          <h3 style={{ margin: '0 0 4px', fontSize: 22 }}>What you get</h3>
+          <p style={{ color: MUTEL, margin: '0 0 24px' }}>Popular apps for work — explained in plain English.</p>
+          {[
+            ['📧', 'Gmail', 'on your own domain — like you@yourbusiness.com'],
+            ['🎥', 'Google Meet', 'for video meetings with teammates and clients'],
+            ['📁', 'Drive', 'to store and share files, plus Calendar to stay organized'],
+          ].map(([ic, t, d], i) => (
+            <div key={i} style={{ display: 'flex', gap: 14, marginBottom: 18 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: '#f0f7f5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>{ic}</div>
+              <div><strong>{t}</strong> <span style={{ color: MUTEL }}>{d}</span></div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Plans */}
+      <section style={{ padding: '20px 40px 80px', maxWidth: 1200, margin: '0 auto' }}>
+        <h2 style={{ fontSize: 36, textAlign: 'center', margin: '0 0 8px' }}>Plans & prices</h2>
+        <p style={{ textAlign: 'center', color: MUTEL, margin: '0 0 40px' }}>Pick the Workspace plan that fits your team.</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 24 }}>
+          {plans.length === 0 ? (
+            <p style={{ textAlign: 'center', color: MUTEL, gridColumn: '1/-1' }}>Loading plans…</p>
+          ) : plans.map((p) => (
+            <div key={p.id} style={{ background: '#fff', borderRadius: 20, padding: 28, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', border: '1px solid #eef2f1' }}>
+              <h3 style={{ margin: '0 0 8px', fontSize: 20 }}>{p.name}</h3>
+              <div style={{ fontSize: 36, fontWeight: 800, color: T }}>${p.monthlyPrice}<span style={{ fontSize: 15, color: MUTEL, fontWeight: 400 }}>/user/mo</span></div>
+              {p.features && (
+                <ul style={{ listStyle: 'none', padding: 0, margin: '18px 0 24px', color: MUTEL }}>
+                  {p.features.slice(0, 5).map((f, i) => <li key={i} style={{ padding: '4px 0' }}>✓ {f}</li>)}
+                </ul>
+              )}
+              <button onClick={() => go('/register')} style={{ width: '100%', background: T, color: '#fff', border: 'none', borderRadius: 12, padding: '14px', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>Get started</button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* CTA band */}
+      <section style={{ background: T, color: '#fff', padding: '64px 40px', textAlign: 'center' }}>
+        <h2 style={{ fontSize: 44, margin: '0 0 12px', fontWeight: 800 }}>Ready when you are</h2>
+        <p style={{ fontSize: 18, opacity: 0.95, margin: '0 0 32px' }}>Sign up to save your orders, or browse plans first — whatever is easier for you.</p>
+        <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <button onClick={() => go('/register')} style={{ background: '#fff', color: T, border: 'none', borderRadius: 12, padding: '16px 32px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Compare plans</button>
+          <button onClick={() => go('/login')} style={{ background: 'transparent', color: '#fff', border: '2px solid rgba(255,255,255,0.7)', borderRadius: 12, padding: '16px 32px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Sign in</button>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer style={{ background: '#10241f', color: '#cbd5d1', padding: '48px 40px 32px' }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 40, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 9, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>A</div>
+              <strong style={{ color: '#fff', fontSize: 18 }}>Artisan Drywall LLC</strong>
+            </div>
+            <p style={{ maxWidth: 320, lineHeight: 1.6, color: '#9fb4ae' }}>
+              Google Workspace for your domain — simple ordering, secure payment, and support while you get set up.
+            </p>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, letterSpacing: 1, color: '#7e948e', fontWeight: 700, marginBottom: 14 }}>EXPLORE</div>
+            {[['Plans & pricing', '/register'], ['Why choose us', '/'], ['Create account', '/register'], ['Sign in', '/login']].map(([t, h]) => (
+              <div key={t} style={{ marginBottom: 12 }}>
+                <a href={h} style={{ color: '#cbd5d1', textDecoration: 'none' }}>{t}</a>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div style={{ fontSize: 12, letterSpacing: 1, color: '#7e948e', fontWeight: 700, marginBottom: 14 }}>ACCOUNT</div>
+            <div style={{ marginBottom: 12 }}><a href="/login" style={{ color: '#cbd5d1', textDecoration: 'none' }}>Customer portal</a></div>
+          </div>
+        </div>
+        <div style={{ maxWidth: 1200, margin: '32px auto 0', paddingTop: 24, borderTop: '1px solid #1e3a33', color: '#7e948e', fontSize: 14 }}>
+          © {new Date().getFullYear()} Artisan Drywall LLC · Google Workspace Reseller
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+function tag(T) {
+  return { display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid #eef2f1', borderRadius: 14, padding: '12px 18px', fontWeight: 600, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' };
 }
 
-// Full scopes needed for end-to-end provisioning (customer + admin user + verification)
-const PROVISION_SCOPES = [
-  'https://www.googleapis.com/auth/apps.order',
-  'https://www.googleapis.com/auth/admin.directory.user',
-  'https://www.googleapis.com/auth/admin.directory.domain',
-  'https://www.googleapis.com/auth/siteverification',
+
+// ==================== MAIN APP ====================
+function App() {
+  const { token, user, loading } = useAuth();
+
+  if (loading) {
+    return <div className="loading">Loading...</div>;
+  }
+
+  const isAdminPath = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
+  const path = typeof window !== 'undefined' ? window.location.pathname : '/';
+  const isAuthPath = path.startsWith('/login') || path.startsWith('/register') || isAdminPath;
+
+  if (!token) {
+    // Logged-out: show the public landing page on the main URL,
+    // and the login form on /login, /register, or /admin.
+    if (isAuthPath) {
+      return <LoginPage adminMode={isAdminPath} startTab={path.startsWith('/register') ? 'register' : 'login'} />;
+    }
+    return <LandingPage />;
+  }
+
+  const role = user?.role || 'customer';
+
+  // Admin portal lives at /admin and requires admin role
+  if (isAdminPath) {
+    if (role === 'admin') return <Dashboard />;
+    // Non-admins can't access /admin
+    return (
+      <div className="loading" style={{ padding: 40, textAlign: 'center' }}>
+        This area is for administrators only.{' '}
+        <a href="/" style={{ color: '#2563eb' }}>Go to your portal</a>
+      </div>
+    );
+  }
+
+  // Main URL: admins see admin dashboard; customers see the customer portal
+  return role === 'admin' ? <Dashboard /> : <CustomerPortal />;
+}
+
+// ==================== STAGE 1: WORKSPACE ORDER FLOW ====================
+const US_STATES = [
+  ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'],
+  ['CO', 'Colorado'], ['CT', 'Connecticut'], ['DE', 'Delaware'], ['FL', 'Florida'], ['GA', 'Georgia'],
+  ['HI', 'Hawaii'], ['ID', 'Idaho'], ['IL', 'Illinois'], ['IN', 'Indiana'], ['IA', 'Iowa'],
+  ['KS', 'Kansas'], ['KY', 'Kentucky'], ['LA', 'Louisiana'], ['ME', 'Maine'], ['MD', 'Maryland'],
+  ['MA', 'Massachusetts'], ['MI', 'Michigan'], ['MN', 'Minnesota'], ['MS', 'Mississippi'], ['MO', 'Missouri'],
+  ['MT', 'Montana'], ['NE', 'Nebraska'], ['NV', 'Nevada'], ['NH', 'New Hampshire'], ['NJ', 'New Jersey'],
+  ['NM', 'New Mexico'], ['NY', 'New York'], ['NC', 'North Carolina'], ['ND', 'North Dakota'], ['OH', 'Ohio'],
+  ['OK', 'Oklahoma'], ['OR', 'Oregon'], ['PA', 'Pennsylvania'], ['RI', 'Rhode Island'], ['SC', 'South Carolina'],
+  ['SD', 'South Dakota'], ['TN', 'Tennessee'], ['TX', 'Texas'], ['UT', 'Utah'], ['VT', 'Vermont'],
+  ['VA', 'Virginia'], ['WA', 'Washington'], ['WV', 'West Virginia'], ['WI', 'Wisconsin'], ['WY', 'Wyoming'],
+  ['DC', 'District of Columbia'],
 ];
 
-// Service-account auth that impersonates the reseller admin (domain-wide delegation).
-// This is the method that can create users in customer domains.
-function getServiceAccountAuth() {
-  if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return null;
-  let creds;
-  try {
-    creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
-  } catch (e) {
-    console.error('GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON:', e.message);
-    return null;
-  }
-  const subject = process.env.RESELLER_ADMIN_EMAIL || 'admin@gnbmentor.com';
-  return new google.auth.JWT({
-    email: creds.client_email,
-    key: creds.private_key,
-    scopes: PROVISION_SCOPES,
-    subject, // impersonate the reseller admin
+function WorkspaceOrderFlow() {
+  const [step, setStep] = useState(1);
+  const [plans, setPlans] = useState(null);
+  const [plansError, setPlansError] = useState('');
+  const [selectedPlanId, setSelectedPlanId] = useState('');
+  const [seats, setSeats] = useState(1);
+  const [form, setForm] = useState({
+    organizationName: '', domain: '', desiredAdminUsername: '', tempPassword: '',
+    country: 'United States', streetAddress: '', streetAddress2: '', city: '', state: '', zip: '',
+    firstName: '', lastName: '', email: '', alternateEmail: '', phone: '',
   });
-}
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [orderDone, setOrderDone] = useState(null);
+  const [verification, setVerification] = useState(null);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyMsg, setVerifyMsg] = useState('');
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionMsg, setProvisionMsg] = useState('');
+  const [provisionSuccess, setProvisionSuccess] = useState(false);
+  const [loginInfo, setLoginInfo] = useState(null);
+  const [domainStatus, setDomainStatus] = useState({ state: 'idle', message: '' }); // idle|checking|available|taken|invalid
+  const [mapsReady, setMapsReady] = useState(false);
+  const streetInputRef = useRef(null);
+  const autocompleteRef = useRef(null);
 
-// Helper: get an authorized client for reseller calls.
-// Prefers the service account (needed for user creation); falls back to OAuth refresh token.
-async function getResellerAuth() {
-  const sa = getServiceAccountAuth();
-  if (sa) return sa;
-  const conn = await GoogleConnection.findOne({ account: 'pk' });
-  if (!conn || !conn.refreshToken) throw new Error('Google account not connected');
-  const oauth2 = makeOAuthClient();
-  oauth2.setCredentials({ refresh_token: conn.refreshToken });
-  return oauth2;
-}
-
-// One-time: backfill Google SKU IDs onto existing workspace plans
-app.post('/api/admin/backfill-skus', async (req, res) => {
-  try {
-    const skuMap = {
-      starter: '1010020027',
-      'voice-starter': '1010330003',
-      'voice-standard': '1010330004',
-      'voice-premier': '1010330002',
-      standard: '1010020028',
-      plus: '1010020025',
-      frontline: '1010020030',
-    };
-    const results = [];
-    for (const [planId, skuId] of Object.entries(skuMap)) {
-      const r = await Plan.updateOne({ planId }, { $set: { skuId } });
-      results.push({ planId, skuId, matched: r.matchedCount ?? r.n, modified: r.modifiedCount ?? r.nModified });
-    }
-    res.json({ success: true, results });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Provision a workspace order into Google: create customer + create subscription
-// Reusable provisioning: creates Google customer + admin user + Workspace subscription.
-// Returns { success, message } or throws. Used by the manual endpoint AND auto-provision-on-payment.
-async function provisionWorkspaceOrder(order) {
-  const planDoc = await Plan.findOne({ planId: order.plan?.id });
-  if (!planDoc || !planDoc.skuId) throw new Error('Plan is missing a Google SKU.');
-
-  const auth = await getResellerAuth();
-  const reseller = google.reseller({ version: 'v1', auth });
-  const org = order.organization || {};
-  const contact = order.contact || {};
-  const domain = (org.domain || '').toLowerCase();
-
-  // Plan type: FLEXIBLE (monthly) or ANNUAL_MONTHLY_PAY (annual commitment, paid monthly)
-  const planType = order.planType === 'annual' ? 'ANNUAL_MONTHLY_PAY' : 'FLEXIBLE';
-  const seatsBody = planType === 'FLEXIBLE'
-    ? { maximumNumberOfSeats: order.seats }
-    : { numberOfSeats: order.seats };
-
-  // 1) Create customer
-  try {
-    await reseller.customers.insert({
-      requestBody: {
-        customerDomain: domain,
-        alternateEmail: contact.alternateEmail,
-        customerDomainVerified: !!order.domainVerified,
-        phoneNumber: contact.phone || undefined,
-        postalAddress: {
-          contactName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
-          organizationName: org.name,
-          addressLine1: org.streetAddress,
-          addressLine2: org.streetAddress2 || undefined,
-          locality: org.city,
-          region: org.state,
-          postalCode: org.zip,
-          countryCode: 'US',
-        },
-      },
-    });
-  } catch (custErr) {
-    const msg = custErr?.errors?.[0]?.message || custErr?.message || '';
-    if (!/already exists|entity already|duplicate/i.test(msg)) throw new Error('Customer creation failed: ' + msg);
-  }
-
-  // 2) Create admin user
-  try {
-    const rawUser = (org.desiredAdminUsername || 'admin').toString().trim();
-    const localPart = rawUser.includes('@') ? rawUser.split('@')[0] : rawUser;
-    const adminEmail = `${localPart}@${domain}`;
-    const password = org.tempPassword && org.tempPassword.length >= 8
-      ? org.tempPassword
-      : Math.random().toString(36).slice(2) + 'A1!';
-    const directory = google.admin({ version: 'directory_v1', auth });
-    await directory.users.insert({
-      requestBody: {
-        primaryEmail: adminEmail,
-        name: { givenName: contact.firstName || 'Admin', familyName: contact.lastName || org.name || 'User' },
-        password,
-        changePasswordAtNextLogin: true,
-      },
-    });
-    await directory.users.makeAdmin({ userKey: adminEmail, requestBody: { status: true } });
-  } catch (userErr) {
-    const msg = userErr?.errors?.[0]?.message || userErr?.message || '';
-    if (!/already exists|entity already|duplicate|409/i.test(msg)) throw new Error('Admin user creation failed: ' + msg);
-  }
-
-  // 3) Create subscription
-  try {
-    await reseller.subscriptions.insert({
-      customerId: domain,
-      requestBody: {
-        customerId: domain,
-        skuId: planDoc.skuId,
-        plan: { planName: planType },
-        seats: seatsBody,
-        purchaseOrderId: order.orderNumber,
-      },
-    });
-  } catch (subErr) {
-    const msg = subErr?.errors?.[0]?.message || subErr?.message || '';
-    throw new Error('Subscription creation failed: ' + msg);
-  }
-
-  order.status = 'provisioned';
-  order.googleProvisioned = true;
-  await order.save();
-  return { success: true, message: 'Provisioned in Google.' };
-}
-
-app.post('/api/workspace-orders/:id/provision', authenticateCustomer, async (req, res) => {
-  try {
-    const order = await WorkspaceOrder.findOne({ _id: req.params.id, customerId: req.customerId });
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    if (order.googleProvisioned && !req.query.force) {
-      // Verify it really exists in Google rather than trusting the flag
+  useEffect(() => {
+    (async () => {
       try {
-        const auth = await getResellerAuth();
-        const reseller = google.reseller({ version: 'v1', auth });
-        const domain = (order.organization?.domain || '').toLowerCase();
-        const existing = await reseller.customers.get({ customerId: domain });
-        return res.json({
-          success: true,
-          alreadyProvisioned: true,
-          message: `Confirmed in Google: customer ${existing.data.customerDomain || domain} exists.`,
-        });
-      } catch (checkErr) {
-        // Flag said provisioned but Google has no such customer -> reset and re-provision
-        order.googleProvisioned = false;
-        await order.save();
-        // fall through to provisioning below
+        const res = await axios.get(`${API_URL}/products`);
+        setPlans(res.data.workspace || []);
+        if (res.data.workspace && res.data.workspace.length) {
+          setSelectedPlanId(res.data.workspace[0].id);
+        }
+      } catch (e) {
+        setPlansError('Could not load plans. Please try again shortly.');
       }
+    })();
+  }, []);
+
+  // Load the Google Maps JavaScript API (with Places) once
+  useEffect(() => {
+    if (!MAPS_KEY) return;
+    if (window.google && window.google.maps && window.google.maps.places) {
+      setMapsReady(true);
+      return;
     }
-
-    // Look up the plan to get its Google SKU id
-    const planDoc = await Plan.findOne({ planId: order.plan?.id });
-    if (!planDoc || !planDoc.skuId) {
-      return res.status(400).json({ error: 'Plan is missing a Google SKU. Set it in admin before provisioning.' });
+    const existing = document.getElementById('gmaps-places-script');
+    if (existing) {
+      existing.addEventListener('load', () => setMapsReady(true));
+      return;
     }
+    const script = document.createElement('script');
+    script.id = 'gmaps-places-script';
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&loading=async&v=weekly`;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => setMapsReady(true);
+    document.body.appendChild(script);
+  }, []);
 
-    const auth = await getResellerAuth();
-    const reseller = google.reseller({ version: 'v1', auth });
-    const org = order.organization || {};
-    const contact = order.contact || {};
-    const domain = (org.domain || '').toLowerCase();
+  // Mount the NEW PlaceAutocompleteElement when on step 2 and maps is ready
+  useEffect(() => {
+    if (step !== 2 || !mapsReady || !streetInputRef.current) return;
+    if (autocompleteRef.current) return; // already mounted
+    let cancelled = false;
 
-    // 1) Create the customer (idempotent-ish: if exists, we catch and continue)
-    let customerCreated = false;
-    try {
-      await reseller.customers.insert({
-        requestBody: {
-          customerDomain: domain,
-          alternateEmail: contact.alternateEmail,
-          customerDomainVerified: !!order.domainVerified,
-          phoneNumber: contact.phone || undefined,
-          postalAddress: {
-            contactName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
-            organizationName: org.name,
-            addressLine1: org.streetAddress,
-            addressLine2: org.streetAddress2 || undefined,
-            locality: org.city,
-            region: org.state,
-            postalCode: org.zip,
-            countryCode: 'US',
-          },
-        },
-      });
-      customerCreated = true;
-    } catch (custErr) {
-      const msg = custErr?.errors?.[0]?.message || custErr?.message || '';
-      // If the customer already exists, proceed to subscription
-      if (!/already exists|entity already|duplicate/i.test(msg)) {
-        return res.status(400).json({ error: 'Customer creation failed: ' + msg, step: 'customer' });
-      }
-    }
-
-    // 2) Create the first admin user with the customer's chosen username + temp password
-    let adminEmail = '';
-    let adminCreated = false;
-    try {
-      const rawUser = (org.desiredAdminUsername || 'admin').toString().trim();
-      // Accept either "admin" or "admin@domain" — normalize to local part
-      const localPart = rawUser.includes('@') ? rawUser.split('@')[0] : rawUser;
-      adminEmail = `${localPart}@${domain}`;
-      const password = org.tempPassword && org.tempPassword.length >= 8
-        ? org.tempPassword
-        : Math.random().toString(36).slice(2) + 'A1!';
-
-      const directory = google.admin({ version: 'directory_v1', auth });
-      await directory.users.insert({
-        requestBody: {
-          primaryEmail: adminEmail,
-          name: {
-            givenName: contact.firstName || 'Admin',
-            familyName: contact.lastName || org.name || 'User',
-          },
-          password,
-          changePasswordAtNextLogin: true,
-        },
-      });
-      // Promote to super administrator
-      await directory.users.makeAdmin({
-        userKey: adminEmail,
-        requestBody: { status: true },
-      });
-      adminCreated = true;
-    } catch (userErr) {
-      const msg = userErr?.errors?.[0]?.message || userErr?.message || '';
-      // 409 = user already exists -> treat as ok and continue
-      if (!/already exists|entity already|duplicate|409/i.test(msg)) {
-        return res.status(400).json({
-          error: 'Admin user creation failed: ' + msg,
-          step: 'admin_user',
-          customerCreated,
-        });
-      }
-      adminCreated = true; // already existed
-    }
-
-    // 3) Create the Workspace subscription
-    try {
-      await reseller.subscriptions.insert({
-        customerId: domain,
-        requestBody: {
-          customerId: domain,
-          skuId: planDoc.skuId,
-          plan: { planName: 'FLEXIBLE' }, // pay-as-you-go monthly; matches reseller pricing
-          seats: { numberOfSeats: order.seats, maximumNumberOfSeats: order.seats },
-          purchaseOrderId: order.orderNumber,
-        },
-      });
-    } catch (subErr) {
-      const msg = subErr?.errors?.[0]?.message || subErr?.message || '';
-      return res.status(400).json({
-        error: 'Subscription creation failed: ' + msg,
-        step: 'subscription',
-        customerCreated,
-        adminCreated,
-      });
-    }
-
-    order.status = 'provisioned';
-    order.googleProvisioned = true;
-    await order.save();
-    res.json({
-      success: true,
-      customerCreated,
-      adminCreated,
-      adminEmail,
-      message: 'Customer, admin user, and Workspace subscription created in Google.',
-    });
-  } catch (error) {
-    const msg = error?.message || 'Provisioning failed';
-    res.status(500).json({ error: msg });
-  }
-});
-
-// ==================== ADD GOOGLE VOICE TO AN EXISTING DOMAIN ====================
-// Adds a Voice subscription to a domain that already has Workspace.
-// Enforces: domain must exist in Google, must have an active Workspace sub, and only ONE Voice sub per domain.
-app.post('/api/admin/add-voice', authenticateCustomer, async (req, res) => {
-  try {
-    const { domain, voicePlanId, seats } = req.body;
-    const dom = (domain || '').toLowerCase().trim();
-    if (!dom) return res.status(400).json({ error: 'Domain is required.' });
-
-    const voicePlan = await Plan.findOne({ planId: voicePlanId, category: 'voice' });
-    if (!voicePlan || !voicePlan.skuId) {
-      return res.status(400).json({ error: 'Invalid Voice plan or missing SKU.' });
-    }
-    const numSeats = Math.max(1, parseInt(seats, 10) || 1);
-
-    // Voice is sold through the USA reseller account (Pakistan can't sell Voice)
-    let auth;
-    try {
-      auth = await getUsaAuth();
-    } catch (e) {
-      return res.status(400).json({ error: e.message, step: 'usa_not_connected' });
-    }
-    const reseller = google.reseller({ version: 'v1', auth });
-
-    // 1) Confirm the customer exists in the USA reseller account
-    try {
-      await reseller.customers.get({ customerId: dom });
-    } catch (e) {
-      if (e?.code === 404) {
-        return res.status(400).json({ error: 'This domain is not a customer in the USA reseller account. Voice requires the customer to exist there.' });
-      }
-      throw e;
-    }
-
-    // 2) Enforce one Voice subscription per domain (Workspace lives on the Pakistan account, so we don't require it here)
-    const subResp = await reseller.subscriptions.list({ customerId: dom });
-    const existing = subResp.data.subscriptions || [];
-    const voiceSkus = ['1010330003', '1010330004', '1010330002', '1010330005', '1010330006'];
-    const hasVoice = existing.some((s) => voiceSkus.includes(String(s.skuId)));
-
-    if (hasVoice) {
-      return res.status(400).json({ error: 'This domain already has a Google Voice subscription (one per domain).' });
-    }
-
-    // 3) Add the Voice subscription. Use the correct seats field per plan type:
-    //    FLEXIBLE -> maximumNumberOfSeats only; ANNUAL_MONTHLY_PAY -> numberOfSeats only.
-    const attempts = [
-      { planName: 'FLEXIBLE', seats: { maximumNumberOfSeats: numSeats } },
-      { planName: 'ANNUAL_MONTHLY_PAY', seats: { numberOfSeats: numSeats } },
-    ];
-    let lastErr = '';
-    let added = false;
-    for (const attempt of attempts) {
+    (async () => {
       try {
-        await reseller.subscriptions.insert({
-          customerId: dom,
-          requestBody: {
-            customerId: dom,
-            skuId: voicePlan.skuId,
-            plan: { planName: attempt.planName },
-            seats: { kind: 'subscriptions#seats', ...attempt.seats },
-            purchaseOrderId: `VOICE-${Date.now()}`,
-          },
+        const { PlaceAutocompleteElement } = await window.google.maps.importLibrary('places');
+        if (cancelled) return;
+
+        const el = new PlaceAutocompleteElement({
+          componentRestrictions: { country: ALLOWED_COUNTRIES },
         });
-        added = true;
-        break;
-      } catch (subErr) {
-        lastErr = subErr?.errors?.[0]?.message || subErr?.message || '';
-        // retry with the other plan type only on applicability errors
-        if (!/not applicable|invalid|seat/i.test(lastErr)) break;
+        el.style.width = '100%';
+        autocompleteRef.current = el;
+
+        // Mount it into our container
+        const container = streetInputRef.current;
+        container.innerHTML = '';
+        container.appendChild(el);
+
+        el.addEventListener('gmp-select', async (event) => {
+          try {
+            const place = event.placePrediction.toPlace();
+            await place.fetchFields({
+              fields: ['addressComponents', 'formattedAddress'],
+            });
+            const comps = place.addressComponents || [];
+            const get = (type) =>
+              comps.find((c) => (c.types || []).includes(type));
+            const streetNumber = get('street_number')?.longText || '';
+            const route = get('route')?.longText || '';
+            const city =
+              get('locality')?.longText ||
+              get('sublocality')?.longText ||
+              get('postal_town')?.longText || '';
+            const stateShort = get('administrative_area_level_1')?.shortText || '';
+            const zip = get('postal_code')?.longText || '';
+            const street = `${streetNumber} ${route}`.trim();
+            setForm((f) => ({
+              ...f,
+              streetAddress: street || f.streetAddress,
+              city,
+              state: stateShort,
+              zip,
+            }));
+          } catch (err) {
+            console.error('Place select error:', err);
+          }
+        });
+      } catch (err) {
+        console.error('Autocomplete init error:', err);
       }
-    }
+    })();
 
-    if (!added) {
-      let hint = '';
-      if (/not applicable|invalid/i.test(lastErr)) {
-        hint = ' The customer may already have Voice, or this Voice SKU needs enabling for them. Check the customer in the USA Partner Console.';
-      } else if (/suspended/i.test(lastErr)) {
-        hint = ' Resolve the suspended subscription on this customer first.';
-      } else if (/terms of service|consent/i.test(lastErr)) {
-        hint = ' Accept the Google Voice reseller terms of service in the USA Partner Console.';
+    return () => { cancelled = true; };
+  }, [step, mapsReady]);
+
+  // Debounced domain availability check
+  useEffect(() => {
+    const domain = (form.domain || '').toLowerCase().trim();
+    if (!domain) { setDomainStatus({ state: 'idle', message: '' }); return; }
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain)) {
+      setDomainStatus({ state: 'invalid', message: 'Enter a valid domain (e.g. example.com).' });
+      return;
+    }
+    setDomainStatus({ state: 'checking', message: 'Checking availability…' });
+    const t = setTimeout(async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await axios.get(`${API_URL}/workspace-orders/check-domain/${encodeURIComponent(domain)}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.data.available) {
+          setDomainStatus({ state: 'available', message: res.data.message || 'Domain is available.' });
+        } else {
+          setDomainStatus({ state: 'taken', message: res.data.message || 'This domain is not available.' });
+        }
+      } catch (e) {
+        setDomainStatus({ state: 'invalid', message: 'Could not check domain. Try again.' });
       }
-      return res.status(400).json({ error: 'Voice subscription failed: ' + lastErr + hint, step: 'voice_subscription' });
-    }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [form.domain]);
 
-    res.json({ success: true, message: `Google ${voicePlan.name} added to ${dom}.`, domain: dom, plan: voicePlan.name, seats: numSeats });
-  } catch (error) {
-    const msg = error?.errors?.[0]?.message || error?.message || 'Could not add Voice.';
-    res.status(500).json({ error: msg });
-  }
-});
+  const selectedPlan = plans?.find((p) => p.id === selectedPlanId);
+  const monthlyTotal = selectedPlan ? (selectedPlan.monthlyPrice * seats) : 0;
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
-// ORDER MANAGEMENT
-app.post('/api/orders', authenticateCustomer, async (req, res) => {
-  try {
-    const { items, paymentMethod } = req.body;
+  const canContinueStep1 = selectedPlan && seats >= 1;
+  const canSubmit =
+    form.organizationName &&
+    /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(form.domain) &&
+    domainStatus.state === 'available' &&
+    form.desiredAdminUsername && form.tempPassword.length >= 8 &&
+    form.streetAddress && form.city && form.state && /^\d{5}$/.test(form.zip) &&
+    form.firstName && form.lastName &&
+    /\S+@\S+\.\S+/.test(form.email) && /\S+@\S+\.\S+/.test(form.alternateEmail);
 
-    let totalAmount = 0;
-    items.forEach((item) => {
-      totalAmount += item.monthlyPrice * item.quantity;
-    });
-
-    const orderNumber = `ORD-${Date.now()}`;
-
-    const payment = await processPayment(req.customerId, totalAmount, paymentMethod);
-    if (!payment.success) {
-      return res.status(400).json({ error: 'Payment failed' });
-    }
-
-    const order = await Order.create({
-      customerId: req.customerId,
-      orderNumber,
-      items,
-      totalAmount,
-      paymentMethod,
-      transactionId: payment.transactionId,
-      startDate: new Date(),
-      renewalDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-    });
-
-    // Create subscriptions for each item
-    for (const item of items) {
-      await Subscription.create({
-        customerId: req.customerId,
-        orderId: order._id,
-        type: item.productType,
-        plan: item.productName,
-        seats: item.quantity,
-        monthlyPrice: item.monthlyPrice,
-      });
-    }
-
-    // Generate invoice
-    const invoice = await Invoice.create({
-      customerId: req.customerId,
-      invoiceNumber: `INV-${Date.now()}`,
-      orderId: order._id,
-      amount: totalAmount,
-      tax: Math.round(totalAmount * 0.1 * 100) / 100,
-      total: Math.round((totalAmount * 1.1) * 100) / 100,
-      issueDate: new Date(),
-      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-    });
-
-    // Update customer
-    await Customer.findByIdAndUpdate(req.customerId, {
-      $inc: { totalUsers: items.reduce((sum, item) => sum + item.quantity, 0) },
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Order placed successfully',
-      order,
-      invoice: {
-        id: invoice._id,
-        invoiceNumber: invoice.invoiceNumber,
-        total: invoice.total,
-      },
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/orders', authenticateCustomer, async (req, res) => {
-  try {
-    const orders = await Order.find({ customerId: req.customerId }).sort({ createdAt: -1 });
-    res.json(orders);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// SUBSCRIPTIONS
-app.get('/api/subscriptions', authenticateCustomer, async (req, res) => {
-  try {
-    const subscriptions = await Subscription.find({ customerId: req.customerId });
-    res.json(subscriptions);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.patch('/api/subscriptions/:id', authenticateCustomer, async (req, res) => {
-  try {
-    const { seats, autoRenew } = req.body;
-    const subscription = await Subscription.findByIdAndUpdate(
-      req.params.id,
-      { seats, autoRenew, updatedAt: new Date() },
-      { new: true }
-    );
-    res.json({ success: true, subscription });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// USER MANAGEMENT
-app.post('/api/users', authenticateCustomer, async (req, res) => {
-  try {
-    const { firstName, lastName, email, voiceNumber, forwardingNumber } = req.body;
-
-    // Create Google Workspace user
-    const googleUser = await createGoogleWorkspaceUser(email, firstName, lastName, req.customerId);
-
-    // Create Google Voice number if provided
-    if (voiceNumber && forwardingNumber) {
-      await createGoogleVoiceNumber(googleUser.id, forwardingNumber);
-    }
-
-    res.status(201).json({
-      success: true,
-      message: 'User created successfully',
-      user: googleUser,
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/users', authenticateCustomer, async (req, res) => {
-  try {
-    const users = await User.find({ customerId: req.customerId });
-    res.json(users);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.delete('/api/users/:id', authenticateCustomer, async (req, res) => {
-  try {
-    const user = await User.findByIdAndUpdate(req.params.id, { status: 'inactive' }, { new: true });
-    // Also disable in Google Workspace
-    res.json({ success: true, message: 'User disabled', user });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// INVOICES
-app.get('/api/invoices', authenticateCustomer, async (req, res) => {
-  try {
-    const invoices = await Invoice.find({ customerId: req.customerId }).sort({ createdAt: -1 });
-    res.json(invoices);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/invoices/:id', authenticateCustomer, async (req, res) => {
-  try {
-    const invoice = await Invoice.findOne({
-      _id: req.params.id,
-      customerId: req.customerId,
-    });
-    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
-    res.json(invoice);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// DOMAINS
-app.post('/api/domains', authenticateCustomer, async (req, res) => {
-  try {
-    const { domainName } = req.body;
-
-    const domain = await Domain.create({
-      customerId: req.customerId,
-      domainName,
-      txtRecord: `google-site-verification=${Math.random().toString(36).substring(7)}`,
-    });
-
-    res.status(201).json({
-      success: true,
-      domain,
-      verificationSteps: [
-        'Add the TXT record to your domain DNS',
-        'Wait 24-48 hours for DNS propagation',
-        'Verify the domain in your dashboard',
-      ],
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/domains', authenticateCustomer, async (req, res) => {
-  try {
-    const domains = await Domain.find({ customerId: req.customerId });
-    res.json(domains);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/domains/:id/verify', authenticateCustomer, async (req, res) => {
-  try {
-    const domain = await Domain.findByIdAndUpdate(
-      req.params.id,
-      { verified: true, verificationMethod: 'dns' },
-      { new: true }
-    );
-    res.json({ success: true, domain });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// DASHBOARD STATS
-app.get('/api/dashboard', authenticateCustomer, async (req, res) => {
-  try {
-    const customer = await Customer.findById(req.customerId);
-    const orders = await Order.find({ customerId: req.customerId });
-    const subscriptions = await Subscription.find({ customerId: req.customerId });
-    const users = await User.find({ customerId: req.customerId });
-    const invoices = await Invoice.find({ customerId: req.customerId });
-
-    const stats = {
-      customerInfo: {
-        companyName: customer.companyName,
-        totalUsers: customer.totalUsers,
-        totalCost: customer.totalCost,
-        resellerCode: customer.resellerCode,
-      },
-      orders: orders.length,
-      activeSubscriptions: subscriptions.filter((s) => s.status === 'active').length,
-      totalUsers: users.length,
-      totalRevenue: orders.reduce((sum, order) => sum + order.totalAmount, 0),
-      pendingInvoices: invoices.filter((i) => i.status === 'unpaid').length,
-      recentOrders: orders.slice(0, 5),
-    };
-
-    res.json(stats);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Voice first-party supported countries (ISO codes) — from Google's official list
-const VOICE_SUPPORTED_COUNTRIES = ['BE', 'CA', 'DK', 'FR', 'DE', 'IE', 'IT', 'NL', 'PT', 'ES', 'SE', 'CH', 'GB', 'US'];
-
-// Live subscriptions for ONE account (PK or USA), paginated (100 per page).
-// Query: ?account=PK|USA&page=1
-app.get('/api/admin/google/subscriptions', authenticateCustomer, async (req, res) => {
-  try {
-    const account = (req.query.account || 'PK').toUpperCase() === 'USA' ? 'USA' : 'PK';
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const pageSize = 100;
-
-    // Pick the right auth for the requested account ONLY (no merging)
-    let auth;
+  const placeOrder = async () => {
+    setSubmitting(true); setSubmitError('');
     try {
-      auth = account === 'USA' ? await getUsaAuth() : await getResellerAuth();
-    } catch (e) {
-      return res.status(400).json({ error: e.message, account, notConnected: true });
-    }
-
-    const reseller = google.reseller({ version: 'v1', auth });
-    let subs = [];
-    let pageToken;
-    do {
-      const resp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
-      subs = subs.concat(resp.data.subscriptions || []);
-      pageToken = resp.data.nextPageToken;
-    } while (pageToken);
-
-    const allRows = subs.map((s) => {
-      return {
-        account,
-        customerId: s.customerId,
-        domain: s.customerDomain || s.customerId,
-        skuId: s.skuId,
-        skuName: s.skuName || s.skuId,
-        planName: s.plan?.planName,
-        seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
-        licensedSeats: s.seats?.licensedNumberOfSeats ?? null,
-        status: s.status,
-        creationTime: s.creationTime ? Number(s.creationTime) : null,
+      const token = localStorage.getItem('token');
+      const payload = {
+        type: 'workspace',
+        plan: { id: selectedPlan.id, name: selectedPlan.name, monthlyPrice: selectedPlan.monthlyPrice },
+        seats: Number(seats), monthlyTotal,
+        organization: {
+          name: form.organizationName, domain: form.domain.toLowerCase(),
+          desiredAdminUsername: form.desiredAdminUsername.toLowerCase(), tempPassword: form.tempPassword,
+          country: 'US', streetAddress: form.streetAddress, streetAddress2: form.streetAddress2,
+          city: form.city, state: form.state, zip: form.zip,
+        },
+        contact: {
+          firstName: form.firstName, lastName: form.lastName, email: form.email,
+          alternateEmail: form.alternateEmail, phone: form.phone,
+        },
       };
-    });
+      const res = await axios.post(`${API_URL}/workspace-orders`, payload, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      setOrderDone(res.data); setStep(4);
+      // Fetch the domain verification TXT record for this order
+      try {
+        const vres = await axios.get(`${API_URL}/workspace-orders/${res.data.id}/verification`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        setVerification(vres.data);
+      } catch (_) { /* verification fetch is non-blocking */ }
+    } catch (e) {
+      setSubmitError(e?.response?.data?.error || 'Could not place the order. Please check your details and try again.');
+    } finally { setSubmitting(false); }
+  };
 
-    const total = allRows.length;
-    const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    const start = (page - 1) * pageSize;
-    const rows = allRows.slice(start, start + pageSize);
+  const confirmVerify = async () => {
+    if (!orderDone?.id) return;
+    setVerifying(true); setVerifyMsg('');
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API_URL}/workspace-orders/${orderDone.id}/verify`, {}, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.data.domainVerified) {
+        setVerification((v) => ({ ...(v || {}), verified: true, status: res.data.status }));
+        setVerifyMsg('Domain marked as verified. You can now add Google Voice.');
+      }
+    } catch (e) {
+      setVerifyMsg(e?.response?.data?.error || 'Could not mark as verified. Try again.');
+    } finally { setVerifying(false); }
+  };
 
-    const uniqueDomains = new Set(allRows.map((r) => r.domain));
-    const summary = {
-      account,
-      totalSubscriptions: total,
-      activeSubscriptions: allRows.filter((r) => r.status === 'ACTIVE').length,
-      suspendedSubscriptions: allRows.filter((r) => r.status === 'SUSPENDED').length,
-      totalCustomers: uniqueDomains.size,
-    };
+  const copyTxt = () => {
+    if (verification?.txtRecord && navigator.clipboard) {
+      navigator.clipboard.writeText(verification.txtRecord);
+      setVerifyMsg('TXT record copied to clipboard.');
+    }
+  };
 
-    res.json({ subscriptions: rows, summary, page, totalPages, total });
-  } catch (e) {
-    const msg = e?.errors?.[0]?.message || e?.message || 'Could not fetch subscriptions from Google';
-    res.status(500).json({ error: msg });
-  }
-});
+  const payNow = async (method) => {
+    if (!orderDone?.id) return;
+    setProvisioning(true); setProvisionMsg('');
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API_URL}/customer/checkout`,
+        { orderId: orderDone.id, method },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (res.data.checkoutUrl) {
+        window.location.href = res.data.checkoutUrl; // Stripe or Nicky hosted checkout
+      } else {
+        setProvisionMsg('Could not start checkout.');
+      }
+    } catch (e) {
+      setProvisionMsg(e?.response?.data?.error || 'Could not start checkout.');
+    } finally { setProvisioning(false); }
+  };
 
-// Live dashboard stats from Google
-app.get('/api/admin/google/dashboard', authenticateCustomer, async (req, res) => {
-  try {
-    const auth = await getResellerAuth();
-    const reseller = google.reseller({ version: 'v1', auth });
-    let subs = [];
-    let pageToken;
-    do {
-      const resp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
-      subs = subs.concat(resp.data.subscriptions || []);
-      pageToken = resp.data.nextPageToken;
-    } while (pageToken);
+  const provisionOrder = async () => {
+    if (!orderDone?.id) return;
+    setProvisioning(true); setProvisionMsg('');
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API_URL}/workspace-orders/${orderDone.id}/provision`, {}, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.data.success) {
+        setProvisionSuccess(true);
+        setProvisionMsg(res.data.alreadyProvisioned
+          ? 'Already created in Google.'
+          : '✓ Customer, admin user, and subscription created in Google!');
+        if (res.data.adminEmail) {
+          setLoginInfo({ email: res.data.adminEmail, password: form.tempPassword });
+        }
+      } else {
+        setProvisionMsg('Provisioning returned an unexpected response.');
+      }
+    } catch (e) {
+      const d = e?.response?.data;
+      setProvisionMsg((d?.error || 'Provisioning failed.') + (d?.step ? ` (step: ${d.step})` : ''));
+    } finally { setProvisioning(false); }
+  };
 
-    const uniqueDomains = new Set(subs.map((s) => s.customerDomain || s.customerId));
-    const totalSeats = subs.reduce((sum, s) => sum + (s.seats?.numberOfSeats || 0), 0);
+  return (
+    <div className="wof-wrap">
+      <style>{wofStyles}</style>
+      <header className="wof-head">
+        <h2>Set up Google Workspace</h2>
+        <p>Choose a plan, tell us about your organization, and place your order.</p>
+        <ol className="wof-steps">
+          <li className={step >= 1 ? 'on' : ''}>Plan</li>
+          <li className={step >= 2 ? 'on' : ''}>Organization</li>
+          <li className={step >= 3 ? 'on' : ''}>Review</li>
+        </ol>
+      </header>
 
-    res.json({
-      totalCustomers: uniqueDomains.size,
-      totalSubscriptions: subs.length,
-      activeSubscriptions: subs.filter((s) => s.status === 'ACTIVE').length,
-      suspendedSubscriptions: subs.filter((s) => s.status === 'SUSPENDED').length,
-      totalSeats,
-    });
-  } catch (e) {
-    const msg = e?.errors?.[0]?.message || e?.message || 'Could not fetch dashboard data from Google';
-    res.status(500).json({ error: msg });
-  }
-});
+      {step === 1 && (
+        <section className="wof-card">
+          <h3>Choose your plan</h3>
+          {plansError && <div className="wof-alert err">{plansError}</div>}
+          {!plans && !plansError && <div className="wof-muted">Loading plans…</div>}
+          <div className="wof-plans">
+            {plans?.map((p) => (
+              <button type="button" key={p.id}
+                className={`wof-plan ${selectedPlanId === p.id ? 'sel' : ''}`}
+                onClick={() => setSelectedPlanId(p.id)}>
+                <div className="wof-plan-name">{p.name}</div>
+                <div className="wof-plan-price">${Number(p.monthlyPrice).toFixed(2)}<span>/user/mo</span></div>
+                {p.features && (
+                  <ul className="wof-plan-feats">
+                    {p.features.slice(0, 4).map((f, i) => (<li key={i}>{f}</li>))}
+                  </ul>
+                )}
+              </button>
+            ))}
+          </div>
+          <div className="wof-seats">
+            <label>Number of user licenses (seats)</label>
+            <div className="wof-stepper">
+              <button type="button" onClick={() => setSeats(Math.max(1, seats - 1))}>−</button>
+              <input type="number" min="1" value={seats}
+                onChange={(e) => setSeats(Math.max(1, parseInt(e.target.value || '1', 10)))} />
+              <button type="button" onClick={() => setSeats(seats + 1)}>+</button>
+            </div>
+          </div>
+          <div className="wof-summary">
+            <span>{selectedPlan ? selectedPlan.name : '—'} × {seats}</span>
+            <strong>${monthlyTotal.toFixed(2)}/mo</strong>
+          </div>
+          <div className="wof-actions">
+            <button type="button" className="wof-btn primary" disabled={!canContinueStep1} onClick={() => setStep(2)}>Continue</button>
+          </div>
+        </section>
+      )}
 
-// HEALTH CHECK
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'Server is running' });
-});
+      {step === 2 && (
+        <section className="wof-card">
+          <h3>Organization information</h3>
+          <div className="wof-grid">
+            <div className="wof-field"><label>Organization name *</label>
+              <input value={form.organizationName} onChange={set('organizationName')} placeholder="Acme Inc." /></div>
+            <div className="wof-field"><label>Domain *</label>
+              <input value={form.domain} onChange={set('domain')} placeholder="acme.com" />
+              {domainStatus.state !== 'idle' && (
+                <small className={`wof-domain-status ${domainStatus.state}`}>
+                  {domainStatus.state === 'checking' && '⏳ '}
+                  {domainStatus.state === 'available' && '✓ '}
+                  {(domainStatus.state === 'taken' || domainStatus.state === 'invalid') && '✕ '}
+                  {domainStatus.message}
+                </small>
+              )}
+            </div>
+          </div>
+          <div className="wof-grid">
+            <div className="wof-field"><label>Desired admin username *</label>
+              <div className="wof-inline">
+                <input value={form.desiredAdminUsername} onChange={set('desiredAdminUsername')} placeholder="admin" />
+                <span className="wof-suffix">@{form.domain || 'yourdomain.com'}</span>
+              </div>
+              <small>This becomes the Workspace administrator login.</small>
+            </div>
+            <div className="wof-field"><label>Temporary password *</label>
+              <input type="password" value={form.tempPassword} onChange={set('tempPassword')} placeholder="At least 8 characters" />
+              <small>You'll be prompted to change this on first sign-in.</small>
+            </div>
+          </div>
+          <h3 className="wof-subhead">Business address</h3>
+          <div className="wof-field"><label>Country *</label><input value="United States" disabled /></div>
+          <div className="wof-field">
+            <label>Street address *</label>
+            <div ref={streetInputRef} className="wof-autocomplete-mount">
+              {!MAPS_KEY && (
+                <input value={form.streetAddress} onChange={set('streetAddress')} placeholder="Enter your street address" />
+              )}
+            </div>
+            <small>{MAPS_KEY ? 'Start typing and pick your address from the list.' : 'Address suggestions unavailable — enter manually.'}</small>
+            {form.streetAddress && (
+              <div className="wof-picked">Selected: {form.streetAddress}</div>
+            )}
+          </div>
+          <div className="wof-field"><label>Street address line 2</label>
+            <input value={form.streetAddress2} onChange={set('streetAddress2')} placeholder="Suite 400 (optional)" /></div>
+          <div className="wof-grid">
+            <div className="wof-field"><label>City *</label>
+              <input value={form.city} onChange={set('city')} placeholder="Mountain View" /></div>
+            <div className="wof-field"><label>State *</label>
+              <select value={form.state} onChange={set('state')}>
+                <option value="">Please select</option>
+                {US_STATES.map(([abbr, name]) => (<option key={abbr} value={abbr}>{name}</option>))}
+              </select>
+            </div>
+          </div>
+          <div className="wof-field" style={{ maxWidth: 220 }}><label>ZIP code *</label>
+            <input value={form.zip}
+              onChange={(e) => setForm({ ...form, zip: e.target.value.replace(/\D/g, '').slice(0, 5) })}
+              placeholder="ZIP" inputMode="numeric" /></div>
+          <h3 className="wof-subhead">Contact information</h3>
+          <p className="wof-muted">Used to create the initial administrator account.</p>
+          <div className="wof-grid">
+            <div className="wof-field"><label>First name *</label><input value={form.firstName} onChange={set('firstName')} /></div>
+            <div className="wof-field"><label>Last name *</label><input value={form.lastName} onChange={set('lastName')} /></div>
+          </div>
+          <div className="wof-field"><label>Email *</label>
+            <input value={form.email} onChange={set('email')} placeholder="you@example.com" /></div>
+          <div className="wof-grid">
+            <div className="wof-field"><label>Alternate email * (not on your new domain)</label>
+              <input value={form.alternateEmail} onChange={set('alternateEmail')} placeholder="you@gmail.com" /></div>
+            <div className="wof-field"><label>Phone</label>
+              <input value={form.phone} onChange={set('phone')} placeholder="+1 555 123 4567" /></div>
+          </div>
+          <div className="wof-actions">
+            <button type="button" className="wof-btn ghost" onClick={() => setStep(1)}>Back</button>
+            <button type="button" className="wof-btn primary" disabled={!canSubmit} onClick={() => setStep(3)}>Review order</button>
+          </div>
+          {!canSubmit && <small className="wof-muted">Complete all required (*) fields to continue.</small>}
+        </section>
+      )}
 
-// ==================== SERVER START ====================
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-  console.log(`📧 Email service: ${process.env.EMAIL_USER}`);
-  console.log(`🔐 JWT Secret configured: ${process.env.JWT_SECRET ? 'Yes' : 'No'}`);
-  console.log(`☁️ Google Workspace configured: ${process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? 'Yes' : 'No'}`);
-});
+      {step === 3 && (
+        <section className="wof-card">
+          <h3>Review your order</h3>
+          <div className="wof-review">
+            <div className="wof-review-row"><span>Plan</span><strong>{selectedPlan?.name}</strong></div>
+            <div className="wof-review-row"><span>Seats</span><strong>{seats}</strong></div>
+            <div className="wof-review-row"><span>Monthly total</span><strong>${monthlyTotal.toFixed(2)}/mo</strong></div>
+            <hr />
+            <div className="wof-review-row"><span>Organization</span><strong>{form.organizationName}</strong></div>
+            <div className="wof-review-row"><span>Domain</span><strong>{form.domain}</strong></div>
+            <div className="wof-review-row"><span>Admin</span><strong>{form.desiredAdminUsername}@{form.domain}</strong></div>
+            <div className="wof-review-row"><span>Address</span><strong>{form.streetAddress}, {form.city}, {form.state} {form.zip}</strong></div>
+            <div className="wof-review-row"><span>Contact</span><strong>{form.firstName} {form.lastName} · {form.email}</strong></div>
+          </div>
+          <div className="wof-note">
+            After you place this order, you'll verify your domain at admin.google.com, then add Google Voice. We'll guide you through it.
+          </div>
+          {submitError && <div className="wof-alert err">{submitError}</div>}
+          <div className="wof-actions">
+            <button type="button" className="wof-btn ghost" onClick={() => setStep(2)}>Back</button>
+            <button type="button" className="wof-btn primary" disabled={submitting} onClick={placeOrder}>
+              {submitting ? 'Placing order…' : 'Place order'}
+            </button>
+          </div>
+        </section>
+      )}
 
-module.exports = app;
+      {step === 4 && orderDone && (
+        <section className="wof-card">
+          <div className="wof-done">
+            <div className="wof-check">✓</div>
+            <h3>Order placed</h3>
+            <p>Your Google Workspace order for <strong>{form.domain}</strong> has been received.</p>
+            {orderDone.orderNumber && <p className="wof-muted">Order number: {orderDone.orderNumber}</p>}
+          </div>
+
+          <div className="wof-verify">
+            <h4>Next — Complete your payment</h4>
+            <p className="wof-muted">
+              Pay for <strong>{form.domain}</strong> ({form.plan?.name || 'your plan'}, {form.seats} seat{form.seats === 1 ? '' : 's'}).
+              As soon as your payment is confirmed, your Google Workspace is set up automatically and we'll show your
+              admin sign-in details.
+            </p>
+            {provisionMsg && <div className="wof-verify-msg">{provisionMsg}</div>}
+            <div className="wof-actions" style={{ gap: 12 }}>
+              <button type="button" className="wof-btn primary" onClick={() => payNow('stripe')} disabled={provisioning}>
+                {provisioning ? 'Starting…' : '💳 Pay by card'}
+              </button>
+              <button type="button" className="wof-btn" onClick={() => payNow('nicky')} disabled={provisioning}>
+                {provisioning ? 'Starting…' : '🪙 Pay with crypto'}
+              </button>
+            </div>
+            <p className="wof-muted" style={{ fontSize: 13, marginTop: 12 }}>
+              After payment you'll return here. Your Workspace (admin account + subscription) is created automatically —
+              then you'll finish by verifying your domain inside your Google Admin console to activate Gmail.
+            </p>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+const wofStyles = `
+.wof-wrap{max-width:760px;margin:0 auto;padding:8px;color:#1a1a2e}
+.wof-head h2{margin:0 0 4px}
+.wof-head p{margin:0 0 14px;color:#5b6075}
+.wof-steps{display:flex;gap:8px;list-style:none;padding:0;margin:0 0 18px;counter-reset:s}
+.wof-steps li{flex:1;text-align:center;font-size:13px;color:#9aa0b5;padding:8px 4px;border-radius:8px;background:#f1f2f7;counter-increment:s}
+.wof-steps li::before{content:counter(s) ". "}
+.wof-steps li.on{background:#2563eb;color:#fff}
+.wof-card{background:#fff;border:1px solid #e7e9f0;border-radius:14px;padding:22px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.wof-card h3{margin:0 0 14px}
+.wof-subhead{margin-top:22px!important}
+.wof-muted{color:#7a809a;font-size:13px}
+.wof-plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.wof-plan{text-align:left;border:2px solid #e7e9f0;background:#fff;border-radius:12px;padding:14px;cursor:pointer;transition:.15s}
+.wof-plan:hover{border-color:#b9c4ef}
+.wof-plan.sel{border-color:#2563eb;background:#f5f8ff}
+.wof-plan-name{font-weight:600;margin-bottom:6px}
+.wof-plan-price{font-size:22px;font-weight:700}
+.wof-plan-price span{font-size:12px;font-weight:500;color:#7a809a;margin-left:2px}
+.wof-plan-feats{margin:10px 0 0;padding-left:16px;color:#5b6075;font-size:12px}
+.wof-seats{margin:20px 0 0}
+.wof-seats label{display:block;font-size:13px;margin-bottom:6px;font-weight:500}
+.wof-stepper{display:inline-flex;align-items:center;border:1px solid #d8dbe6;border-radius:10px;overflow:hidden}
+.wof-stepper button{width:42px;height:42px;border:0;background:#f1f2f7;font-size:20px;cursor:pointer}
+.wof-stepper input{width:80px;height:42px;border:0;text-align:center;font-size:16px;border-left:1px solid #e7e9f0;border-right:1px solid #e7e9f0}
+.wof-summary{display:flex;justify-content:space-between;align-items:center;margin-top:20px;padding:14px 16px;background:#f5f8ff;border-radius:10px}
+.wof-summary strong{font-size:18px}
+.wof-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:560px){.wof-grid{grid-template-columns:1fr}}
+.wof-field{margin-bottom:14px;display:flex;flex-direction:column}
+.wof-field label{font-size:13px;font-weight:500;margin-bottom:6px}
+.wof-field input,.wof-field select{height:42px;border:1px solid #d8dbe6;border-radius:10px;padding:0 12px;font-size:14px;background:#fff}
+.wof-field input:disabled{background:#f1f2f7;color:#7a809a}
+.wof-field small{margin-top:5px;color:#7a809a;font-size:12px}
+.wof-inline{display:flex;gap:8px;align-items:center}
+.wof-inline input{flex:1}
+.wof-suffix{color:#5b6075;font-size:14px;white-space:nowrap}
+.wof-zipmsg{color:#2563eb!important}
+.wof-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+.wof-btn{height:44px;padding:0 20px;border-radius:10px;border:1px solid transparent;font-size:14px;font-weight:600;cursor:pointer}
+.wof-btn.primary{background:#2563eb;color:#fff}
+.wof-btn.primary:disabled{background:#aab6e8;cursor:not-allowed}
+.wof-btn.ghost{background:#fff;border-color:#d8dbe6;color:#1a1a2e}
+.wof-alert{padding:10px 12px;border-radius:8px;font-size:13px;margin:12px 0}
+.wof-alert.err{background:#fdecec;color:#b42318}
+.wof-review{background:#f8f9fc;border-radius:10px;padding:16px}
+.wof-review-row{display:flex;justify-content:space-between;gap:12px;padding:6px 0;font-size:14px}
+.wof-review-row span{color:#7a809a}
+.wof-review hr{border:0;border-top:1px solid #e7e9f0;margin:10px 0}
+.wof-note{margin-top:16px;background:#fff8e6;border:1px solid #ffe5a3;border-radius:10px;padding:12px;font-size:13px;color:#6b5a1e}
+.wof-done{text-align:center}
+.wof-check{width:54px;height:54px;border-radius:50%;background:#16a34a;color:#fff;font-size:28px;display:flex;align-items:center;justify-content:center;margin:0 auto 12px}
+.wof-next{text-align:left;margin-top:18px;background:#f8f9fc;border-radius:10px;padding:16px}
+.wof-next h4{margin:0 0 8px}
+.wof-next ol{margin:0;padding-left:18px;color:#5b6075;font-size:14px}
+.wof-next a{color:#2563eb}
+.pac-container{z-index:100000!important;border-radius:10px;margin-top:2px;box-shadow:0 6px 24px rgba(16,24,40,.18);font-family:inherit}
+.pac-item{padding:8px 12px;cursor:pointer}
+.wof-autocomplete-mount{width:100%}
+.wof-autocomplete-mount gmp-place-autocomplete{width:100%}
+.wof-autocomplete-mount input{height:42px;border:1px solid #d8dbe6;border-radius:10px;padding:0 12px;font-size:14px;width:100%}
+.wof-picked{margin-top:6px;font-size:13px;color:#16a34a}
+.wof-verify{margin-top:22px;border-top:1px solid #e7e9f0;padding-top:20px}
+.wof-verify h4{margin:0 0 8px}
+.wof-verify-steps{margin:10px 0;padding-left:20px;color:#5b6075;font-size:14px;line-height:1.7}
+.wof-verify-steps a{color:#2563eb}
+.wof-txt{display:flex;gap:8px;align-items:center;background:#f8f9fc;border:1px solid #e7e9f0;border-radius:10px;padding:10px 12px;margin:8px 0}
+.wof-txt code{flex:1;font-size:12px;word-break:break-all;color:#1a1a2e}
+.wof-verify-msg{margin:10px 0;font-size:13px;color:#2563eb;background:#f5f8ff;border-radius:8px;padding:8px 12px}
+.wof-verified-ok{margin-top:22px;border-top:1px solid #e7e9f0;padding-top:20px;text-align:center}
+.wof-verify-badge{display:inline-block;background:#dcfce7;color:#166534;font-weight:600;padding:8px 16px;border-radius:999px;margin-bottom:8px}
+.wof-domain-status.checking{color:#7a809a!important}
+.wof-domain-status.available{color:#16a34a!important}
+.wof-domain-status.taken,.wof-domain-status.invalid{color:#b42318!important}
+.wof-finish{margin-top:14px;text-align:left;background:#f5fbf6;border:1px solid #cdeccd;border-radius:10px;padding:14px 16px}
+.wof-finish h4{margin:0 0 8px;color:#166534}
+.wof-creds{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+.wof-cred-row{display:flex;justify-content:space-between;align-items:center;gap:12px;background:#fff;border:1px solid #cdeccd;border-radius:8px;padding:8px 12px}
+.wof-cred-row span{font-size:13px;color:#5b6075}
+.wof-cred-row code{font-size:14px;font-weight:600;color:#1a1a2e;word-break:break-all}
+`;
+
+
+// ==================== ROOT RENDER ====================
+export default function Root() {
+  return (
+    <AuthProvider>
+      <App />
+    </AuthProvider>
+  );
+}

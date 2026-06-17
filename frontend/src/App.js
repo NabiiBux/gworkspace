@@ -1516,85 +1516,171 @@ const AdminTicketsSection = () => {
 
 
 // ==================== ADMIN: PAYMENTS SECTION ====================
+// ==================== ADMIN: PAYMENTS + SETTINGS ====================
 const AdminPaymentsSection = () => {
-  const [settings, setSettings] = useState(null);
+  const [tab, setTab] = useState('settings'); // 'settings' | 'transactions'
+  const [s, setS] = useState(null);
   const [payments, setPayments] = useState([]);
   const [totalPaid, setTotalPaid] = useState(0);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [s, p] = await Promise.all([
+      const [st, p] = await Promise.all([
         axios.get(`${API_URL}/admin/payment-settings`),
         axios.get(`${API_URL}/admin/payments`).catch(() => ({ data: { payments: [], totalPaid: 0 } })),
       ]);
-      setSettings(s.data);
+      setS(st.data);
       setPayments(p.data.payments || []);
       setTotalPaid(p.data.totalPaid || 0);
     } catch (_) { } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
 
-  const toggle = async (key, val) => {
-    setMsg('');
+  const set = (k, v) => setS(prev => ({ ...prev, [k]: v }));
+
+  const save = async () => {
+    setSaving(true); setMsg('');
     try {
-      const res = await axios.patch(`${API_URL}/admin/payment-settings`, { [key]: val });
-      setSettings(s => ({ ...s, ...res.data }));
-      setMsg('✓ Saved.');
+      await axios.patch(`${API_URL}/admin/payment-settings`, {
+        stripeEnabled: s.stripeEnabled,
+        nickyEnabled: s.nickyEnabled,
+        stripeMode: s.stripeMode,
+        stripePublishableTest: s.stripePublishableTest,
+        stripePublishableLive: s.stripePublishableLive,
+        feeEnabled: s.feeEnabled,
+        feeFixed: s.feeFixed,
+        feePercent: s.feePercent,
+      });
+      setMsg('✓ Settings saved.');
+      load();
     } catch (e) { setMsg(e?.response?.data?.error || 'Could not save.'); }
+    finally { setSaving(false); }
   };
 
-  const card = { background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
-  if (loading) return <div className="loading">Loading payments…</div>;
+  const card = { background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 18 };
+  const inp = { width: '100%', height: 38, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12, fontFamily: 'monospace', fontSize: 13 };
+  const chip = (ok) => ({ fontSize: 12, fontWeight: 600, color: ok ? '#166534' : '#b45309' });
+
+  if (loading || !s) return <div className="loading">Loading payment settings…</div>;
 
   return (
     <div className="section">
       <h2>💳 Payments</h2>
 
-      <div className="stats-grid" style={{ marginBottom: 20 }}>
-        <div className="stat-card"><h3>Total received</h3><p className="stat-value">${Number(totalPaid).toFixed(2)}</p></div>
-        <div className="stat-card"><h3>Payments</h3><p className="stat-value">{payments.length}</p></div>
-        <div className="stat-card"><h3>Paid</h3><p className="stat-value">{payments.filter(p => p.status === 'paid').length}</p></div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+        <button className={`btn ${tab === 'settings' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('settings')}>Settings</button>
+        <button className={`btn ${tab === 'transactions' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('transactions')}>Transactions</button>
       </div>
 
-      <div style={{ ...card, marginBottom: 20 }}>
-        <h3 style={{ marginTop: 0 }}>Payment methods</h3>
-        <p style={{ color: '#6b7280', fontSize: 14 }}>Turn methods on/off. API keys are set securely in your server environment (Railway), never here.</p>
-        <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 12 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input type="checkbox" checked={!!settings?.stripeEnabled} onChange={e => toggle('stripeEnabled', e.target.checked)} />
-            💳 Card (Stripe) {settings?.stripeConfigured ? <span style={{ color: '#166534', fontSize: 12 }}>· keys set</span> : <span style={{ color: '#b45309', fontSize: 12 }}>· keys missing</span>}
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input type="checkbox" checked={!!settings?.nickyEnabled} onChange={e => toggle('nickyEnabled', e.target.checked)} />
-            🪙 Crypto (Nicky) {settings?.nickyConfigured ? <span style={{ color: '#166534', fontSize: 12 }}>· keys set</span> : <span style={{ color: '#b45309', fontSize: 12 }}>· keys missing</span>}
-          </label>
-        </div>
-        {msg && <div style={{ marginTop: 12, color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</div>}
-        <div style={{ marginTop: 16, fontSize: 13, color: '#6b7280', borderTop: '1px solid #f0f0f0', paddingTop: 12 }}>
-          Required server env vars: <code>STRIPE_SECRET_KEY</code>, <code>STRIPE_WEBHOOK_SECRET</code>, <code>NICKY_API_TOKEN</code>, <code>BACKEND_URL</code>.
-        </div>
-      </div>
+      {tab === 'settings' && (
+        <>
+          {msg && <div style={{ background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 14 }}>{msg}</div>}
 
-      <h3>All payments</h3>
-      {payments.length === 0 ? <p>No payments yet.</p> : (
-        <table className="data-table">
-          <thead><tr><th>Date</th><th>Customer</th><th>Domain</th><th>Amount</th><th>Method</th><th>Status</th></tr></thead>
-          <tbody>
-            {payments.map(p => (
-              <tr key={p._id}>
-                <td>{new Date(p.createdAt).toLocaleDateString()}</td>
-                <td>{p.customerEmail}</td>
-                <td>{p.domain || '—'}</td>
-                <td>${Number(p.amount || 0).toFixed(2)}</td>
-                <td>{p.method === 'nicky' ? 'Crypto' : 'Card'}</td>
-                <td><span className={`status ${p.status}`}>{p.status}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          {/* STRIPE */}
+          <div style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>💳 Stripe Checkout</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                <input type="checkbox" checked={!!s.stripeEnabled} onChange={e => set('stripeEnabled', e.target.checked)} /> Enabled
+              </label>
+            </div>
+            <p style={{ color: '#6b7280', fontSize: 14 }}>Hosted Stripe Checkout. Customers are redirected to Stripe, then returned to your site. Currently active mode: <strong style={{ color: s.stripeMode === 'live' ? '#166534' : '#b45309' }}>{(s.stripeMode || 'test').toUpperCase()}</strong></p>
+
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Payment environment</label>
+            <div style={{ display: 'flex', gap: 16, margin: '8px 0 16px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="radio" name="mode" checked={s.stripeMode !== 'live'} onChange={() => set('stripeMode', 'test')} /> Test (sandbox)
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="radio" name="mode" checked={s.stripeMode === 'live'} onChange={() => set('stripeMode', 'live')} /> Live (real charges)
+              </label>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <h4 style={{ margin: '0 0 8px' }}>Test keys</h4>
+                <label style={{ fontSize: 13 }}>Publishable key (pk_test_…)</label>
+                <input style={inp} value={s.stripePublishableTest || ''} onChange={e => set('stripePublishableTest', e.target.value)} placeholder="pk_test_..." />
+                <div style={chip(s.stripeTestSecretConfigured)}>Secret key (test): {s.stripeTestSecretConfigured ? 'configured in Railway ✓' : 'set STRIPE_SECRET_KEY_TEST in Railway'}</div>
+              </div>
+              <div>
+                <h4 style={{ margin: '0 0 8px' }}>Live keys</h4>
+                <label style={{ fontSize: 13 }}>Publishable key (pk_live_…)</label>
+                <input style={inp} value={s.stripePublishableLive || ''} onChange={e => set('stripePublishableLive', e.target.value)} placeholder="pk_live_..." />
+                <div style={chip(s.stripeLiveSecretConfigured)}>Secret key (live): {s.stripeLiveSecretConfigured ? 'configured in Railway ✓' : 'set STRIPE_SECRET_KEY in Railway'}</div>
+              </div>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
+              🔒 Secret keys are stored securely in Railway environment variables, never in the database. Webhook: {s.stripeWebhookConfigured ? 'configured ✓' : 'set STRIPE_WEBHOOK_SECRET'}
+            </div>
+          </div>
+
+          {/* PROCESSING FEE */}
+          <div style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>Processing fee (customer-paid)</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                <input type="checkbox" checked={!!s.feeEnabled} onChange={e => set('feeEnabled', e.target.checked)} /> Enable
+              </label>
+            </div>
+            <p style={{ color: '#6b7280', fontSize: 14 }}>Added as a separate line item on top of the order subtotal. Fee = fixed (USD) + percentage × subtotal.</p>
+            <div style={{ display: 'flex', gap: 16 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 13 }}>Fixed amount (USD)</label>
+                <input type="number" step="0.01" style={{ ...inp, fontFamily: 'inherit' }} value={s.feeFixed} onChange={e => set('feeFixed', e.target.value)} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 13 }}>Percentage of subtotal (%)</label>
+                <input type="number" step="0.1" style={{ ...inp, fontFamily: 'inherit' }} value={s.feePercent} onChange={e => set('feePercent', e.target.value)} />
+              </div>
+            </div>
+          </div>
+
+          {/* NICKY */}
+          <div style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>🪙 Crypto (Nicky)</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                <input type="checkbox" checked={!!s.nickyEnabled} onChange={e => set('nickyEnabled', e.target.checked)} /> Enabled
+              </label>
+            </div>
+            <p style={{ color: '#6b7280', fontSize: 14 }}>Customers pay in crypto via Nicky's hosted checkout, settled to your account.</p>
+            <div style={chip(s.nickyConfigured)}>API key: {s.nickyConfigured ? 'configured in Railway ✓' : 'set NICKY_API_TOKEN in Railway'}</div>
+          </div>
+
+          <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save payment settings'}</button>
+        </>
+      )}
+
+      {tab === 'transactions' && (
+        <>
+          <div className="stats-grid" style={{ marginBottom: 18 }}>
+            <div className="stat-card"><h3>Total received</h3><p className="stat-value">${Number(totalPaid).toFixed(2)}</p></div>
+            <div className="stat-card"><h3>Payments</h3><p className="stat-value">{payments.length}</p></div>
+            <div className="stat-card"><h3>Paid</h3><p className="stat-value">{payments.filter(p => p.status === 'paid').length}</p></div>
+          </div>
+          {payments.length === 0 ? <p>No payments yet.</p> : (
+            <table className="data-table">
+              <thead><tr><th>Date</th><th>Customer</th><th>Domain</th><th>Amount</th><th>Method</th><th>Status</th></tr></thead>
+              <tbody>
+                {payments.map(p => (
+                  <tr key={p._id}>
+                    <td>{new Date(p.createdAt).toLocaleDateString()}</td>
+                    <td>{p.customerEmail}</td>
+                    <td>{p.domain || '—'}</td>
+                    <td>${Number(p.amount || 0).toFixed(2)}</td>
+                    <td>{p.method === 'nicky' ? 'Crypto' : 'Card'}</td>
+                    <td><span className={`status ${p.status}`}>{p.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
       )}
     </div>
   );
