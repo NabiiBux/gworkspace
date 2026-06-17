@@ -1375,7 +1375,13 @@ const DNA_BASE = process.env.DNA_API_BASE || 'https://ote.domainresellerapi.com'
 // Auth = two headers: "reseller" (your reseller UUID) + "x-api-key" (your API key).
 function dnaAuthHeaders() {
   const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
-  if (process.env.DNA_RESELLER_ID) headers['reseller'] = process.env.DNA_RESELLER_ID;
+  if (process.env.DNA_RESELLER_ID) {
+    // Send the reseller id under several header name variants to match the API's expectation
+    headers['reseller'] = process.env.DNA_RESELLER_ID;
+    headers['ResellerId'] = process.env.DNA_RESELLER_ID;
+    headers['resellerId'] = process.env.DNA_RESELLER_ID;
+    headers['Reseller'] = process.env.DNA_RESELLER_ID;
+  }
   if (process.env.DNA_API_KEY) headers['x-api-key'] = process.env.DNA_API_KEY;
   if (!process.env.DNA_API_KEY && process.env.DNA_USERNAME && process.env.DNA_PASSWORD) {
     const basic = Buffer.from(`${process.env.DNA_USERNAME}:${process.env.DNA_PASSWORD}`).toString('base64');
