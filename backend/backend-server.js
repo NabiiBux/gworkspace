@@ -1367,6 +1367,144 @@ app.get('/api/admin/payments', authenticateCustomer, requireAdmin, async (req, r
 });
 
 // PRODUCTS & PRICING (DB-backed, editable via /api/admin/plans)
+// ==================== DOMAINS (DomainNameAPI) ====================
+// OT&E test base: https://ote.domainresellerapi.com  | Production: https://api.domainresellerapi.com
+const DNA_BASE = process.env.DNA_API_BASE || 'https://ote.domainresellerapi.com';
+
+// Build auth headers for DomainNameAPI.
+// Auth = two headers: "reseller" (your reseller UUID) + "x-api-key" (your API key).
+function dnaAuthHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  if (process.env.DNA_RESELLER_ID) headers['reseller'] = process.env.DNA_RESELLER_ID;
+  if (process.env.DNA_API_KEY) headers['x-api-key'] = process.env.DNA_API_KEY;
+  // Fallback: some accounts also accept Basic auth (username/password)
+  if (!process.env.DNA_API_KEY && process.env.DNA_USERNAME && process.env.DNA_PASSWORD) {
+    const basic = Buffer.from(`${process.env.DNA_USERNAME}:${process.env.DNA_PASSWORD}`).toString('base64');
+    headers['Authorization'] = `Basic ${basic}`;
+  }
+  return headers;
+}
+
+// Customer: get/check domain verification (TXT or CNAME) for Workspace
+app.post('/api/customer/domains/verify-check', authenticateCustomer, async (req, res) => {
+  try {
+    const { domain, method } = req.body;
+    const dom = (domain || '').toLowerCase().trim();
+    if (!dom) return res.status(400).json({ error: 'Domain required.' });
+
+    // Look up the customer's order for this domain to read/store its verification token
+    const order = await WorkspaceOrder.findOne({ customerId: req.customerId, 'organization.domain': dom });
+
+    // Generate a verification token if not present (used for both TXT and CNAME display)
+    let token = order?.txtRecord;
+    if (!token) {
+      token = 'google-site-verification=' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+      if (order) { order.txtRecord = token; await order.save(); }
+    }
+
+    // Actually check DNS for the record using Node's DNS resolver
+    const dns = require('dns').promises;
+    let verified = false;
+    try {
+      if (method === 'cname') {
+        const recs = await dns.resolveCname(`workspace-verify.${dom}`).catch(() => []);
+        verified = recs.some(r => /google|verify/i.test(r));
+      } else {
+        const txt = await dns.resolveTxt(dom).catch(() => []);
+        const flat = txt.map(arr => arr.join('')).join(' ');
+        verified = flat.includes(token);
+      }
+    } catch (_) { verified = false; }
+
+    if (verified && order) { order.domainVerified = true; await order.save(); }
+
+    res.json({
+      domain: dom,
+      method: method || 'txt',
+      verified,
+      txtRecord: token,
+      cnameHost: `workspace-verify.${dom}`,
+      cnameValue: 'verify.google.com',
+      instructions: method === 'cname'
+        ? `Add a CNAME record: host "workspace-verify" pointing to "verify.google.com", then click Check.`
+        : `Add a TXT record at your domain root with value "${token}", then click Check.`,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Public domain search (for the landing page — no login required)
+app.post('/api/public/domains/search', async (req, res) => {
+  try {
+    const { domainName } = req.body;
+    const dom = (domainName || '').toLowerCase().trim();
+    if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) {
+      return res.status(400).json({ error: 'Please enter a valid domain like example.com' });
+    }
+    const resp = await fetch(`${DNA_BASE}/api/v1/domains/search`, {
+      method: 'POST',
+      headers: dnaAuthHeaders(),
+      body: JSON.stringify({ domainName: dom }),
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.success === false) {
+      const msg = data?.error?.message || data?.reason || `Search failed (${resp.status})`;
+      return res.status(400).json({ error: msg });
+    }
+    const info = data.info || {};
+    const markup = Number(process.env.DNA_MARKUP_PERCENT || 0);
+    const sellPrice = Math.round(Number(info.price || 0) * (1 + markup / 100) * 100) / 100;
+    res.json({
+      domainName: info.domainName || dom,
+      available: (info.status || '').toUpperCase() === 'AVAILABLE',
+      currency: info.currency || 'USD',
+      period: info.period || 1,
+      price: sellPrice,
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Domain search error: ' + e.message });
+  }
+});
+
+// Customer: search domain availability + price
+app.post('/api/customer/domains/search', authenticateCustomer, async (req, res) => {
+  try {
+    const { domainName } = req.body;
+    const dom = (domainName || '').toLowerCase().trim();
+    if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) {
+      return res.status(400).json({ error: 'Please enter a valid domain like example.com' });
+    }
+    const resp = await fetch(`${DNA_BASE}/api/v1/domains/search`, {
+      method: 'POST',
+      headers: dnaAuthHeaders(),
+      body: JSON.stringify({ domainName: dom }),
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.success === false) {
+      const msg = data?.error?.message || data?.reason || `Search failed (${resp.status})`;
+      return res.status(400).json({ error: msg });
+    }
+    const info = data.info || {};
+    // Apply optional markup so you can resell above cost (set DNA_MARKUP_PERCENT, e.g. 20)
+    const markup = Number(process.env.DNA_MARKUP_PERCENT || 0);
+    const basePrice = Number(info.price || 0);
+    const sellPrice = Math.round(basePrice * (1 + markup / 100) * 100) / 100;
+    res.json({
+      domainName: info.domainName || dom,
+      tld: info.tld,
+      available: (info.status || '').toUpperCase() === 'AVAILABLE',
+      isPremium: !!info.isPremium,
+      currency: info.currency || 'USD',
+      period: info.period || 1,
+      price: sellPrice,
+      basePrice,
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Domain search error: ' + e.message });
+  }
+});
+
 app.get('/api/products', async (req, res) => {
   try {
     const plans = await Plan.find({ active: true }).sort({ category: 1, sortOrder: 1 });

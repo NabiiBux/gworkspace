@@ -20,6 +20,23 @@ const MAPS_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '';
 const ALLOWED_COUNTRIES = ['us'];
 // =======================================================================
 
+// All countries for checkout (Israel intentionally excluded).
+const COUNTRIES = [
+  "Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Antigua and Barbuda", "Argentina", "Armenia", "Australia", "Austria", "Azerbaijan",
+  "Bahamas", "Bahrain", "Bangladesh", "Barbados", "Belarus", "Belgium", "Belize", "Benin", "Bhutan", "Bolivia", "Bosnia and Herzegovina", "Botswana", "Brazil", "Brunei", "Bulgaria", "Burkina Faso", "Burundi",
+  "Cabo Verde", "Cambodia", "Cameroon", "Canada", "Central African Republic", "Chad", "Chile", "China", "Colombia", "Comoros", "Congo", "Costa Rica", "Côte d'Ivoire", "Croatia", "Cuba", "Cyprus", "Czechia",
+  "Denmark", "Djibouti", "Dominica", "Dominican Republic", "Ecuador", "Egypt", "El Salvador", "Equatorial Guinea", "Eritrea", "Estonia", "Eswatini", "Ethiopia",
+  "Fiji", "Finland", "France", "Gabon", "Gambia", "Georgia", "Germany", "Ghana", "Greece", "Grenada", "Guatemala", "Guinea", "Guinea-Bissau", "Guyana",
+  "Haiti", "Honduras", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Italy", "Jamaica", "Japan", "Jordan",
+  "Kazakhstan", "Kenya", "Kiribati", "Kuwait", "Kyrgyzstan", "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia", "Libya", "Liechtenstein", "Lithuania", "Luxembourg",
+  "Madagascar", "Malawi", "Malaysia", "Maldives", "Mali", "Malta", "Marshall Islands", "Mauritania", "Mauritius", "Mexico", "Micronesia", "Moldova", "Monaco", "Mongolia", "Montenegro", "Morocco", "Mozambique", "Myanmar",
+  "Namibia", "Nauru", "Nepal", "Netherlands", "New Zealand", "Nicaragua", "Niger", "Nigeria", "North Korea", "North Macedonia", "Norway", "Oman",
+  "Pakistan", "Palau", "Palestine", "Panama", "Papua New Guinea", "Paraguay", "Peru", "Philippines", "Poland", "Portugal", "Qatar",
+  "Romania", "Russia", "Rwanda", "Saint Kitts and Nevis", "Saint Lucia", "Saint Vincent and the Grenadines", "Samoa", "San Marino", "Sao Tome and Principe", "Saudi Arabia", "Senegal", "Serbia", "Seychelles", "Sierra Leone", "Singapore", "Slovakia", "Slovenia", "Solomon Islands", "Somalia", "South Africa", "South Korea", "South Sudan", "Spain", "Sri Lanka", "Sudan", "Suriname", "Sweden", "Switzerland", "Syria",
+  "Taiwan", "Tajikistan", "Tanzania", "Thailand", "Timor-Leste", "Togo", "Tonga", "Trinidad and Tobago", "Tunisia", "Turkey", "Turkmenistan", "Tuvalu",
+  "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom", "United States", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela", "Vietnam", "Yemen", "Zambia", "Zimbabwe"
+];
+
 // Auth Context
 const AuthContext = createContext();
 
@@ -1718,6 +1735,7 @@ const CustomerPortal = () => {
     { key: 'overview', label: 'Overview', icon: '🏠' },
     { key: 'dashboard', label: 'My subscriptions', icon: '📚' },
     { key: 'order', label: 'New subscription', icon: '✨' },
+    { key: 'domains', label: 'Domains', icon: '🌐' },
     { key: 'voice', label: 'Google Voice', icon: '📞' },
     { key: 'payments', label: 'Payments', icon: '💳' },
     { key: 'support', label: 'Support', icon: '🎫' },
@@ -1766,6 +1784,7 @@ const CustomerPortal = () => {
           {section === 'overview' && <CustomerOverview onNavigate={setSection} />}
           {section === 'dashboard' && <CustomerSubscriptions />}
           {section === 'order' && <WorkspaceOrderFlow />}
+          {section === 'domains' && <CustomerDomains />}
           {section === 'voice' && <CustomerVoice />}
           {section === 'payments' && <CustomerPayments />}
           {section === 'support' && <CustomerSupport />}
@@ -1951,6 +1970,122 @@ const CustomerPayments = () => {
 };
 
 // Customer: their own subscriptions
+// Customer: domain search + availability (DomainNameAPI)
+const CustomerDomains = () => {
+  const [query, setQuery] = useState('');
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  // Verification panel
+  const [vDomain, setVDomain] = useState('');
+  const [vMethod, setVMethod] = useState('txt');
+  const [vData, setVData] = useState(null);
+  const [vMsg, setVMsg] = useState('');
+  const [vLoading, setVLoading] = useState(false);
+
+  const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
+
+  const search = async () => {
+    setError(''); setResult(null);
+    const dom = query.toLowerCase().trim();
+    if (!/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) { setError('Enter a full domain like example.com'); return; }
+    setLoading(true);
+    try {
+      const res = await axios.post(`${API_URL}/customer/domains/search`, { domainName: dom });
+      setResult(res.data);
+    } catch (e) { setError(e?.response?.data?.error || 'Search failed.'); }
+    finally { setLoading(false); }
+  };
+
+  const checkVerify = async () => {
+    setVMsg('');
+    const dom = vDomain.toLowerCase().trim();
+    if (!/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) { setVMsg('Enter a full domain like example.com'); return; }
+    setVLoading(true);
+    try {
+      const res = await axios.post(`${API_URL}/customer/domains/verify-check`, { domain: dom, method: vMethod });
+      setVData(res.data);
+      setVMsg(res.data.verified ? '✓ Domain verified! You can proceed with your Workspace plan.' : 'Not verified yet — add the record below, wait a few minutes for DNS, then Check again.');
+    } catch (e) { setVMsg(e?.response?.data?.error || 'Check failed.'); }
+    finally { setVLoading(false); }
+  };
+
+  return (
+    <div>
+      <h1 style={{ fontSize: 28, margin: '0 0 6px' }}>🌐 Domains</h1>
+      <p style={{ color: MUTE, margin: '0 0 20px' }}>Search for a domain, or verify a domain you already own.</p>
+
+      <div style={{ ...card, marginBottom: 18 }}>
+        <h3 style={{ marginTop: 0 }}>Find a domain</h3>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') search(); }}
+            placeholder="yourbusiness.com"
+            style={{ flex: 1, height: 46, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px', fontSize: 16 }}
+          />
+          <button onClick={search} disabled={loading}
+            style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '0 24px', fontWeight: 700, cursor: 'pointer' }}>
+            {loading ? 'Searching…' : 'Search'}
+          </button>
+        </div>
+        {error && <div style={{ color: '#b42318', marginTop: 10, fontSize: 14 }}>{error}</div>}
+        {result && (
+          <div style={{ marginTop: 16, background: '#f0f7f5', borderRadius: 12, padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{result.domainName}</div>
+              <div style={{ color: result.available ? '#166534' : '#b45309', fontWeight: 600 }}>{result.available ? '✓ Available' : '✗ Not available'}</div>
+            </div>
+            {result.available && <strong style={{ fontSize: 20, color: TEAL }}>${Number(result.price).toFixed(2)}/yr</strong>}
+          </div>
+        )}
+      </div>
+
+      {/* Verification panel */}
+      <div style={card}>
+        <h3 style={{ marginTop: 0 }}>Verify a domain you own</h3>
+        <p style={{ color: MUTE, fontSize: 14 }}>To use Google Workspace on your own domain, verify you own it. Choose TXT or CNAME, add the record at your DNS provider, then click Check.</p>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+          <input value={vDomain} onChange={e => setVDomain(e.target.value)} placeholder="yourbusiness.com"
+            style={{ flex: 1, minWidth: 200, height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px' }} />
+          <select value={vMethod} onChange={e => setVMethod(e.target.value)} style={{ height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 12px' }}>
+            <option value="txt">TXT record</option>
+            <option value="cname">CNAME record</option>
+          </select>
+          <button onClick={checkVerify} disabled={vLoading}
+            style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '0 22px', fontWeight: 700, cursor: 'pointer' }}>
+            {vLoading ? 'Checking…' : 'Check'}
+          </button>
+        </div>
+        {vMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: vMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: vMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{vMsg}</div>}
+        {vData && !vData.verified && (
+          <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 10, padding: 16 }}>
+            <h4 style={{ marginTop: 0 }}>Add this {vData.method.toUpperCase()} record at your DNS provider:</h4>
+            {vData.method === 'cname' ? (
+              <table style={{ width: '100%', fontSize: 14 }}><tbody>
+                <tr><td style={{ color: MUTE, padding: '4px 0' }}>Type</td><td><strong>CNAME</strong></td></tr>
+                <tr><td style={{ color: MUTE }}>Host / Name</td><td><code>{vData.cnameHost}</code></td></tr>
+                <tr><td style={{ color: MUTE }}>Value / Target</td><td><code>{vData.cnameValue}</code></td></tr>
+              </tbody></table>
+            ) : (
+              <table style={{ width: '100%', fontSize: 14 }}><tbody>
+                <tr><td style={{ color: MUTE, padding: '4px 0' }}>Type</td><td><strong>TXT</strong></td></tr>
+                <tr><td style={{ color: MUTE }}>Host / Name</td><td><code>@ (root)</code></td></tr>
+                <tr><td style={{ color: MUTE }}>Value</td><td><code style={{ wordBreak: 'break-all' }}>{vData.txtRecord}</code></td></tr>
+              </tbody></table>
+            )}
+            <p style={{ color: MUTE, fontSize: 13, marginBottom: 0, marginTop: 10 }}>DNS changes can take a few minutes (sometimes up to an hour). Add the record, wait, then click Check again.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+
+
 const CustomerSubscriptions = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -2184,6 +2319,10 @@ const CustomerSettings = () => {
 // ==================== PUBLIC LANDING PAGE ====================
 const LandingPage = () => {
   const [plans, setPlans] = useState([]);
+  const [dq, setDq] = useState('');
+  const [dResult, setDResult] = useState(null);
+  const [dLoading, setDLoading] = useState(false);
+  const [dError, setDError] = useState('');
   useEffect(() => {
     (async () => {
       try { const res = await axios.get(`${API_URL}/products`); setPlans(res.data.workspace || []); } catch (_) { }
@@ -2192,6 +2331,18 @@ const LandingPage = () => {
 
   const T = '#0F766E', TD = '#115E56', INKL = '#1f2937', MUTEL = '#6b7280';
   const go = (p) => { window.location.href = p; };
+
+  const searchDomain = async () => {
+    setDError(''); setDResult(null);
+    const dom = dq.toLowerCase().trim();
+    if (!/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) { setDError('Enter a full domain like yourbusiness.com'); return; }
+    setDLoading(true);
+    try {
+      const res = await axios.post(`${API_URL}/public/domains/search`, { domainName: dom });
+      setDResult(res.data);
+    } catch (e) { setDError(e?.response?.data?.error || 'Search failed.'); }
+    finally { setDLoading(false); }
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg,#ffffff 0%,#f0f7f5 60%,#eef4fb 100%)', fontFamily: 'Inter, system-ui, sans-serif', color: INKL }}>
@@ -2250,6 +2401,50 @@ const LandingPage = () => {
               <div><strong>{t}</strong> <span style={{ color: MUTEL }}>{d}</span></div>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Business email + domain search */}
+      <section style={{ background: '#fff', padding: '64px 40px' }}>
+        <div style={{ maxWidth: 820, margin: '0 auto', textAlign: 'center' }}>
+          <h2 style={{ fontSize: 38, margin: '0 0 14px', fontWeight: 800 }}>Get a professional business email</h2>
+          <p style={{ fontSize: 18, color: MUTEL, lineHeight: 1.6, margin: '0 0 28px' }}>
+            Create a custom email address connected to your domain to build instant trust and look credible from the get go.
+          </p>
+          <p style={{ fontWeight: 600, margin: '0 0 14px' }}>Start by finding the right domain for your business email</p>
+          <div style={{ display: 'flex', gap: 10, maxWidth: 560, margin: '0 auto' }}>
+            <input
+              value={dq}
+              onChange={e => setDq(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') searchDomain(); }}
+              placeholder="yourbusiness.com"
+              style={{ flex: 1, height: 52, borderRadius: 12, border: '1px solid #d8dbe6', padding: '0 16px', fontSize: 16 }}
+            />
+            <button onClick={searchDomain} disabled={dLoading}
+              style={{ background: T, color: '#fff', border: 'none', borderRadius: 12, padding: '0 28px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>
+              {dLoading ? 'Searching…' : 'Search'}
+            </button>
+          </div>
+          {dError && <div style={{ color: '#b42318', marginTop: 12 }}>{dError}</div>}
+          {dResult && (
+            <div style={{ marginTop: 20, background: '#f0f7f5', borderRadius: 14, padding: 20, maxWidth: 560, margin: '20px auto 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontSize: 18, fontWeight: 700 }}>{dResult.domainName}</div>
+                <div style={{ color: dResult.available ? '#166534' : '#b45309', fontWeight: 600 }}>
+                  {dResult.available ? '✓ Available' : '✗ Taken'}
+                </div>
+              </div>
+              {dResult.available && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <strong style={{ fontSize: 20, color: T }}>${Number(dResult.price).toFixed(2)}/yr</strong>
+                  <button onClick={() => go('/register')}
+                    style={{ background: T, color: '#fff', border: 'none', borderRadius: 10, padding: '12px 22px', fontWeight: 700, cursor: 'pointer' }}>
+                    Get started
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
@@ -2724,7 +2919,11 @@ function WorkspaceOrderFlow() {
             </div>
           </div>
           <h3 className="wof-subhead">Business address</h3>
-          <div className="wof-field"><label>Country *</label><input value="United States" disabled /></div>
+          <div className="wof-field"><label>Country *</label>
+            <select value={form.country} onChange={set('country')}>
+              {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
           <div className="wof-field">
             <label>Street address *</label>
             <div ref={streetInputRef} className="wof-autocomplete-mount">
