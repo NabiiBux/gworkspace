@@ -404,6 +404,14 @@ const Dashboard = () => {
               💳 Payments
             </button>
           </li>
+          <li>
+            <button
+              className={`menu-item ${activeSection === 'emails' ? 'active' : ''}`}
+              onClick={() => setActiveSection('emails')}
+            >
+              ✉️ Emails
+            </button>
+          </li>
         </ul>
 
         <button onClick={logout} className="btn btn-logout">
@@ -421,6 +429,7 @@ const Dashboard = () => {
         {activeSection === 'customers' && <AdminCustomersSection />}
         {activeSection === 'tickets' && <AdminTicketsSection />}
         {activeSection === 'payments' && <AdminPaymentsSection />}
+        {activeSection === 'emails' && <AdminEmailsSection />}
       </main>
     </div>
   );
@@ -1514,6 +1523,150 @@ const AdminTicketsSection = () => {
 
 // ==================== ADMIN: PAYMENTS SECTION ====================
 // ==================== ADMIN: PAYMENTS + SETTINGS ====================
+// ==================== ADMIN: EMAIL MANAGEMENT ====================
+const AdminEmailsSection = () => {
+  const [tab, setTab] = useState('templates'); // 'templates' | 'send'
+  const [data, setData] = useState(null);
+  const [editing, setEditing] = useState('warning');
+  const [draft, setDraft] = useState({ subject: '', heading: '', body: '' });
+  const [msg, setMsg] = useState('');
+  const [previewHtml, setPreviewHtml] = useState('');
+  const [testTo, setTestTo] = useState('');
+  // manual send
+  const [mTo, setMTo] = useState(''); const [mSubject, setMSubject] = useState(''); const [mBody, setMBody] = useState('');
+  const [mMsg, setMMsg] = useState('');
+
+  const TEAL = '#0F766E';
+  const card = { background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 16 };
+  const inp = { width: '100%', borderRadius: 8, border: '1px solid #d8dbe6', padding: '10px 12px', marginBottom: 12, fontSize: 14, fontFamily: 'inherit' };
+
+  const labels = { warning: 'Renewal warning', suspension: 'Suspension notice', payment: 'Payment confirmation' };
+
+  const load = async () => {
+    try { const r = await axios.get(`${API_URL}/admin/email/templates`); setData(r.data); pick('warning', r.data); }
+    catch (_) { }
+  };
+  useEffect(() => { load(); }, []);
+
+  const pick = (key, d) => {
+    const src = d || data; if (!src) return;
+    setEditing(key);
+    setDraft({ subject: src.templates[key].subject, heading: src.templates[key].heading, body: src.templates[key].body });
+    setPreviewHtml('');
+    setMsg('');
+  };
+
+  const save = async () => {
+    setMsg('Saving…');
+    try { await axios.put(`${API_URL}/admin/email/templates/${editing}`, draft); setMsg('✓ Saved.'); load(); }
+    catch (e) { setMsg(e?.response?.data?.error || 'Save failed.'); }
+  };
+  const resetDefault = async () => {
+    setMsg('Resetting…');
+    try { await axios.delete(`${API_URL}/admin/email/templates/${editing}`); setMsg('✓ Reset to default.'); load(); }
+    catch (e) { setMsg(e?.response?.data?.error || 'Reset failed.'); }
+  };
+  const preview = async () => {
+    try { const r = await axios.post(`${API_URL}/admin/email/preview`, { key: editing }); setPreviewHtml(r.data.html); }
+    catch (e) { setMsg(e?.response?.data?.error || 'Preview failed.'); }
+  };
+  const sendTest = async () => {
+    setMsg('Sending test…');
+    try { const r = await axios.post(`${API_URL}/admin/email/test`, { key: editing, to: testTo || undefined }); setMsg(`✓ Test sent to ${r.data.sentTo}`); }
+    catch (e) { setMsg(e?.response?.data?.error || 'Test send failed.'); }
+  };
+  const sendManual = async () => {
+    setMMsg('Sending…');
+    try { const r = await axios.post(`${API_URL}/admin/email/send`, { to: mTo, subject: mSubject, message: mBody }); setMMsg(`✓ Sent to ${r.data.sentTo}`); setMTo(''); setMSubject(''); setMBody(''); }
+    catch (e) { setMMsg(e?.response?.data?.error || 'Send failed.'); }
+  };
+
+  if (!data) return <div className="section"><h2>✉️ Emails</h2><p>Loading…</p></div>;
+
+  return (
+    <div className="section">
+      <h2>✉️ Emails</h2>
+
+      {!data.emailConfigured && (
+        <div style={{ background: '#fef3c7', color: '#92600a', padding: '12px 16px', borderRadius: 8, marginBottom: 16 }}>
+          ⚠️ Email isn't configured yet. Set <code>EMAIL_USER</code> and <code>EMAIL_PASSWORD</code> (Gmail/Workspace app password) in Railway to send emails.
+        </div>
+      )}
+      {data.emailConfigured && (
+        <div style={{ color: '#166534', fontSize: 14, marginBottom: 16 }}>
+          Sending from: <strong>{data.fromName} &lt;{data.fromAddress}&gt;</strong>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+        <button className={`btn ${tab === 'templates' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('templates')}>Templates</button>
+        <button className={`btn ${tab === 'send' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('send')}>Send a message</button>
+      </div>
+
+      {tab === 'templates' && (
+        <>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+            {['warning', 'suspension', 'payment'].map(k => (
+              <button key={k} className={`btn ${editing === k ? 'btn-primary' : 'btn-secondary'}`} onClick={() => pick(k)}>
+                {labels[k]}{data.templates[k].customized ? ' •' : ''}
+              </button>
+            ))}
+          </div>
+
+          <div style={card}>
+            <p style={{ color: '#6b7280', fontSize: 13, marginTop: 0 }}>
+              Use variables: <code>{'{{domain}}'}</code>, <code>{'{{dueDate}}'}</code>, <code>{'{{amount}}'}</code>, <code>{'{{brand}}'}</code>. They're filled automatically when sent.
+            </p>
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Subject</label>
+            <input style={inp} value={draft.subject} onChange={e => setDraft({ ...draft, subject: e.target.value })} />
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Heading</label>
+            <input style={inp} value={draft.heading} onChange={e => setDraft({ ...draft, heading: e.target.value })} />
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Body (one paragraph per line)</label>
+            <textarea style={{ ...inp, minHeight: 140 }} value={draft.body} onChange={e => setDraft({ ...draft, body: e.target.value })} />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-primary" onClick={save}>Save template</button>
+              <button className="btn btn-secondary" onClick={preview}>Preview</button>
+              <button className="btn btn-secondary" onClick={resetDefault}>Reset to default</button>
+            </div>
+            {msg && <div style={{ marginTop: 10, color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</div>}
+          </div>
+
+          {previewHtml && (
+            <div style={card}>
+              <h3 style={{ marginTop: 0 }}>Preview</h3>
+              <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
+            </div>
+          )}
+
+          <div style={card}>
+            <h3 style={{ marginTop: 0 }}>Send a test</h3>
+            <p style={{ color: '#6b7280', fontSize: 13 }}>Sends the <strong>{labels[editing]}</strong> template (with sample data) to an address.</p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <input style={{ ...inp, flex: 1, marginBottom: 0, minWidth: 220 }} placeholder={data.fromAddress || 'you@example.com'} value={testTo} onChange={e => setTestTo(e.target.value)} />
+              <button className="btn btn-primary" onClick={sendTest}>Send test</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {tab === 'send' && (
+        <div style={card}>
+          <h3 style={{ marginTop: 0 }}>Send a message to a customer</h3>
+          <label style={{ fontSize: 13, fontWeight: 600 }}>To (email)</label>
+          <input style={inp} value={mTo} onChange={e => setMTo(e.target.value)} placeholder="customer@example.com" />
+          <label style={{ fontSize: 13, fontWeight: 600 }}>Subject</label>
+          <input style={inp} value={mSubject} onChange={e => setMSubject(e.target.value)} />
+          <label style={{ fontSize: 13, fontWeight: 600 }}>Message (one paragraph per line)</label>
+          <textarea style={{ ...inp, minHeight: 160 }} value={mBody} onChange={e => setMBody(e.target.value)} />
+          <button className="btn btn-primary" onClick={sendManual}>Send email</button>
+          {mMsg && <div style={{ marginTop: 10, color: mMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{mMsg}</div>}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
 const AdminPaymentsSection = () => {
   const [tab, setTab] = useState('settings'); // 'settings' | 'transactions'
   const [s, setS] = useState(null);
@@ -1542,6 +1695,12 @@ const AdminPaymentsSection = () => {
     setSubBillingMsg('Running check…');
     try { const r = await axios.post(`${API_URL}/admin/billing/run`, {}); setSubBillingMsg(`✓ Checked ${r.data.checked} · warned ${r.data.warned.length} · suspended ${r.data.suspended.length}`); loadSubBilling(); }
     catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Check failed.'); }
+  };
+  const startFromToday = async () => {
+    if (!window.confirm('Reset past-due / suspended subscriptions to start a fresh 29-day cycle from today? This reactivates any we suspended.')) return;
+    setSubBillingMsg('Resetting cycles to today…');
+    try { const r = await axios.post(`${API_URL}/admin/billing/start-from-today`, { onlyPastDue: true }); setSubBillingMsg(`✓ Reset ${r.data.reset} subscription(s) to a fresh 29-day cycle from today.`); loadSubBilling(); }
+    catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Reset failed.'); }
   };
 
   const loadDomainOrders = async () => {
@@ -1796,6 +1955,7 @@ const AdminPaymentsSection = () => {
             <h3 style={{ margin: 0 }}>Subscription billing (29-day cycle)</h3>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-secondary" onClick={syncSubBilling}>Sync from Google</button>
+              <button className="btn btn-secondary" onClick={startFromToday}>Start cycle from today</button>
               <button className="btn btn-primary" onClick={runSubBilling}>Run check now</button>
             </div>
           </div>

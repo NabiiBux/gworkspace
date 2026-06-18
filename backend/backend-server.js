@@ -253,6 +253,16 @@ const SubBillingSchema = new mongoose.Schema({
 SubBillingSchema.index({ domain: 1, skuId: 1 }, { unique: true });
 const SubBilling = mongoose.model('SubBilling', SubBillingSchema);
 
+// Editable email templates (admin can customize subject + body; {{vars}} are filled at send time)
+const EmailTemplateSchema = new mongoose.Schema({
+  key: { type: String, unique: true },     // 'warning' | 'suspension' | 'payment'
+  subject: String,
+  heading: String,
+  body: String,                            // supports {{domain}}, {{dueDate}}, {{amount}}, {{brand}}
+  updatedAt: { type: Date, default: Date.now },
+});
+const EmailTemplate = mongoose.model('EmailTemplate', EmailTemplateSchema);
+
 // Payment settings (which methods are enabled) — keys themselves live in env vars
 const PaymentSettingsSchema = new mongoose.Schema({
   singleton: { type: String, default: 'main', unique: true },
@@ -429,16 +439,96 @@ const transporter = nodemailer.createTransport({
 
 const sendEmail = async (to, subject, htmlContent) => {
   try {
+    const fromName = process.env.EMAIL_FROM_NAME || process.env.BRAND_NAME || 'Artisan Drywall LLC';
     await transporter.sendMail({
-      from: process.env.EMAIL_USER,
+      from: `"${fromName}" <${process.env.EMAIL_USER}>`,
       to,
       subject,
       html: htmlContent,
     });
+    return true;
   } catch (error) {
     console.error('Email send error:', error);
+    return false;
   }
 };
+
+// ===== Billing email templates (brand: Artisan Drywall LLC, teal theme) =====
+const BRAND_NAME = process.env.BRAND_NAME || 'Artisan Drywall LLC';
+const PORTAL_URL = process.env.CORS_ORIGIN || 'https://gworkspaceresellere.vercel.app';
+
+function emailShell(title, bodyHtml) {
+  return `<div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
+    <div style="background:#0F766E;color:#fff;padding:20px 24px;font-size:20px;font-weight:700">${BRAND_NAME}</div>
+    <div style="padding:24px;color:#1f2937;line-height:1.6">
+      <h2 style="margin:0 0 12px;font-size:20px">${title}</h2>
+      ${bodyHtml}
+      <div style="margin-top:24px"><a href="${PORTAL_URL}" style="background:#0F766E;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Go to your portal</a></div>
+    </div>
+    <div style="background:#f8fafc;padding:16px 24px;color:#6b7280;font-size:12px">You're receiving this because you have a subscription with ${BRAND_NAME}.</div>
+  </div>`;
+}
+
+// Default templates (used if admin hasn't customized them)
+const DEFAULT_EMAIL_TEMPLATES = {
+  warning: {
+    subject: 'Action needed: your {{domain}} subscription renews soon',
+    heading: 'Your subscription renews soon',
+    body: 'Hi,\n\nYour subscription for {{domain}} is due for renewal on {{dueDate}}.\n\nTo avoid any interruption to your email and services, please complete your payment before the due date.',
+  },
+  suspension: {
+    subject: 'Your {{domain}} subscription is suspended — action required',
+    heading: 'Your subscription has been suspended',
+    body: 'Hi,\n\nYour subscription for {{domain}} has been suspended because payment wasn\'t received by the due date.\n\nTo restore your service, please make your payment in the portal. Your service reactivates automatically once payment is received.',
+  },
+  payment: {
+    subject: 'Payment received for {{domain}}',
+    heading: 'Payment received — thank you',
+    body: 'Hi,\n\nWe\'ve received your payment of {{amount}} for {{domain}}.\n\nYour subscription is active and your billing cycle has been renewed. No further action is needed.',
+  },
+};
+
+function fillTemplate(str, vars) {
+  return (str || '').replace(/\{\{(\w+)\}\}/g, (_, k) => (vars[k] != null ? vars[k] : ''));
+}
+
+// Get a template (custom from DB, or default), filled with vars
+async function getFilledTemplate(key, vars) {
+  let t = await EmailTemplate.findOne({ key });
+  const def = DEFAULT_EMAIL_TEMPLATES[key] || {};
+  const subject = fillTemplate(t?.subject || def.subject || '', vars);
+  const heading = fillTemplate(t?.heading || def.heading || '', vars);
+  const bodyText = fillTemplate(t?.body || def.body || '', vars);
+  const bodyHtml = bodyText.split('\n').map(line => line.trim() ? `<p>${line}</p>` : '').join('');
+  return { subject, html: emailShell(heading, bodyHtml) };
+}
+
+async function sendRenewalWarningEmail(to, domain, dueDate) {
+  if (!to) return;
+  const due = dueDate ? new Date(dueDate).toLocaleDateString() : 'soon';
+  const { subject, html } = await getFilledTemplate('warning', { domain: domain || 'your account', dueDate: due, brand: BRAND_NAME });
+  await sendEmail(to, subject, html);
+}
+
+async function sendSuspensionEmail(to, domain) {
+  if (!to) return;
+  const { subject, html } = await getFilledTemplate('suspension', { domain: domain || 'your account', brand: BRAND_NAME });
+  await sendEmail(to, subject, html);
+}
+
+async function sendPaymentConfirmationEmail(to, domain, amount) {
+  if (!to) return;
+  const amt = amount != null ? `$${Number(amount).toFixed(2)}` : '';
+  const { subject, html } = await getFilledTemplate('payment', { domain: domain || 'your account', amount: amt, brand: BRAND_NAME });
+  await sendEmail(to, subject, html);
+}
+
+// Find a customer's email by domain (for billing notifications)
+async function emailForDomain(domain) {
+  if (!domain) return null;
+  const c = await Customer.findOne({ domain: domain.toLowerCase() });
+  return c?.businessEmail || null;
+}
 
 // ==================== GOOGLE WORKSPACE INTEGRATION ====================
 const getGoogleAuth = () => {
@@ -1174,6 +1264,7 @@ async function markPaidAndProvision(payment) {
         // Link this domain to the customer's account
         if (me && !me.domain) { me.domain = dOrder.domainName; await me.save(); }
         console.log('DOMAIN REGISTERED on payment:', dOrder.domainName);
+        try { await sendPaymentConfirmationEmail(me?.businessEmail, dOrder.domainName, payment.amount); } catch (_) { }
       }
     } catch (e) {
       console.error('DOMAIN REGISTRATION FAILED for payment', String(payment._id), e.message);
@@ -1222,6 +1313,12 @@ async function markPaidAndProvision(payment) {
         order.billingStatus = 'active';
         order.suspendedAt = null;
         await order.save();
+
+        // Payment confirmation email
+        try {
+          const me = await Customer.findById(payment.customerId);
+          await sendPaymentConfirmationEmail(me?.businessEmail, order.organization?.domain, payment.amount);
+        } catch (_) { }
 
         // Also reset/extend the 29-day cycle for this subscription's billing record
         try {
@@ -1403,6 +1500,7 @@ async function runSubscriptionBillingCheck() {
       r.warnedAt = now;
       await r.save();
       results.warned.push(`${r.domain} (${r.skuId})`);
+      try { await sendRenewalWarningEmail(await emailForDomain(r.domain), r.domain, r.nextBillingDate); } catch (_) { }
     }
 
     // Suspend when past the 29-day mark
@@ -1414,6 +1512,7 @@ async function runSubscriptionBillingCheck() {
         await r.save();
         results.suspended.push(`${r.domain} (${r.skuId})`);
         console.log('SUB SUSPENDED (29-day, non-payment):', r.domain, r.skuId);
+        try { await sendSuspensionEmail(await emailForDomain(r.domain), r.domain); } catch (_) { }
       } catch (e) {
         console.error('SUB SUSPEND FAILED', r.domain, r.skuId, e.message);
       }
@@ -1501,6 +1600,108 @@ app.get('/api/cron/subscription-billing', async (req, res) => {
 });
 
 // ===== END EXISTING SUBSCRIPTION BILLING =====
+
+// ==================== ADMIN: EMAIL MANAGEMENT ====================
+// Get all templates (custom merged over defaults) + whether email is configured
+app.get('/api/admin/email/templates', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const custom = await EmailTemplate.find();
+    const byKey = {}; custom.forEach(t => { byKey[t.key] = t; });
+    const out = {};
+    for (const key of ['warning', 'suspension', 'payment']) {
+      const def = DEFAULT_EMAIL_TEMPLATES[key];
+      const c = byKey[key];
+      out[key] = {
+        subject: c?.subject ?? def.subject,
+        heading: c?.heading ?? def.heading,
+        body: c?.body ?? def.body,
+        customized: !!c,
+      };
+    }
+    res.json({
+      templates: out,
+      emailConfigured: !!(process.env.EMAIL_USER && process.env.EMAIL_PASSWORD),
+      fromAddress: process.env.EMAIL_USER || null,
+      fromName: process.env.EMAIL_FROM_NAME || process.env.BRAND_NAME || 'Artisan Drywall LLC',
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Save (customize) a template
+app.put('/api/admin/email/templates/:key', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const key = req.params.key;
+    if (!['warning', 'suspension', 'payment'].includes(key)) return res.status(400).json({ error: 'Invalid template.' });
+    const { subject, heading, body } = req.body;
+    const t = await EmailTemplate.findOneAndUpdate(
+      { key },
+      { key, subject, heading, body, updatedAt: new Date() },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true, template: t });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Reset a template to default
+app.delete('/api/admin/email/templates/:key', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    await EmailTemplate.deleteOne({ key: req.params.key });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Preview a template (filled with sample data) — returns HTML
+app.post('/api/admin/email/preview', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { key } = req.body;
+    const sample = { domain: 'example.com', dueDate: new Date().toLocaleDateString(), amount: '$14.40', brand: BRAND_NAME };
+    const { subject, html } = await getFilledTemplate(key, sample);
+    res.json({ subject, html });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Send a test email of a template to a chosen address
+app.post('/api/admin/email/test', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+      return res.status(400).json({ error: 'Email not configured. Set EMAIL_USER and EMAIL_PASSWORD in Railway.' });
+    }
+    const { key, to } = req.body;
+    const dest = to || process.env.EMAIL_USER;
+    const sample = { domain: 'example.com', dueDate: new Date().toLocaleDateString(), amount: '$14.40', brand: BRAND_NAME };
+    const { subject, html } = await getFilledTemplate(key, sample);
+    const ok = await sendEmail(dest, '[TEST] ' + subject, html);
+    if (!ok) return res.status(500).json({ error: 'Send failed — check email credentials in Railway logs.' });
+    res.json({ success: true, sentTo: dest });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Send a custom one-off email to a customer (or any address)
+app.post('/api/admin/email/send', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+      return res.status(400).json({ error: 'Email not configured. Set EMAIL_USER and EMAIL_PASSWORD in Railway.' });
+    }
+    const { to, subject, message } = req.body;
+    if (!to || !subject || !message) return res.status(400).json({ error: 'To, subject, and message are required.' });
+    const bodyHtml = String(message).split('\n').map(l => l.trim() ? `<p>${l}</p>` : '').join('');
+    const ok = await sendEmail(to, subject, emailShell(subject, bodyHtml));
+    if (!ok) return res.status(500).json({ error: 'Send failed — check email credentials.' });
+    res.json({ success: true, sentTo: to });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // Secured cron endpoint — point an external daily cron (e.g. cron-job.org) here.
 app.get('/api/cron/billing-check', async (req, res) => {
