@@ -1339,29 +1339,39 @@ async function syncSubscriptionsForBilling(account) {
   } while (pageToken);
 
   let seeded = 0;
+  const seen = new Set();
   for (const s of subs) {
     const domain = s.customerDomain || s.customerId;
     const skuId = String(s.skuId || '');
     if (!domain || !skuId) continue;
+    // Skip duplicate domain+sku pairs within the same Google response
+    const key = `${domain}::${skuId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
     // Purchase date = Google creation time (ms epoch as string)
     const purchaseDate = s.creationTime ? new Date(Number(s.creationTime)) : new Date();
     const nextBillingDate = new Date(purchaseDate.getTime() + 29 * 24 * 60 * 60 * 1000);
 
-    const existing = await SubBilling.findOne({ domain, skuId });
-    if (!existing) {
-      await SubBilling.create({
-        account, domain, skuId, subscriptionId: s.subscriptionId,
-        purchaseDate, nextBillingDate,
-        billingStatus: s.status === 'SUSPENDED' ? 'suspended' : 'active',
-      });
-      seeded++;
-    } else {
-      // Keep purchaseDate stable; only backfill if missing
-      if (!existing.purchaseDate) { existing.purchaseDate = purchaseDate; }
-      if (!existing.nextBillingDate) { existing.nextBillingDate = nextBillingDate; }
-      existing.subscriptionId = s.subscriptionId || existing.subscriptionId;
-      existing.updatedAt = new Date();
-      await existing.save();
+    try {
+      // Atomic upsert: insert if new (setting seed fields once), otherwise just touch subscriptionId.
+      const r = await SubBilling.updateOne(
+        { domain, skuId },
+        {
+          $setOnInsert: {
+            account, purchaseDate, nextBillingDate,
+            billingStatus: s.status === 'SUSPENDED' ? 'suspended' : 'active',
+          },
+          $set: { subscriptionId: s.subscriptionId || '', updatedAt: new Date() },
+        },
+        { upsert: true }
+      );
+      if (r.upsertedCount) seeded++;
+    } catch (e) {
+      // Ignore duplicate-key races; keep going
+      if (!String(e.message || '').includes('E11000')) {
+        console.error('SUB BILLING SYNC error for', domain, skuId, e.message);
+      }
     }
   }
   return { account, total: subs.length, seeded };
@@ -1411,6 +1421,37 @@ async function runSubscriptionBillingCheck() {
   }
   return results;
 }
+
+// Admin: start the 29-day cycle from TODAY for existing subs (so old purchase dates don't instantly suspend)
+app.post('/api/admin/billing/start-from-today', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const onlyPastDue = req.body?.onlyPastDue !== false; // default: only reset those already past due / suspended
+    const now = new Date();
+    const next = new Date(now.getTime() + 29 * 24 * 60 * 60 * 1000);
+    const filter = onlyPastDue
+      ? { $or: [{ nextBillingDate: { $lte: now } }, { billingStatus: 'suspended' }, { billingStatus: 'warned' }] }
+      : {};
+    const records = await SubBilling.find(filter);
+    let reset = 0;
+    for (const r of records) {
+      // If it was suspended by us, reactivate it in Google
+      if (r.billingStatus === 'suspended') {
+        try { await setSubscriptionState(r.account, r.domain, r.skuId, 'activate'); } catch (_) { }
+      }
+      r.lastPaymentDate = now;
+      r.nextBillingDate = next;
+      r.billingStatus = 'active';
+      r.warnedAt = null;
+      r.suspendedAt = null;
+      r.updatedAt = now;
+      await r.save();
+      reset++;
+    }
+    res.json({ success: true, reset, onlyPastDue });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // Admin: sync existing subscriptions into billing tracking (seed from Google creation dates)
 app.post('/api/admin/billing/sync', authenticateCustomer, requireAdmin, async (req, res) => {
@@ -3082,6 +3123,47 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'Server is running' });
 });
 
+// ==================== DAILY BILLING SCHEDULER ====================
+// Runs the billing checks automatically at 12:00 AM every day (in-code backup to external cron).
+// Set TZ env var (e.g. TZ=America/New_York) to control which timezone midnight uses.
+async function runDailyBillingTasks() {
+  console.log('⏰ DAILY BILLING TASKS running at', new Date().toISOString());
+  try {
+    // Sync existing subscriptions from Google, then run the 29-day check
+    await syncSubscriptionsForBilling('pk');
+    await syncSubscriptionsForBilling('usa');
+    const subResults = await runSubscriptionBillingCheck();
+    console.log('⏰ Subscription billing:', JSON.stringify(subResults));
+  } catch (e) {
+    console.error('Daily subscription billing error:', e.message);
+  }
+  try {
+    // Also run the portal-order billing check (new orders)
+    const orderResults = await runBillingCheck();
+    console.log('⏰ Order billing:', JSON.stringify(orderResults));
+  } catch (e) {
+    console.error('Daily order billing error:', e.message);
+  }
+}
+
+function msUntilNextMidnight() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(24, 0, 0, 0); // next 00:00:00.000
+  return next.getTime() - now.getTime();
+}
+
+function scheduleDailyBilling() {
+  const wait = msUntilNextMidnight();
+  const hours = (wait / 3600000).toFixed(1);
+  console.log(`⏰ Next daily billing run scheduled in ${hours}h (at next 12:00 AM).`);
+  setTimeout(() => {
+    runDailyBillingTasks();
+    // Then repeat every 24 hours
+    setInterval(runDailyBillingTasks, 24 * 60 * 60 * 1000);
+  }, wait);
+}
+
 // ==================== SERVER START ====================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
@@ -3089,6 +3171,8 @@ app.listen(PORT, () => {
   console.log(`📧 Email service: ${process.env.EMAIL_USER}`);
   console.log(`🔐 JWT Secret configured: ${process.env.JWT_SECRET ? 'Yes' : 'No'}`);
   console.log(`☁️ Google Workspace configured: ${process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? 'Yes' : 'No'}`);
+  // Start the daily midnight billing scheduler
+  scheduleDailyBilling();
 });
 
 module.exports = app;
