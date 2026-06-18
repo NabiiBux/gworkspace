@@ -1560,61 +1560,103 @@ function toIsoCountry(name) {
   return s.slice(0, 2).toUpperCase();                   // last-resort fallback
 }
 
+// ===== DomainNameAPI SOAP client (official method, like their nodejs-dna library) =====
+// Registration uses the SOAP API at whmcs.domainnameapi.com with username/password.
+// Set DNA_USERNAME and DNA_PASSWORD (your domainnameapi.com login) in Railway.
+let _dnaSoapClientPromise = null;
+function getDnaSoapClient() {
+  if (_dnaSoapClientPromise) return _dnaSoapClientPromise;
+  const soap = require('strong-soap').soap;
+  const wsdl = process.env.DNA_SOAP_WSDL || 'https://whmcs.domainnameapi.com/DomainApi.svc?singlewsdl';
+  _dnaSoapClientPromise = new Promise((resolve, reject) => {
+    soap.createClient(wsdl, { strictSSL: false, wsdl_options: { timeout: 20000 } }, (err, client) => {
+      if (err) { _dnaSoapClientPromise = null; reject(new Error('SOAP connection error: ' + err.message)); }
+      else resolve(client);
+    });
+  });
+  return _dnaSoapClientPromise;
+}
+
+// Build a SOAP contact object from the customer profile (DomainNameAPI contact structure)
+function buildDnaContact(customer) {
+  return {
+    FirstName: (customer.firstName || customer.username || 'Customer').trim(),
+    LastName: (customer.lastName || customer.companyName || 'Owner').trim(),
+    Company: (customer.companyName || 'N/A').trim(),
+    EMail: customer.businessEmail || 'admin@example.com',
+    AddressLine1: (customer.address || 'N/A').trim(),
+    State: (customer.state || 'N/A').trim(),
+    City: (customer.city || 'N/A').trim(),
+    Country: toIsoCountry(customer.country),     // 2-letter ISO code
+    ZipCode: (customer.postalCode || '00000').trim(),
+    Phone: (customer.phone || '0000000000').toString().replace(/[^0-9]/g, '') || '0000000000',
+    PhoneCountryCode: (customer.phoneCountryCode || '1').toString().replace(/[^0-9]/g, '') || '1',
+    Fax: '',
+    FaxCountryCode: '',
+    Type: 'Contact',
+  };
+}
+
+// Register a domain via the official SOAP RegisterWithContactInfo method
 async function registerDomainViaApi(customer, domainName, period) {
   const dom = (domainName || '').toLowerCase().trim();
-  // DomainNameAPI throws NullReferenceException if any expected field is null — send safe non-empty defaults.
-  const contact = {
-    firstName: (customer.firstName || customer.username || 'Customer').trim(),
-    lastName: (customer.lastName || customer.companyName || 'Owner').trim(),
-    companyName: (customer.companyName || customer.firstName || 'N/A').trim(),
-    eMail: customer.businessEmail || 'admin@example.com',
-    address: (customer.address || 'N/A').trim(),
-    phoneCountryCode: (customer.phoneCountryCode || '1').toString().replace(/[^0-9]/g, '') || '1',
-    phone: (customer.phone || '0000000000').toString().replace(/[^0-9]/g, '') || '0000000000',
-    faxCountryCode: '1',
-    fax: '0000000000',
-    postalCode: (customer.postalCode || '00000').trim(),
-    country: toIsoCountry(customer.country),   // 2-letter ISO code (was the NullReferenceException cause)
-    city: (customer.city || 'N/A').trim(),
-    state: (customer.state || 'N/A').trim(),
-    contactType: 'Registrant',
-    isHidden: true,
+  const username = process.env.DNA_USERNAME;
+  const password = process.env.DNA_PASSWORD;
+  if (!username || !password) throw new Error('DNA_USERNAME / DNA_PASSWORD not set (required for SOAP registration).');
+
+  const contact = buildDnaContact(customer);
+  const nameServers = ['dns.domainnameapi.com', 'web.domainnameapi.com'];
+
+  const parameters = {
+    request: {
+      Password: password,
+      UserName: username,
+      DomainName: dom,
+      Period: Number(period) || 1,
+      NameServerList: nameServers,
+      LockStatus: true,
+      PrivacyProtectionStatus: false,
+      AdministrativeContact: contact,
+      BillingContact: contact,
+      TechnicalContact: contact,
+      RegistrantContact: contact,
+    },
   };
-  const headers = dnaAuthHeaders();
-  headers['accept'] = 'text/plain';
-  const payload = {
-    domainName: dom,
-    period: Number(period) || 1,
-    nameServers: ['ns1.domainnameapi.com', 'ns2.domainnameapi.com'],
-    contacts: [
-      { ...contact, contactType: 'Registrant' },
-      { ...contact, contactType: 'Administrative' },
-      { ...contact, contactType: 'Billing' },
-      { ...contact, contactType: 'Technical' },
-    ],
-    tldAttributes: {},
-    useTrusteeContact: false,
-  };
-  console.log('DNA REGISTER ->', dom, 'period', payload.period, '| payload:', JSON.stringify(payload));
-  const resp = await fetch(`${DNA_BASE}/api/v1/domains/register-with-contacts`, {
-    method: 'POST', headers, body: JSON.stringify(payload),
+
+  console.log('DNA SOAP REGISTER ->', dom, 'period', parameters.request.Period);
+  const client = await getDnaSoapClient();
+
+  const result = await new Promise((resolve, reject) => {
+    client.RegisterWithContactInfo(parameters, (err, res) => {
+      if (err) return reject(new Error('SOAP register error: ' + (err.message || err)));
+      resolve(res);
+    });
   });
-  const raw = await resp.text();
-  console.log('DNA REGISTER <-', resp.status, raw.slice(0, 600));
-  let data;
-  try { data = JSON.parse(raw); } catch (_) { throw new Error(`Registration response error (${resp.status}): ${raw.slice(0, 150)}`); }
-  // Only an explicit "already registered" message counts as already-owned success.
-  const errMsg = (data?.error?.message || data?.error?.details || '').toLowerCase();
-  const alreadyReg = errMsg.includes('already been registered') || errMsg.includes('already registered');
-  if (alreadyReg) {
-    console.log('DNA REGISTER: domain already registered (treating as success):', dom);
+
+  // Dig out the ...Result payload (matches official lib's callApiFunction)
+  let data = result?.RegisterWithContactInfoResult || null;
+  if (!data) {
+    const firstKey = Object.keys(result || {})[0];
+    if (result?.[firstKey]?.RegisterWithContactInfoResult) data = result[firstKey].RegisterWithContactInfoResult;
+  }
+  console.log('DNA SOAP REGISTER <-', JSON.stringify(data).slice(0, 600));
+
+  if (!data || typeof data !== 'object') throw new Error('Registration: no data returned from SOAP.');
+  if (data.faultcode) throw new Error('Registration fault: ' + (data.faultstring || data.faultcode));
+
+  const opResult = (data.OperationResult || '').toString().toUpperCase();
+  if (opResult === 'SUCCESS' || (data.DomainInfo && typeof data.DomainInfo === 'object')) {
+    return { success: true, domainName: dom, data: data.DomainInfo || data };
+  }
+
+  // Already registered → treat as owned/success
+  const msg = (data.OperationMessage || data.Message || '').toString();
+  if (/already.*regist|exist/i.test(msg)) {
+    console.log('DNA SOAP REGISTER: already registered (treating as success):', dom);
     return { success: true, alreadyRegistered: true, domainName: dom };
   }
-  if (!resp.ok || data.success === false) {
-    // Surface the real error (e.g. 403 "Domain Error") so failed registrations are NOT hidden.
-    throw new Error(data?.error?.message || data?.error?.details || data?.reason || `Registration failed (${resp.status})`);
-  }
-  return data;
+
+  throw new Error('Registration failed: ' + (msg || opResult || 'Unknown error'));
 }
 
 // Customer: start a PAID domain registration — creates a domain order + checkout (pay first)
