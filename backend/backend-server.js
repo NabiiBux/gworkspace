@@ -235,6 +235,24 @@ const DomainOrderSchema = new mongoose.Schema({
 });
 const DomainOrder = mongoose.model('DomainOrder', DomainOrderSchema);
 
+// Tracks a 29-day billing cycle for EACH Google subscription (incl. pre-existing ones).
+// Seeded from the Google subscription creation date.
+const SubBillingSchema = new mongoose.Schema({
+  account: { type: String, default: 'pk' },        // 'pk' or 'usa'
+  domain: { type: String, index: true },
+  skuId: String,
+  subscriptionId: String,
+  purchaseDate: Date,                                // Google creationTime
+  nextBillingDate: Date,                             // purchaseDate (or last payment) + 29 days
+  billingStatus: { type: String, enum: ['active', 'warned', 'suspended'], default: 'active' },
+  lastPaymentDate: Date,
+  warnedAt: Date,
+  suspendedAt: Date,
+  updatedAt: { type: Date, default: Date.now },
+});
+SubBillingSchema.index({ domain: 1, skuId: 1 }, { unique: true });
+const SubBilling = mongoose.model('SubBilling', SubBillingSchema);
+
 // Payment settings (which methods are enabled) — keys themselves live in env vars
 const PaymentSettingsSchema = new mongoose.Schema({
   singleton: { type: String, default: 'main', unique: true },
@@ -1204,6 +1222,33 @@ async function markPaidAndProvision(payment) {
         order.billingStatus = 'active';
         order.suspendedAt = null;
         await order.save();
+
+        // Also reset/extend the 29-day cycle for this subscription's billing record
+        try {
+          const domain = (order.organization?.domain || '').toLowerCase();
+          const planDoc = await Plan.findOne({ planId: order.plan?.id });
+          if (domain && planDoc?.skuId) {
+            const nowD = new Date();
+            const next = new Date(nowD.getTime() + 29 * 24 * 60 * 60 * 1000);
+            const rec = await SubBilling.findOne({ domain, skuId: planDoc.skuId });
+            if (rec) {
+              if (rec.billingStatus === 'suspended') {
+                try { await setSubscriptionState(rec.account, domain, planDoc.skuId, 'activate'); } catch (_) { }
+              }
+              rec.lastPaymentDate = nowD;
+              rec.nextBillingDate = next;
+              rec.billingStatus = 'active';
+              rec.suspendedAt = null;
+              rec.warnedAt = null;
+              await rec.save();
+            } else {
+              await SubBilling.create({
+                account: order.account || 'pk', domain, skuId: planDoc.skuId,
+                purchaseDate: nowD, lastPaymentDate: nowD, nextBillingDate: next, billingStatus: 'active',
+              });
+            }
+          }
+        } catch (_) { }
       }
     }
   } catch (e) {
@@ -1273,6 +1318,148 @@ async function runBillingCheck() {
   }
   return results;
 }
+
+// ===== EXISTING SUBSCRIPTION 29-DAY BILLING (seeded from Google creation date) =====
+
+// Pull all subscriptions from a Google reseller account and seed/update billing records.
+async function syncSubscriptionsForBilling(account) {
+  let auth;
+  try {
+    auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+  } catch (e) {
+    return { account, error: e.message, seeded: 0 };
+  }
+  const reseller = google.reseller({ version: 'v1', auth });
+  let subs = [];
+  let pageToken;
+  do {
+    const resp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
+    subs = subs.concat(resp.data.subscriptions || []);
+    pageToken = resp.data.nextPageToken;
+  } while (pageToken);
+
+  let seeded = 0;
+  for (const s of subs) {
+    const domain = s.customerDomain || s.customerId;
+    const skuId = String(s.skuId || '');
+    if (!domain || !skuId) continue;
+    // Purchase date = Google creation time (ms epoch as string)
+    const purchaseDate = s.creationTime ? new Date(Number(s.creationTime)) : new Date();
+    const nextBillingDate = new Date(purchaseDate.getTime() + 29 * 24 * 60 * 60 * 1000);
+
+    const existing = await SubBilling.findOne({ domain, skuId });
+    if (!existing) {
+      await SubBilling.create({
+        account, domain, skuId, subscriptionId: s.subscriptionId,
+        purchaseDate, nextBillingDate,
+        billingStatus: s.status === 'SUSPENDED' ? 'suspended' : 'active',
+      });
+      seeded++;
+    } else {
+      // Keep purchaseDate stable; only backfill if missing
+      if (!existing.purchaseDate) { existing.purchaseDate = purchaseDate; }
+      if (!existing.nextBillingDate) { existing.nextBillingDate = nextBillingDate; }
+      existing.subscriptionId = s.subscriptionId || existing.subscriptionId;
+      existing.updatedAt = new Date();
+      await existing.save();
+    }
+  }
+  return { account, total: subs.length, seeded };
+}
+
+// Suspend / reactivate a subscription by domain + sku on the right account
+async function setSubscriptionState(account, domain, skuId, action) {
+  const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+  const reseller = google.reseller({ version: 'v1', auth });
+  if (action === 'suspend') {
+    await reseller.subscriptions.suspend({ customerId: domain, subscriptionId: skuId });
+  } else {
+    await reseller.subscriptions.activate({ customerId: domain, subscriptionId: skuId });
+  }
+}
+
+// The 29-day check for ALL tracked subscriptions (existing + new).
+async function runSubscriptionBillingCheck() {
+  const now = new Date();
+  const results = { checked: 0, warned: [], suspended: [] };
+  const records = await SubBilling.find({ billingStatus: { $in: ['active', 'warned'] }, nextBillingDate: { $ne: null } });
+  for (const r of records) {
+    results.checked++;
+    const daysLeft = (new Date(r.nextBillingDate).getTime() - now.getTime()) / (24 * 60 * 60 * 1000);
+
+    // Warn ~4 days before
+    if (daysLeft <= 4 && daysLeft > 0 && r.billingStatus === 'active') {
+      r.billingStatus = 'warned';
+      r.warnedAt = now;
+      await r.save();
+      results.warned.push(`${r.domain} (${r.skuId})`);
+    }
+
+    // Suspend when past the 29-day mark
+    if (daysLeft <= 0 && r.billingStatus !== 'suspended') {
+      try {
+        await setSubscriptionState(r.account, r.domain, r.skuId, 'suspend');
+        r.billingStatus = 'suspended';
+        r.suspendedAt = now;
+        await r.save();
+        results.suspended.push(`${r.domain} (${r.skuId})`);
+        console.log('SUB SUSPENDED (29-day, non-payment):', r.domain, r.skuId);
+      } catch (e) {
+        console.error('SUB SUSPEND FAILED', r.domain, r.skuId, e.message);
+      }
+    }
+  }
+  return results;
+}
+
+// Admin: sync existing subscriptions into billing tracking (seed from Google creation dates)
+app.post('/api/admin/billing/sync', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const pk = await syncSubscriptionsForBilling('pk');
+    const usa = await syncSubscriptionsForBilling('usa');
+    res.json({ success: true, pk, usa });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: list tracked subscription billing records
+app.get('/api/admin/billing/subscriptions', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const rows = await SubBilling.find().sort({ nextBillingDate: 1 }).limit(1000);
+    res.json({ subscriptions: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: run the subscription billing check now
+app.post('/api/admin/billing/run', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const results = await runSubscriptionBillingCheck();
+    res.json({ success: true, ...results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Cron: run the subscription billing check (point a daily external cron here)
+app.get('/api/cron/subscription-billing', async (req, res) => {
+  if (!req.query.secret || req.query.secret !== process.env.JWT_SECRET) {
+    return res.status(403).json({ error: 'Invalid secret.' });
+  }
+  try {
+    // Optionally re-sync to pick up new subs, then check
+    if (req.query.sync === '1') { await syncSubscriptionsForBilling('pk'); await syncSubscriptionsForBilling('usa'); }
+    const results = await runSubscriptionBillingCheck();
+    console.log('SUBSCRIPTION BILLING CHECK:', JSON.stringify(results));
+    res.json({ success: true, ...results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ===== END EXISTING SUBSCRIPTION BILLING =====
 
 // Secured cron endpoint — point an external daily cron (e.g. cron-job.org) here.
 app.get('/api/cron/billing-check', async (req, res) => {

@@ -1526,6 +1526,23 @@ const AdminPaymentsSection = () => {
   const [balErr, setBalErr] = useState('');
   const [domainOrders, setDomainOrders] = useState([]);
   const [retryMsg, setRetryMsg] = useState({});
+  const [subBilling, setSubBilling] = useState([]);
+  const [subBillingMsg, setSubBillingMsg] = useState('');
+
+  const loadSubBilling = async () => {
+    try { const r = await axios.get(`${API_URL}/admin/billing/subscriptions`); setSubBilling(r.data.subscriptions || []); }
+    catch (_) { }
+  };
+  const syncSubBilling = async () => {
+    setSubBillingMsg('Syncing from Google…');
+    try { const r = await axios.post(`${API_URL}/admin/billing/sync`, {}); setSubBillingMsg(`✓ Synced. PK seeded ${r.data.pk?.seeded || 0}, USA seeded ${r.data.usa?.seeded || 0}`); loadSubBilling(); }
+    catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Sync failed.'); }
+  };
+  const runSubBilling = async () => {
+    setSubBillingMsg('Running check…');
+    try { const r = await axios.post(`${API_URL}/admin/billing/run`, {}); setSubBillingMsg(`✓ Checked ${r.data.checked} · warned ${r.data.warned.length} · suspended ${r.data.suspended.length}`); loadSubBilling(); }
+    catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Check failed.'); }
+  };
 
   const loadDomainOrders = async () => {
     try { const r = await axios.get(`${API_URL}/admin/domain-orders`); setDomainOrders(r.data.orders || []); }
@@ -1599,6 +1616,7 @@ const AdminPaymentsSection = () => {
         <button className={`btn ${tab === 'settings' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('settings')}>Settings</button>
         <button className={`btn ${tab === 'transactions' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('transactions')}>Transactions</button>
         <button className={`btn ${tab === 'domains' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('domains'); loadDomainOrders(); }}>Domain Orders</button>
+        <button className={`btn ${tab === 'subbilling' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('subbilling'); loadSubBilling(); }}>Subscription Billing</button>
       </div>
 
       {tab === 'settings' && (
@@ -1771,12 +1789,42 @@ const AdminPaymentsSection = () => {
           )}
         </>
       )}
+
+      {tab === 'subbilling' && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <h3 style={{ margin: 0 }}>Subscription billing (29-day cycle)</h3>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-secondary" onClick={syncSubBilling}>Sync from Google</button>
+              <button className="btn btn-primary" onClick={runSubBilling}>Run check now</button>
+            </div>
+          </div>
+          <p style={{ color: '#6b7280', fontSize: 14 }}>
+            Each subscription gets a 29-day cycle from its purchase date (Google creation date). Click <strong>Sync from Google</strong> first to load existing subscriptions, then <strong>Run check</strong> warns those near due and suspends those past 29 days. Set up a daily cron at <code>/api/cron/subscription-billing?secret=YOUR_JWT_SECRET&sync=1</code>.
+          </p>
+          {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
+          {subBilling.length === 0 ? <p>No subscriptions tracked yet. Click "Sync from Google" to load them.</p> : (
+            <table className="data-table">
+              <thead><tr><th>Domain</th><th>SKU</th><th>Acct</th><th>Purchased</th><th>Next bill (29d)</th><th>Status</th></tr></thead>
+              <tbody>
+                {subBilling.map(r => (
+                  <tr key={r._id}>
+                    <td>{r.domain}</td>
+                    <td>{r.skuId}</td>
+                    <td>{(r.account || 'pk').toUpperCase()}</td>
+                    <td>{r.purchaseDate ? new Date(r.purchaseDate).toLocaleDateString() : '—'}</td>
+                    <td>{r.nextBillingDate ? new Date(r.nextBillingDate).toLocaleDateString() : '—'}</td>
+                    <td><span className={`status ${r.billingStatus === 'active' ? 'active' : r.billingStatus === 'suspended' ? 'suspended' : 'pending'}`}>{r.billingStatus}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
     </div>
   );
 };
-
-
-// ==================== CUSTOMER PORTAL ====================
 // Shared theme tokens for the customer portal (matches portal.gnbmentor.com)
 const TEAL = '#0F766E';
 const TEAL_DARK = '#115E56';
