@@ -430,11 +430,16 @@ async function seedPlans() {
 
 // ==================== EMAIL SERVICE ====================
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true,               // SSL on 465 (more reliable on Railway than the 'gmail' shortcut)
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASSWORD,
   },
+  connectionTimeout: 15000,
+  greetingTimeout: 10000,
+  socketTimeout: 20000,
 });
 
 const sendEmail = async (to, subject, htmlContent) => {
