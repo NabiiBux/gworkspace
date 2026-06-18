@@ -263,6 +263,23 @@ const EmailTemplateSchema = new mongoose.Schema({
 });
 const EmailTemplate = mongoose.model('EmailTemplate', EmailTemplateSchema);
 
+// Abuse / spam complaint log — track reports against Voice customers
+const AbuseReportSchema = new mongoose.Schema({
+  domain: { type: String, index: true },     // customer domain the report is about
+  customerId: mongoose.Schema.Types.ObjectId,
+  reportType: { type: String, enum: ['spam_calls', 'spam_sms', 'robocall', 'harassment', 'fraud_scam', 'carrier_block', 'google_notice', 'other'], default: 'other' },
+  source: String,                              // who reported (recipient, carrier, Google, internal)
+  severity: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
+  description: String,
+  phoneNumber: String,                         // the number involved, if known
+  status: { type: String, enum: ['open', 'investigating', 'actioned', 'dismissed'], default: 'open' },
+  actionTaken: String,                         // e.g. 'warned', 'suspended', 'none'
+  loggedBy: String,                            // admin who logged it
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+});
+const AbuseReport = mongoose.model('AbuseReport', AbuseReportSchema);
+
 // Payment settings (which methods are enabled) — keys themselves live in env vars
 const PaymentSettingsSchema = new mongoose.Schema({
   singleton: { type: String, default: 'main', unique: true },
@@ -432,7 +449,7 @@ async function seedPlans() {
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 465,
-  secure: true,               // SSL on 465 (more reliable on Railway than the 'gmail' shortcut)
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASSWORD,
@@ -442,9 +459,34 @@ const transporter = nodemailer.createTransport({
   socketTimeout: 20000,
 });
 
+// Send email via Resend HTTP API (works on Railway where SMTP ports are blocked).
+// Set RESEND_API_KEY and EMAIL_FROM (e.g. "Artisan Drywall LLC <noreply@yourdomain>").
+async function sendViaResend(to, subject, html) {
+  const fromName = process.env.EMAIL_FROM_NAME || process.env.BRAND_NAME || 'Artisan Drywall LLC';
+  // Resend requires a verified domain sender; falls back to onboarding sender if EMAIL_FROM unset
+  const from = process.env.EMAIL_FROM || `${fromName} <onboarding@resend.dev>`;
+  const resp = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ from, to, subject, html }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(`Resend ${resp.status}: ${JSON.stringify(data).slice(0, 200)}`);
+  return data;
+}
+
 const sendEmail = async (to, subject, htmlContent) => {
   try {
     const fromName = process.env.EMAIL_FROM_NAME || process.env.BRAND_NAME || 'Artisan Drywall LLC';
+    // Prefer Resend (HTTP API — works on Railway where SMTP is blocked)
+    if (process.env.RESEND_API_KEY) {
+      await sendViaResend(to, subject, htmlContent);
+      return true;
+    }
+    // Fallback: SMTP (works only where outbound SMTP isn't blocked)
     await transporter.sendMail({
       from: `"${fromName}" <${process.env.EMAIL_USER}>`,
       to,
@@ -453,7 +495,7 @@ const sendEmail = async (to, subject, htmlContent) => {
     });
     return true;
   } catch (error) {
-    console.error('Email send error:', error);
+    console.error('Email send error:', error.message || error);
     return false;
   }
 };
@@ -1625,7 +1667,7 @@ app.get('/api/admin/email/templates', authenticateCustomer, requireAdmin, async 
     }
     res.json({
       templates: out,
-      emailConfigured: !!(process.env.EMAIL_USER && process.env.EMAIL_PASSWORD),
+      emailConfigured: !!(process.env.RESEND_API_KEY || (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD)),
       fromAddress: process.env.EMAIL_USER || null,
       fromName: process.env.EMAIL_FROM_NAME || process.env.BRAND_NAME || 'Artisan Drywall LLC',
     });
@@ -1676,8 +1718,8 @@ app.post('/api/admin/email/preview', authenticateCustomer, requireAdmin, async (
 // Send a test email of a template to a chosen address
 app.post('/api/admin/email/test', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-      return res.status(400).json({ error: 'Email not configured. Set EMAIL_USER and EMAIL_PASSWORD in Railway.' });
+    if (!process.env.RESEND_API_KEY && (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD)) {
+      return res.status(400).json({ error: 'Email not configured. Set RESEND_API_KEY (recommended on Railway) or EMAIL_USER + EMAIL_PASSWORD.' });
     }
     const { key, to } = req.body;
     const dest = to || process.env.EMAIL_USER;
@@ -1694,8 +1736,8 @@ app.post('/api/admin/email/test', authenticateCustomer, requireAdmin, async (req
 // Send a custom one-off email to a customer (or any address)
 app.post('/api/admin/email/send', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-      return res.status(400).json({ error: 'Email not configured. Set EMAIL_USER and EMAIL_PASSWORD in Railway.' });
+    if (!process.env.RESEND_API_KEY && (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD)) {
+      return res.status(400).json({ error: 'Email not configured. Set RESEND_API_KEY (recommended on Railway) or EMAIL_USER + EMAIL_PASSWORD.' });
     }
     const { to, subject, message } = req.body;
     if (!to || !subject || !message) return res.status(400).json({ error: 'To, subject, and message are required.' });
@@ -1707,6 +1749,169 @@ app.post('/api/admin/email/send', authenticateCustomer, requireAdmin, async (req
     res.status(500).json({ error: e.message });
   }
 });
+
+// Abuse detection signal: flag Voice customers with 2+ high-severity complaints.
+// Flag ONLY — never auto-suspends. The reseller reviews and suspends manually.
+async function computeAbuseFlags() {
+  const reports = await AbuseReport.find({ status: { $in: ['open', 'investigating'] } });
+  const byDomain = {};
+  for (const r of reports) {
+    const d = r.domain;
+    if (!byDomain[d]) byDomain[d] = { domain: d, total: 0, high: 0, types: new Set(), score: 0 };
+    byDomain[d].total++;
+    if (r.severity === 'high') byDomain[d].high++;
+    byDomain[d].types.add(r.reportType);
+    byDomain[d].score += (r.severity === 'high' ? 5 : r.severity === 'medium' ? 2 : 1);
+  }
+  // Flag rule: 2+ high-severity open complaints
+  const flagged = Object.values(byDomain)
+    .filter((c) => c.high >= 2)
+    .map((c) => ({ domain: c.domain, highSeverity: c.high, totalOpen: c.total, score: c.score, types: [...c.types] }))
+    .sort((a, b) => b.highSeverity - a.highSeverity || b.score - a.score);
+  return flagged;
+}
+
+// Admin: run the abuse check across ALL Voice customers (existing + new).
+// Pulls Voice subs from Google (so we cover existing customers from their purchase date),
+// and cross-references logged complaints. Returns flagged customers only — NO auto-suspend.
+app.get('/api/admin/abuse/check', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const flagged = await computeAbuseFlags();
+    const flaggedDomains = new Set(flagged.map((f) => f.domain));
+
+    // Pull Voice customers from Google to show their purchase date + status alongside flags
+    let voiceCustomers = [];
+    try {
+      const auth = await getUsaAuth();
+      const reseller = google.reseller({ version: 'v1', auth });
+      const voiceSkus = { '1010330003': 'Voice Starter', '1010330004': 'Voice Standard', '1010330002': 'Voice Premier' };
+      let subs = []; let pageToken;
+      do {
+        const resp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
+        subs = subs.concat(resp.data.subscriptions || []);
+        pageToken = resp.data.nextPageToken;
+      } while (pageToken);
+      voiceCustomers = subs
+        .filter((s) => voiceSkus[String(s.skuId)])
+        .map((s) => {
+          const domain = s.customerDomain || s.customerId;
+          const created = s.creationTime ? Number(s.creationTime) : null;
+          const f = flagged.find((x) => x.domain === domain);
+          return {
+            domain,
+            plan: voiceSkus[String(s.skuId)],
+            status: s.status,
+            purchaseDate: created,
+            flagged: flaggedDomains.has(domain),
+            highSeverity: f?.highSeverity || 0,
+            totalOpen: f?.totalOpen || 0,
+          };
+        });
+    } catch (e) {
+      // Google not connected — still return complaint-based flags
+      return res.json({ flagged, voiceCustomers: [], note: 'USA reseller not connected; showing complaint-based flags only. ' + e.message });
+    }
+
+    res.json({ flagged, voiceCustomers, flaggedCount: flagged.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== ADMIN: ABUSE / SPAM COMPLAINT TRACKING ====================
+// Log a complaint received about a customer (from a recipient, carrier, Google, or internal review)
+app.post('/api/admin/abuse-reports', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { domain, reportType, source, severity, description, phoneNumber } = req.body;
+    const dom = (domain || '').toLowerCase().trim();
+    if (!dom) return res.status(400).json({ error: 'Customer domain is required.' });
+    const customer = await Customer.findOne({ domain: dom });
+    const me = await Customer.findById(req.customerId);
+    const report = await AbuseReport.create({
+      domain: dom,
+      customerId: customer?._id,
+      reportType: reportType || 'other',
+      source: source || '',
+      severity: ['low', 'medium', 'high'].includes(severity) ? severity : 'medium',
+      description: description || '',
+      phoneNumber: phoneNumber || '',
+      loggedBy: me?.businessEmail || 'admin',
+    });
+    res.status(201).json({ success: true, report });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// List all abuse reports (optionally filter by domain or status)
+app.get('/api/admin/abuse-reports', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const filter = {};
+    if (req.query.domain) filter.domain = req.query.domain.toLowerCase();
+    if (req.query.status) filter.status = req.query.status;
+    const reports = await AbuseReport.find(filter).sort({ createdAt: -1 }).limit(1000);
+
+    // Per-customer risk summary (more/severe reports = higher risk)
+    const byDomain = {};
+    for (const r of reports) {
+      const d = r.domain;
+      if (!byDomain[d]) byDomain[d] = { domain: d, total: 0, open: 0, high: 0, score: 0 };
+      byDomain[d].total++;
+      if (r.status === 'open' || r.status === 'investigating') byDomain[d].open++;
+      if (r.severity === 'high') byDomain[d].high++;
+      byDomain[d].score += (r.severity === 'high' ? 5 : r.severity === 'medium' ? 2 : 1);
+    }
+    const customers = Object.values(byDomain).map((c) => ({
+      ...c,
+      risk: c.score >= 10 || c.high >= 2 ? 'high' : c.score >= 4 ? 'medium' : 'low',
+    })).sort((a, b) => b.score - a.score);
+
+    res.json({ reports, customers });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Update a report's status / action taken
+app.patch('/api/admin/abuse-reports/:id', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { status, actionTaken } = req.body;
+    const report = await AbuseReport.findById(req.params.id);
+    if (!report) return res.status(404).json({ error: 'Report not found.' });
+    if (status && ['open', 'investigating', 'actioned', 'dismissed'].includes(status)) report.status = status;
+    if (actionTaken !== undefined) report.actionTaken = actionTaken;
+    report.updatedAt = new Date();
+    await report.save();
+    res.json({ success: true, report });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Suspend a flagged customer's Voice subscription (action on confirmed abuse)
+app.post('/api/admin/abuse-reports/suspend-customer', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const dom = (req.body.domain || '').toLowerCase().trim();
+    if (!dom) return res.status(400).json({ error: 'Domain required.' });
+    let auth;
+    try { auth = await getUsaAuth(); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
+    const reseller = google.reseller({ version: 'v1', auth });
+    const subResp = await reseller.subscriptions.list({ customerId: dom });
+    const voiceSkus = ['1010330003', '1010330004', '1010330002'];
+    const subs = (subResp.data.subscriptions || []).filter((s) => voiceSkus.includes(String(s.skuId)));
+    let suspended = 0;
+    for (const s of subs) {
+      try { await reseller.subscriptions.suspend({ customerId: dom, subscriptionId: s.skuId }); suspended++; } catch (_) { }
+    }
+    // Mark related open reports as actioned
+    await AbuseReport.updateMany({ domain: dom, status: { $in: ['open', 'investigating'] } }, { $set: { status: 'actioned', actionTaken: 'suspended', updatedAt: new Date() } });
+    res.json({ success: true, suspended, message: `Suspended ${suspended} Voice subscription(s) for ${dom}.` });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+// ==================== ABUSE TRACKING end ====================
 
 // Secured cron endpoint — point an external daily cron (e.g. cron-job.org) here.
 app.get('/api/cron/billing-check', async (req, res) => {
@@ -3230,6 +3435,78 @@ app.get('/api/dashboard', authenticateCustomer, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ==================== VOICE USAGE & ABUSE MONITORING (reseller) ====================
+// Surfaces, per Voice customer: seat utilization, subscription status/age, and risk flags.
+// NOTE: Google's Reseller API exposes subscription/seat data, not granular per-call logs.
+// Detailed call/SMS activity requires Google Voice API/Reports access (added here if available).
+app.get('/api/admin/voice/usage', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    let auth;
+    try { auth = await getUsaAuth(); }
+    catch (e) { return res.status(400).json({ error: e.message, notConnected: true }); }
+    const reseller = google.reseller({ version: 'v1', auth });
+
+    const voiceSkus = { '1010330003': 'Voice Starter', '1010330004': 'Voice Standard', '1010330002': 'Voice Premier' };
+
+    // Pull all subscriptions from the USA (Voice) account
+    let subs = [];
+    let pageToken;
+    do {
+      const resp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
+      subs = subs.concat(resp.data.subscriptions || []);
+      pageToken = resp.data.nextPageToken;
+    } while (pageToken);
+
+    const now = Date.now();
+    const rows = subs
+      .filter((s) => voiceSkus[String(s.skuId)])
+      .map((s) => {
+        const domain = s.customerDomain || s.customerId;
+        const seats = s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? 0;
+        const licensed = s.seats?.licensedNumberOfSeats ?? null;
+        const created = s.creationTime ? Number(s.creationTime) : null;
+        const ageDays = created ? Math.floor((now - created) / 86400000) : null;
+
+        // Heuristic flags from available signals (subscription-level)
+        const flags = [];
+        if (s.status === 'SUSPENDED') flags.push('suspended');
+        // Idle signal: licensed seats far below purchased seats = paying for unused capacity
+        if (licensed != null && seats > 0 && licensed === 0) flags.push('idle_no_licensed_seats');
+        // New + high seat count can be worth reviewing (rapid scale = possible misuse)
+        if (ageDays != null && ageDays < 7 && seats >= 10) flags.push('new_high_seat_count');
+
+        return {
+          domain,
+          plan: voiceSkus[String(s.skuId)],
+          skuId: s.skuId,
+          status: s.status,
+          purchasedSeats: seats,
+          licensedSeats: licensed,
+          utilization: seats > 0 && licensed != null ? Math.round((licensed / seats) * 100) : null,
+          ageDays,
+          createdAt: created,
+          flags,
+          risk: flags.length === 0 ? 'ok' : (flags.includes('suspended') ? 'suspended' : 'review'),
+        };
+      });
+
+    const summary = {
+      totalVoiceCustomers: new Set(rows.map((r) => r.domain)).size,
+      totalSubscriptions: rows.length,
+      flaggedForReview: rows.filter((r) => r.risk === 'review').length,
+      suspended: rows.filter((r) => r.risk === 'suspended').length,
+      idle: rows.filter((r) => r.flags.includes('idle_no_licensed_seats')).length,
+    };
+
+    res.json({ rows, summary });
+  } catch (e) {
+    const msg = e?.errors?.[0]?.message || e?.message || 'Could not load Voice usage.';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ==================== VOICE USAGE & ABUSE MONITORING end ====================
 
 // Voice first-party supported countries (ISO codes) — from Google's official list
 const VOICE_SUPPORTED_COUNTRIES = ['BE', 'CA', 'DK', 'FR', 'DE', 'IE', 'IT', 'NL', 'PT', 'ES', 'SE', 'CH', 'GB', 'US'];

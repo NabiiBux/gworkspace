@@ -412,6 +412,14 @@ const Dashboard = () => {
               ✉️ Emails
             </button>
           </li>
+          <li>
+            <button
+              className={`menu-item ${activeSection === 'voice-monitor' ? 'active' : ''}`}
+              onClick={() => setActiveSection('voice-monitor')}
+            >
+              🛡️ Abuse Monitor
+            </button>
+          </li>
         </ul>
 
         <button onClick={logout} className="btn btn-logout">
@@ -430,6 +438,7 @@ const Dashboard = () => {
         {activeSection === 'tickets' && <AdminTicketsSection />}
         {activeSection === 'payments' && <AdminPaymentsSection />}
         {activeSection === 'emails' && <AdminEmailsSection />}
+        {activeSection === 'voice-monitor' && <AdminVoiceMonitorSection />}
       </main>
     </div>
   );
@@ -1524,6 +1533,247 @@ const AdminTicketsSection = () => {
 // ==================== ADMIN: PAYMENTS SECTION ====================
 // ==================== ADMIN: PAYMENTS + SETTINGS ====================
 // ==================== ADMIN: EMAIL MANAGEMENT ====================
+// ==================== ADMIN: ABUSE / SPAM COMPLAINT MONITOR ====================
+// Legitimate reseller tool: log complaints received about customers, track which
+// customers have a pattern of abuse, and act on confirmed cases to protect the account.
+const AdminVoiceMonitorSection = () => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+  const [checkResult, setCheckResult] = useState(null);
+  const [checking, setChecking] = useState(false);
+  const [form, setForm] = useState({ domain: '', reportType: 'spam_calls', source: '', severity: 'medium', phoneNumber: '', description: '' });
+
+  const runAbuseCheck = async () => {
+    setChecking(true); setMsg('');
+    try { const r = await axios.get(`${API_URL}/admin/abuse/check`); setCheckResult(r.data); }
+    catch (e) { setMsg(e?.response?.data?.error || 'Check failed.'); }
+    finally { setChecking(false); }
+  };
+
+  const TEAL = '#0F766E';
+  const card = { background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 16 };
+  const inp = { width: '100%', borderRadius: 8, border: '1px solid #d8dbe6', padding: '10px 12px', marginBottom: 12, fontSize: 14, fontFamily: 'inherit' };
+
+  const load = async () => {
+    setLoading(true); setErr('');
+    try { const r = await axios.get(`${API_URL}/admin/abuse-reports`); setData(r.data); }
+    catch (e) { setErr(e?.response?.data?.error || 'Could not load reports.'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const logReport = async () => {
+    if (!form.domain.trim()) { setMsg('Customer domain is required.'); return; }
+    setMsg('Saving…');
+    try {
+      await axios.post(`${API_URL}/admin/abuse-reports`, form);
+      setMsg('✓ Report logged.');
+      setForm({ domain: '', reportType: 'spam_calls', source: '', severity: 'medium', phoneNumber: '', description: '' });
+      load();
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not save.'); }
+  };
+
+  const setStatus = async (id, status) => {
+    try { await axios.patch(`${API_URL}/admin/abuse-reports/${id}`, { status }); load(); } catch (_) { }
+  };
+
+  const suspendCustomer = async (domain) => {
+    if (!window.confirm(`Suspend all Google Voice subscriptions for ${domain}? Use only for confirmed abuse.`)) return;
+    setMsg('Suspending…');
+    try { const r = await axios.post(`${API_URL}/admin/abuse-reports/suspend-customer`, { domain }); setMsg(`✓ ${r.data.message}`); load(); }
+    catch (e) { setMsg(e?.response?.data?.error || 'Suspend failed.'); }
+  };
+
+  const riskPill = (risk) => {
+    const map = { low: ['#dcfce7', '#166534', 'Low'], medium: ['#fef3c7', '#92600a', 'Medium'], high: ['#fee2e2', '#b42318', 'High'] };
+    const [bg, fg, label] = map[risk] || map.low;
+    return <span style={{ background: bg, color: fg, padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600 }}>{label} risk</span>;
+  };
+  const statusPill = (s) => {
+    const map = { open: ['#fee2e2', '#b42318'], investigating: ['#fef3c7', '#92600a'], actioned: ['#dcfce7', '#166534'], dismissed: ['#e5e7eb', '#6b7280'] };
+    const [bg, fg] = map[s] || map.open;
+    return <span style={{ background: bg, color: fg, padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600 }}>{s}</span>;
+  };
+
+  const typeLabels = {
+    spam_calls: 'Spam calls', spam_sms: 'Spam SMS', robocall: 'Robocalls', harassment: 'Harassment',
+    fraud_scam: 'Fraud / scam', carrier_block: 'Carrier block', google_notice: 'Google notice', other: 'Other',
+  };
+
+  return (
+    <div className="section">
+      <h2>🛡️ Abuse & Spam Monitoring</h2>
+      <p style={{ color: '#6b7280' }}>
+        Log complaints you receive about customers (from recipients, carriers, or Google), track which customers have a
+        pattern of abuse, and suspend confirmed bad actors to protect your reseller account.
+      </p>
+
+      {msg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a' }}>{msg}</div>}
+
+      {/* Abuse detection check */}
+      <div style={{ ...card, borderLeft: '4px solid #b42318' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <h3 style={{ margin: 0 }}>Abuse detection check</h3>
+            <p style={{ color: '#6b7280', fontSize: 13, margin: '4px 0 0' }}>
+              Flags Voice customers (existing + new) with <strong>2 or more high-severity complaints</strong>. Flag only — you decide whether to suspend.
+            </p>
+          </div>
+          <button className="btn btn-primary" onClick={runAbuseCheck} disabled={checking}>
+            {checking ? 'Checking…' : 'Run abuse check'}
+          </button>
+        </div>
+
+        {checkResult && (
+          <div style={{ marginTop: 16 }}>
+            {checkResult.note && <div style={{ color: '#92600a', fontSize: 13, marginBottom: 10 }}>{checkResult.note}</div>}
+            {checkResult.flagged.length === 0 ? (
+              <div style={{ color: '#166534', fontWeight: 600 }}>✓ No customers flagged for abuse.</div>
+            ) : (
+              <>
+                <div style={{ color: '#b42318', fontWeight: 700, marginBottom: 10 }}>
+                  ⚠️ {checkResult.flagged.length} customer(s) flagged — review and decide:
+                </div>
+                <table className="data-table">
+                  <thead><tr><th>Domain</th><th>High-severity</th><th>Open reports</th><th>Voice plan</th><th>Voice status</th><th>Purchased</th><th>Action</th></tr></thead>
+                  <tbody>
+                    {checkResult.flagged.map((f, i) => {
+                      const vc = (checkResult.voiceCustomers || []).find(v => v.domain === f.domain);
+                      return (
+                        <tr key={i}>
+                          <td>{f.domain}</td>
+                          <td><span style={{ background: '#fee2e2', color: '#b42318', padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600 }}>{f.highSeverity} high</span></td>
+                          <td>{f.totalOpen}</td>
+                          <td>{vc?.plan || '—'}</td>
+                          <td>{vc?.status || '—'}</td>
+                          <td>{vc?.purchaseDate ? new Date(vc.purchaseDate).toLocaleDateString() : '—'}</td>
+                          <td>
+                            <button className="btn btn-secondary" style={{ color: '#b42318', borderColor: '#b42318' }} onClick={() => suspendCustomer(f.domain)}>
+                              Review & suspend
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Log a new report */}
+      <div style={card}>
+        <h3 style={{ marginTop: 0 }}>Log a complaint</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Customer domain *</label>
+            <input style={inp} value={form.domain} onChange={e => setForm({ ...form, domain: e.target.value })} placeholder="customer.com" />
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Type</label>
+            <select style={inp} value={form.reportType} onChange={e => setForm({ ...form, reportType: e.target.value })}>
+              {Object.entries(typeLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Severity</label>
+            <select style={inp} value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })}>
+              <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Phone number (if known)</label>
+            <input style={inp} value={form.phoneNumber} onChange={e => setForm({ ...form, phoneNumber: e.target.value })} placeholder="+1..." />
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Source</label>
+            <input style={inp} value={form.source} onChange={e => setForm({ ...form, source: e.target.value })} placeholder="Recipient / Carrier / Google" />
+          </div>
+        </div>
+        <label style={{ fontSize: 13, fontWeight: 600 }}>Description</label>
+        <textarea style={{ ...inp, minHeight: 80 }} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="What was reported?" />
+        <button className="btn btn-primary" onClick={logReport}>Log complaint</button>
+      </div>
+
+      {loading ? <p>Loading…</p> : err ? (
+        <div style={{ background: '#fef3c7', color: '#92600a', padding: '12px 16px', borderRadius: 8 }}>{err}</div>
+      ) : data && (
+        <>
+          {/* Customer risk summary */}
+          <div style={card}>
+            <h3 style={{ marginTop: 0 }}>Customers by risk</h3>
+            {data.customers.length === 0 ? <p style={{ color: '#6b7280' }}>No complaints logged yet.</p> : (
+              <table className="data-table">
+                <thead><tr><th>Domain</th><th>Reports</th><th>Open</th><th>High severity</th><th>Risk</th><th>Action</th></tr></thead>
+                <tbody>
+                  {data.customers.map((c, i) => (
+                    <tr key={i}>
+                      <td>{c.domain}</td>
+                      <td>{c.total}</td>
+                      <td>{c.open}</td>
+                      <td>{c.high}</td>
+                      <td>{riskPill(c.risk)}</td>
+                      <td>
+                        {c.risk === 'high' && (
+                          <button className="btn btn-secondary" style={{ color: '#b42318', borderColor: '#b42318' }} onClick={() => suspendCustomer(c.domain)}>
+                            Suspend Voice
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* All reports */}
+          <div style={card}>
+            <h3 style={{ marginTop: 0 }}>All complaints</h3>
+            {data.reports.length === 0 ? <p style={{ color: '#6b7280' }}>None yet.</p> : (
+              <table className="data-table">
+                <thead><tr><th>Date</th><th>Domain</th><th>Type</th><th>Severity</th><th>Source</th><th>Status</th><th>Set status</th></tr></thead>
+                <tbody>
+                  {data.reports.map((r) => (
+                    <tr key={r._id}>
+                      <td>{new Date(r.createdAt).toLocaleDateString()}</td>
+                      <td>{r.domain}</td>
+                      <td>{typeLabels[r.reportType] || r.reportType}</td>
+                      <td>{r.severity}</td>
+                      <td style={{ fontSize: 13 }}>{r.source || '—'}</td>
+                      <td>{statusPill(r.status)}</td>
+                      <td>
+                        <select value={r.status} onChange={e => setStatus(r._id, e.target.value)} style={{ borderRadius: 6, border: '1px solid #d8dbe6', padding: '4px 8px', fontSize: 13 }}>
+                          <option value="open">open</option>
+                          <option value="investigating">investigating</option>
+                          <option value="actioned">actioned</option>
+                          <option value="dismissed">dismissed</option>
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div style={{ ...card, background: '#f8fafc' }}>
+            <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>
+              Note: Google's Reseller API doesn't expose customers' call/SMS logs, so this tracks complaints you receive
+              rather than reading private call data. When a customer accumulates high-severity reports, investigate and
+              suspend if confirmed — this protects your reseller standing with Google.
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 const AdminEmailsSection = () => {
   const [tab, setTab] = useState('templates'); // 'templates' | 'send'
   const [data, setData] = useState(null);
