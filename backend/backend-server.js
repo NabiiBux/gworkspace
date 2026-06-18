@@ -1538,6 +1538,28 @@ app.post('/api/customer/domains/verify-check', authenticateCustomer, async (req,
 
 // Customer: register a domain (real purchase via DomainNameAPI) using their saved profile
 // Reusable: actually register a domain via DomainNameAPI using a customer's profile
+// DomainNameAPI's contact "country" field is a 2-letter ISO code (placeholder was "st").
+// Map common full names → ISO 3166-1 alpha-2. Falls back to first 2 letters uppercased.
+const COUNTRY_TO_ISO = {
+  "united states": "US", "united kingdom": "GB", "canada": "CA", "australia": "AU", "pakistan": "PK", "india": "IN",
+  "germany": "DE", "france": "FR", "spain": "ES", "italy": "IT", "netherlands": "NL", "ireland": "IE", "new zealand": "NZ",
+  "united arab emirates": "AE", "saudi arabia": "SA", "china": "CN", "japan": "JP", "south korea": "KR", "singapore": "SG",
+  "malaysia": "MY", "indonesia": "ID", "philippines": "PH", "thailand": "TH", "vietnam": "VN", "bangladesh": "BD", "sri lanka": "LK",
+  "turkey": "TR", "egypt": "EG", "nigeria": "NG", "kenya": "KE", "south africa": "ZA", "ghana": "GH", "brazil": "BR", "mexico": "MX",
+  "argentina": "AR", "chile": "CL", "colombia": "CO", "peru": "PE", "poland": "PL", "sweden": "SE", "norway": "NO", "denmark": "DK",
+  "finland": "FI", "switzerland": "CH", "austria": "AT", "belgium": "BE", "portugal": "PT", "greece": "GR", "czechia": "CZ",
+  "romania": "RO", "hungary": "HU", "russia": "RU", "ukraine": "UA", "qatar": "QA", "kuwait": "KW", "bahrain": "BH", "oman": "OM",
+  "jordan": "JO", "lebanon": "LB", "morocco": "MA", "tunisia": "TN", "nepal": "NP", "afghanistan": "AF",
+};
+function toIsoCountry(name) {
+  if (!name) return 'US';
+  const s = String(name).trim();
+  if (s.length === 2) return s.toUpperCase();           // already a code
+  const hit = COUNTRY_TO_ISO[s.toLowerCase()];
+  if (hit) return hit;
+  return s.slice(0, 2).toUpperCase();                   // last-resort fallback
+}
+
 async function registerDomainViaApi(customer, domainName, period) {
   const dom = (domainName || '').toLowerCase().trim();
   // DomainNameAPI throws NullReferenceException if any expected field is null — send safe non-empty defaults.
@@ -1552,7 +1574,7 @@ async function registerDomainViaApi(customer, domainName, period) {
     faxCountryCode: '1',
     fax: '0000000000',
     postalCode: (customer.postalCode || '00000').trim(),
-    country: (customer.country || 'United States').trim(),
+    country: toIsoCountry(customer.country),   // 2-letter ISO code (was the NullReferenceException cause)
     city: (customer.city || 'N/A').trim(),
     state: (customer.state || 'N/A').trim(),
     contactType: 'Registrant',
