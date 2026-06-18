@@ -1586,16 +1586,21 @@ async function registerDomainViaApi(customer, domainName, period) {
     domainName: dom,
     period: Number(period) || 1,
     nameServers: ['ns1.domainnameapi.com', 'ns2.domainnameapi.com'],
-    contacts: [{ ...contact, contactType: 'Registrant' }],
+    contacts: [
+      { ...contact, contactType: 'Registrant' },
+      { ...contact, contactType: 'Administrative' },
+      { ...contact, contactType: 'Billing' },
+      { ...contact, contactType: 'Technical' },
+    ],
     tldAttributes: {},
-    useTrusteeContact: true,
+    useTrusteeContact: false,
   };
   console.log('DNA REGISTER ->', dom, 'period', payload.period, '| payload:', JSON.stringify(payload));
   const resp = await fetch(`${DNA_BASE}/api/v1/domains/register-with-contacts`, {
     method: 'POST', headers, body: JSON.stringify(payload),
   });
   const raw = await resp.text();
-  console.log('DNA REGISTER <-', resp.status, raw.slice(0, 400));
+  console.log('DNA REGISTER <-', resp.status, raw.slice(0, 600));
   let data;
   try { data = JSON.parse(raw); } catch (_) { throw new Error(`Registration response error (${resp.status}): ${raw.slice(0, 150)}`); }
   if (!resp.ok || data.success === false) {
