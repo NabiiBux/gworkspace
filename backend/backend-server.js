@@ -1613,7 +1613,8 @@ async function registerDomainViaApi(customer, domainName, period) {
       UserName: username,
       DomainName: dom,
       Period: Number(period) || 1,
-      NameServerList: nameServers,
+      // SOAP needs the array wrapped in a <string> element so it serializes as multiple nameservers
+      NameServerList: { string: nameServers },
       LockStatus: true,
       PrivacyProtectionStatus: false,
       AdministrativeContact: contact,
@@ -1623,7 +1624,7 @@ async function registerDomainViaApi(customer, domainName, period) {
     },
   };
 
-  console.log('DNA SOAP REGISTER ->', dom, 'period', parameters.request.Period);
+  console.log('DNA SOAP REGISTER ->', dom, 'period', parameters.request.Period, 'ns', nameServers.length);
   const client = await getDnaSoapClient();
 
   const result = await new Promise((resolve, reject) => {
