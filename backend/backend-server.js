@@ -1605,7 +1605,11 @@ async function registerDomainViaApi(customer, domainName, period) {
   if (!username || !password) throw new Error('DNA_USERNAME / DNA_PASSWORD not set (required for SOAP registration).');
 
   const contact = buildDnaContact(customer);
-  const nameServers = ['dns.domainnameapi.com', 'web.domainnameapi.com'];
+  // Account default nameservers (override with DNA_NS1 / DNA_NS2 env vars if needed)
+  const nameServers = [
+    process.env.DNA_NS1 || 'tr.apiname.com',
+    process.env.DNA_NS2 || 'eu.apiname.com',
+  ];
 
   const parameters = {
     request: {
