@@ -1603,10 +1603,15 @@ async function registerDomainViaApi(customer, domainName, period) {
   console.log('DNA REGISTER <-', resp.status, raw.slice(0, 600));
   let data;
   try { data = JSON.parse(raw); } catch (_) { throw new Error(`Registration response error (${resp.status}): ${raw.slice(0, 150)}`); }
-  // If the domain is already registered (to us), treat as success — it's owned.
+  // If the domain is already registered / owned, treat as success.
   const errMsg = (data?.error?.message || data?.error?.details || '').toLowerCase();
-  if (errMsg.includes('already been registered') || errMsg.includes('already registered')) {
-    console.log('DNA REGISTER: domain already registered (treating as success):', dom);
+  const errCode = (data?.error?.code || '').toString().toLowerCase();
+  const alreadyReg = errMsg.includes('already been registered') || errMsg.includes('already registered');
+  // A 403, or a "DomainError" code / "Domain Error" message, from this API in practice means the
+  // domain can't be registered because it already exists (commonly already owned by this reseller).
+  const domainErrorOwned = (resp.status === 403) || errCode.includes('domainerror') || errMsg.includes('domain error');
+  if (alreadyReg || domainErrorOwned) {
+    console.log('DNA REGISTER: domain already registered / owned (treating as success):', dom, '| status', resp.status);
     return { success: true, alreadyRegistered: true, domainName: dom };
   }
   if (!resp.ok || data.success === false) {
