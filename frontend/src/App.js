@@ -1956,6 +1956,17 @@ const AdminPaymentsSection = () => {
   const [retryMsg, setRetryMsg] = useState({});
   const [subBilling, setSubBilling] = useState([]);
   const [subBillingMsg, setSubBillingMsg] = useState('');
+  const [bulkDomains, setBulkDomains] = useState('');
+  const [showBulk, setShowBulk] = useState(false);
+
+  const bulkWhitelist = async () => {
+    const domains = bulkDomains.split(/[\s,\n]+/).map(d => d.trim().toLowerCase()).filter(Boolean);
+    if (!domains.length) { setSubBillingMsg('Paste at least one domain.'); return; }
+    if (!window.confirm(`Whitelist ${domains.length} domain(s)? They'll be protected from suspension and given a fresh 29 days.`)) return;
+    setSubBillingMsg('Whitelisting…');
+    try { const r = await axios.post(`${API_URL}/admin/billing/whitelist-bulk`, { domains }); setSubBillingMsg(`✓ Whitelisted ${r.data.updated} of ${r.data.requested} requested (${r.data.totalWhitelisted} total protected).`); setBulkDomains(''); loadSubBilling(); }
+    catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Bulk whitelist failed.'); }
+  };
 
   const loadSubBilling = async () => {
     try { const r = await axios.get(`${API_URL}/admin/billing/subscriptions`); setSubBilling(r.data.subscriptions || []); }
@@ -2252,13 +2263,25 @@ const AdminPaymentsSection = () => {
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
             <h3 style={{ margin: 0 }}>Subscription billing (29-day cycle)</h3>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="btn btn-secondary" onClick={syncSubBilling}>Sync from Google</button>
               <button className="btn btn-secondary" onClick={recalcDates}>Recalculate dates</button>
+              <button className="btn btn-secondary" style={{ color: '#166534', borderColor: '#166534' }} onClick={() => setShowBulk(!showBulk)}>Bulk whitelist paid</button>
               <button className="btn btn-secondary" onClick={startFromToday}>Start cycle from today</button>
               <button className="btn btn-primary" onClick={runSubBilling}>Run check now</button>
             </div>
           </div>
+
+          {showBulk && (
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 16, marginBottom: 14 }}>
+              <h4 style={{ margin: '0 0 8px' }}>Bulk whitelist paid customers</h4>
+              <p style={{ color: '#166534', fontSize: 13, margin: '0 0 10px' }}>
+                Paste the domains of customers who have PAID (one per line, or comma-separated). They'll be protected from suspension and given a fresh 29 days. Do this BEFORE running the check.
+              </p>
+              <textarea value={bulkDomains} onChange={e => setBulkDomains(e.target.value)} placeholder={"customer1.com\ncustomer2.com\ncustomer3.com"} style={{ width: '100%', minHeight: 120, borderRadius: 8, border: '1px solid #bbf7d0', padding: '10px 12px', fontSize: 14, fontFamily: 'monospace', marginBottom: 10 }} />
+              <button className="btn btn-primary" onClick={bulkWhitelist}>Whitelist these domains</button>
+            </div>
+          )}
           <p style={{ color: '#6b7280', fontSize: 14 }}>
             Each subscription gets a 29-day cycle from its purchase date (Google creation date). Click <strong>Sync from Google</strong> first to load existing subscriptions, then <strong>Run check</strong> warns those near due and suspends those past 29 days. Set up a daily cron at <code>/api/cron/subscription-billing?secret=YOUR_JWT_SECRET&sync=1</code>.
           </p>

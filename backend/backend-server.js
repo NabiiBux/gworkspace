@@ -1510,18 +1510,10 @@ async function syncSubscriptionsForBilling(account) {
       ? new Date(Number(s.creationTime))
       : new Date();
 
-    // Compute the CURRENT cycle's due date: advance 29-day periods from purchase until we reach
-    // the next due date at/after now. For old accounts this lands in the recent past/near future,
-    // so accounts that are overdue are correctly detected (not pushed far into the future).
+    // Due date = purchase + 29 days. If purchase was >29 days ago and never paid, this is in the
+    // past → the account is overdue and will be suspended on the next check. Paying resets it.
     const PERIOD_MS = 29 * 24 * 60 * 60 * 1000;
-    const nowMs = Date.now();
-    let nextBillingMs = purchaseDate.getTime() + PERIOD_MS;
-    if (nextBillingMs < nowMs) {
-      const periodsPassed = Math.floor((nowMs - purchaseDate.getTime()) / PERIOD_MS);
-      // due date = purchase + (periodsPassed) * 29d  → this is the most recent past due date
-      nextBillingMs = purchaseDate.getTime() + periodsPassed * PERIOD_MS;
-    }
-    const nextBillingDate = new Date(nextBillingMs);
+    const nextBillingDate = new Date(purchaseDate.getTime() + PERIOD_MS);
 
     try {
       // Atomic upsert: insert if new (setting seed fields once), otherwise just touch subscriptionId.
@@ -1654,6 +1646,24 @@ app.post('/api/admin/billing/start-from-today', authenticateCustomer, requireAdm
   }
 });
 
+// Admin: bulk whitelist by a list of domains (protect paying customers before a suspension run)
+app.post('/api/admin/billing/whitelist-bulk', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const domains = (req.body.domains || []).map((d) => String(d).toLowerCase().trim()).filter(Boolean);
+    if (!domains.length) return res.status(400).json({ error: 'Provide a list of domains.' });
+    const now = new Date();
+    const next = new Date(now.getTime() + 29 * 24 * 60 * 60 * 1000);
+    const result = await SubBilling.updateMany(
+      { domain: { $in: domains } },
+      { $set: { whitelisted: true, whitelistedAt: now, lastPaymentDate: now, nextBillingDate: next, billingStatus: 'active', warnedAt: null, suspendedAt: null, updatedAt: now } }
+    );
+    const matched = await SubBilling.countDocuments({ domain: { $in: domains }, whitelisted: true });
+    res.json({ success: true, requested: domains.length, updated: result.modifiedCount, totalWhitelisted: matched });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Admin: recalculate nextBillingDate for ALL existing records from their purchase date.
 // Fixes records whose dates were stored incorrectly (e.g. pushed into the future).
 app.post('/api/admin/billing/recalculate', authenticateCustomer, requireAdmin, async (req, res) => {
@@ -1663,23 +1673,11 @@ app.post('/api/admin/billing/recalculate', authenticateCustomer, requireAdmin, a
     const all = await SubBilling.find({ whitelisted: { $ne: true } });
     let updated = 0, nowPastDue = 0;
     for (const r of all) {
-      if (!r.purchaseDate) continue;
-      const pMs = new Date(r.purchaseDate).getTime();
-      let nextMs = pMs + PERIOD_MS;
-      if (nextMs < nowMs) {
-        const periodsPassed = Math.floor((nowMs - pMs) / PERIOD_MS);
-        nextMs = pMs + periodsPassed * PERIOD_MS;
-      }
-      // If a payment was recorded, count cycles from the payment instead
-      if (r.lastPaymentDate) {
-        const lpMs = new Date(r.lastPaymentDate).getTime();
-        let lpNext = lpMs + PERIOD_MS;
-        if (lpNext < nowMs) {
-          const periods = Math.floor((nowMs - lpMs) / PERIOD_MS);
-          lpNext = lpMs + (periods + 1) * PERIOD_MS;
-        }
-        nextMs = lpNext;
-      }
+      // The cycle starts from the last payment, or (if never paid) the purchase date.
+      const anchor = r.lastPaymentDate ? new Date(r.lastPaymentDate).getTime()
+        : (r.purchaseDate ? new Date(r.purchaseDate).getTime() : nowMs);
+      // Due date = anchor + 29 days. If that's in the past, the current period is UNPAID → overdue.
+      const nextMs = anchor + PERIOD_MS;
       r.nextBillingDate = new Date(nextMs);
       if (nextMs <= nowMs) nowPastDue++;
       r.updatedAt = new Date();
