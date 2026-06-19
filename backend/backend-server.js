@@ -92,6 +92,10 @@ const CustomerSchema = new mongoose.Schema({
   status: { type: String, enum: ['active', 'inactive', 'suspended'], default: 'active' },
   totalUsers: { type: Number, default: 0 },
   totalCost: { type: Number, default: 0 },
+  // Voice Acceptable Use Policy acceptance (recorded at signup for legal cover)
+  aupAccepted: { type: Boolean, default: false },
+  aupAcceptedAt: Date,
+  aupVersion: String,
   createdAt: { type: Date, default: Date.now },
   lastLogin: Date,
 });
@@ -267,7 +271,7 @@ const EmailTemplate = mongoose.model('EmailTemplate', EmailTemplateSchema);
 const AbuseReportSchema = new mongoose.Schema({
   domain: { type: String, index: true },     // customer domain the report is about
   customerId: mongoose.Schema.Types.ObjectId,
-  reportType: { type: String, enum: ['spam_calls', 'spam_sms', 'robocall', 'harassment', 'fraud_scam', 'carrier_block', 'google_notice', 'other'], default: 'other' },
+  reportType: { type: String, enum: ['spam_calls', 'spam_sms', 'robocall', 'harassment', 'fraud_scam', 'child_safety', 'illegal', 'impersonation', 'privacy', 'carrier_block', 'google_notice', 'other'], default: 'other' },
   source: String,                              // who reported (recipient, carrier, Google, internal)
   severity: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
   description: String,
@@ -732,10 +736,13 @@ const processPayment = async (customerId, amount, paymentMethod) => {
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { companyName, username, businessEmail, password, phone, country, address, taxId, domain,
-      firstName, lastName, city, state, postalCode, phoneCountryCode } = req.body;
+      firstName, lastName, city, state, postalCode, phoneCountryCode, aupAccepted } = req.body;
 
     if (!businessEmail || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
+    }
+    if (!aupAccepted) {
+      return res.status(400).json({ error: 'You must accept the Voice Acceptable Use Policy to create an account.' });
     }
     const existing = await Customer.findOne({ businessEmail: businessEmail.toLowerCase() });
     if (existing) return res.status(400).json({ error: 'An account with this email already exists.' });
@@ -759,6 +766,9 @@ app.post('/api/auth/register', async (req, res) => {
       state,
       postalCode,
       phoneCountryCode,
+      aupAccepted: true,
+      aupAcceptedAt: new Date(),
+      aupVersion: 'voice-aup-2025',
       domain: domain ? domain.toLowerCase().trim() : undefined,
       resellerCode,
       role: 'customer',
@@ -1750,24 +1760,37 @@ app.post('/api/admin/email/send', authenticateCustomer, requireAdmin, async (req
   }
 });
 
-// Abuse detection signal: flag Voice customers with 2+ high-severity complaints.
+// Zero-tolerance report types: a SINGLE credible report flags the customer immediately.
+const ZERO_TOLERANCE_TYPES = ['child_safety', 'illegal', 'fraud_scam'];
+
+// Abuse detection signal. Flags a Voice customer when EITHER:
+//   - they have 1+ open report of a zero-tolerance type (Child Safety, Illegal, Fraud), OR
+//   - they have 2+ high-severity open reports of any type.
 // Flag ONLY — never auto-suspends. The reseller reviews and suspends manually.
 async function computeAbuseFlags() {
   const reports = await AbuseReport.find({ status: { $in: ['open', 'investigating'] } });
   const byDomain = {};
   for (const r of reports) {
     const d = r.domain;
-    if (!byDomain[d]) byDomain[d] = { domain: d, total: 0, high: 0, types: new Set(), score: 0 };
+    if (!byDomain[d]) byDomain[d] = { domain: d, total: 0, high: 0, zeroTol: 0, types: new Set(), score: 0 };
     byDomain[d].total++;
     if (r.severity === 'high') byDomain[d].high++;
+    if (ZERO_TOLERANCE_TYPES.includes(r.reportType)) byDomain[d].zeroTol++;
     byDomain[d].types.add(r.reportType);
     byDomain[d].score += (r.severity === 'high' ? 5 : r.severity === 'medium' ? 2 : 1);
   }
-  // Flag rule: 2+ high-severity open complaints
   const flagged = Object.values(byDomain)
-    .filter((c) => c.high >= 2)
-    .map((c) => ({ domain: c.domain, highSeverity: c.high, totalOpen: c.total, score: c.score, types: [...c.types] }))
-    .sort((a, b) => b.highSeverity - a.highSeverity || b.score - a.score);
+    .filter((c) => c.zeroTol >= 1 || c.high >= 2)
+    .map((c) => ({
+      domain: c.domain,
+      reason: c.zeroTol >= 1 ? 'zero_tolerance' : 'repeated_high_severity',
+      zeroTolerance: c.zeroTol,
+      highSeverity: c.high,
+      totalOpen: c.total,
+      score: c.score,
+      types: [...c.types],
+    }))
+    .sort((a, b) => (b.zeroTolerance - a.zeroTolerance) || (b.highSeverity - a.highSeverity) || (b.score - a.score));
   return flagged;
 }
 

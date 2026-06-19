@@ -118,6 +118,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
     state: '',
     postalCode: '',
     taxId: '',
+    aupAccepted: false,
   });
 
   const handleLogin = async (e) => {
@@ -138,6 +139,10 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
 
   const handleRegister = async (e) => {
     e.preventDefault();
+    if (!registerForm.aupAccepted) {
+      setError('Please accept the Voice Acceptable Use Policy to continue.');
+      return;
+    }
     setLoading(true);
     setError('');
 
@@ -294,7 +299,18 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
               </div>
             </div>
 
-            <button type="submit" className="btn btn-primary" disabled={loading}>
+            <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 16px', margin: '8px 0 16px' }}>
+              <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer', fontSize: 14 }}>
+                <input type="checkbox" checked={registerForm.aupAccepted} style={{ marginTop: 3 }}
+                  onChange={(e) => setRegisterForm({ ...registerForm, aupAccepted: e.target.checked })} />
+                <span>
+                  I have read and agree to the <a href="/voice-aup" target="_blank" rel="noreferrer" style={{ color: '#0F766E', fontWeight: 600 }}>Voice Acceptable Use Policy</a>.
+                  I understand that spam, harassment, fraud, illegal use, or other violations may result in immediate suspension of my service.
+                </span>
+              </label>
+            </div>
+
+            <button type="submit" className="btn btn-primary" disabled={loading || !registerForm.aupAccepted}>
               {loading ? 'Creating Account...' : 'Create Account'}
             </button>
           </form>
@@ -1599,8 +1615,11 @@ const AdminVoiceMonitorSection = () => {
 
   const typeLabels = {
     spam_calls: 'Spam calls', spam_sms: 'Spam SMS', robocall: 'Robocalls', harassment: 'Harassment',
-    fraud_scam: 'Fraud / scam', carrier_block: 'Carrier block', google_notice: 'Google notice', other: 'Other',
+    fraud_scam: 'Fraud / scam ⛔', child_safety: 'Child safety ⛔', illegal: 'Illegal activity ⛔',
+    impersonation: 'Impersonation', privacy: 'Privacy violation',
+    carrier_block: 'Carrier block', google_notice: 'Google notice', other: 'Other',
   };
+  const ZERO_TOL = ['fraud_scam', 'child_safety', 'illegal'];
 
   return (
     <div className="section">
@@ -1618,7 +1637,7 @@ const AdminVoiceMonitorSection = () => {
           <div>
             <h3 style={{ margin: 0 }}>Abuse detection check</h3>
             <p style={{ color: '#6b7280', fontSize: 13, margin: '4px 0 0' }}>
-              Flags Voice customers (existing + new) with <strong>2 or more high-severity complaints</strong>. Flag only — you decide whether to suspend.
+              Flags Voice customers (existing + new) when they have a <strong>zero-tolerance report</strong> (fraud, child safety, illegal — flags on a single report) <strong>or 2+ high-severity complaints</strong>. Flag only — you decide whether to suspend.
             </p>
           </div>
           <button className="btn btn-primary" onClick={runAbuseCheck} disabled={checking}>
@@ -1637,13 +1656,19 @@ const AdminVoiceMonitorSection = () => {
                   ⚠️ {checkResult.flagged.length} customer(s) flagged — review and decide:
                 </div>
                 <table className="data-table">
-                  <thead><tr><th>Domain</th><th>High-severity</th><th>Open reports</th><th>Voice plan</th><th>Voice status</th><th>Purchased</th><th>Action</th></tr></thead>
+                  <thead><tr><th>Domain</th><th>Reason</th><th>High-severity</th><th>Open reports</th><th>Voice plan</th><th>Voice status</th><th>Purchased</th><th>Action</th></tr></thead>
                   <tbody>
                     {checkResult.flagged.map((f, i) => {
                       const vc = (checkResult.voiceCustomers || []).find(v => v.domain === f.domain);
+                      const zt = f.reason === 'zero_tolerance';
                       return (
                         <tr key={i}>
                           <td>{f.domain}</td>
+                          <td>
+                            <span style={{ background: zt ? '#fee2e2' : '#fef3c7', color: zt ? '#b42318' : '#92600a', padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
+                              {zt ? '⛔ Zero-tolerance' : 'Repeated high-severity'}
+                            </span>
+                          </td>
                           <td><span style={{ background: '#fee2e2', color: '#b42318', padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600 }}>{f.highSeverity} high</span></td>
                           <td>{f.totalOpen}</td>
                           <td>{vc?.plan || '—'}</td>
