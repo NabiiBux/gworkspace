@@ -1505,9 +1505,23 @@ async function syncSubscriptionsForBilling(account) {
     if (seen.has(key)) continue;
     seen.add(key);
 
-    // Purchase date = Google creation time (ms epoch as string)
-    const purchaseDate = s.creationTime ? new Date(Number(s.creationTime)) : new Date();
-    const nextBillingDate = new Date(purchaseDate.getTime() + 29 * 24 * 60 * 60 * 1000);
+    // Purchase date = Google creation time (ms epoch as string). Fall back to now only if truly missing.
+    const purchaseDate = s.creationTime && !isNaN(Number(s.creationTime))
+      ? new Date(Number(s.creationTime))
+      : new Date();
+
+    // Compute the CURRENT cycle's due date: advance 29-day periods from purchase until we reach
+    // the next due date at/after now. For old accounts this lands in the recent past/near future,
+    // so accounts that are overdue are correctly detected (not pushed far into the future).
+    const PERIOD_MS = 29 * 24 * 60 * 60 * 1000;
+    const nowMs = Date.now();
+    let nextBillingMs = purchaseDate.getTime() + PERIOD_MS;
+    if (nextBillingMs < nowMs) {
+      const periodsPassed = Math.floor((nowMs - purchaseDate.getTime()) / PERIOD_MS);
+      // due date = purchase + (periodsPassed) * 29d  → this is the most recent past due date
+      nextBillingMs = purchaseDate.getTime() + periodsPassed * PERIOD_MS;
+    }
+    const nextBillingDate = new Date(nextBillingMs);
 
     try {
       // Atomic upsert: insert if new (setting seed fields once), otherwise just touch subscriptionId.
@@ -1635,6 +1649,44 @@ app.post('/api/admin/billing/start-from-today', authenticateCustomer, requireAdm
       reset++;
     }
     res.json({ success: true, reset, onlyPastDue });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: recalculate nextBillingDate for ALL existing records from their purchase date.
+// Fixes records whose dates were stored incorrectly (e.g. pushed into the future).
+app.post('/api/admin/billing/recalculate', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const PERIOD_MS = 29 * 24 * 60 * 60 * 1000;
+    const nowMs = Date.now();
+    const all = await SubBilling.find({ whitelisted: { $ne: true } });
+    let updated = 0, nowPastDue = 0;
+    for (const r of all) {
+      if (!r.purchaseDate) continue;
+      const pMs = new Date(r.purchaseDate).getTime();
+      let nextMs = pMs + PERIOD_MS;
+      if (nextMs < nowMs) {
+        const periodsPassed = Math.floor((nowMs - pMs) / PERIOD_MS);
+        nextMs = pMs + periodsPassed * PERIOD_MS;
+      }
+      // If a payment was recorded, count cycles from the payment instead
+      if (r.lastPaymentDate) {
+        const lpMs = new Date(r.lastPaymentDate).getTime();
+        let lpNext = lpMs + PERIOD_MS;
+        if (lpNext < nowMs) {
+          const periods = Math.floor((nowMs - lpMs) / PERIOD_MS);
+          lpNext = lpMs + (periods + 1) * PERIOD_MS;
+        }
+        nextMs = lpNext;
+      }
+      r.nextBillingDate = new Date(nextMs);
+      if (nextMs <= nowMs) nowPastDue++;
+      r.updatedAt = new Date();
+      await r.save();
+      updated++;
+    }
+    res.json({ success: true, updated, nowPastDue });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

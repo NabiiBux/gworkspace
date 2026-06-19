@@ -1984,6 +1984,12 @@ const AdminPaymentsSection = () => {
     }
     catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Check failed.'); }
   };
+  const recalcDates = async () => {
+    if (!window.confirm('Recalculate billing due dates for all accounts from their purchase date? This fixes accounts whose dates were stored incorrectly.')) return;
+    setSubBillingMsg('Recalculating dates…');
+    try { const r = await axios.post(`${API_URL}/admin/billing/recalculate`, {}); setSubBillingMsg(`✓ Recalculated ${r.data.updated} accounts. ${r.data.nowPastDue} are now past due and will suspend on next check.`); loadSubBilling(); }
+    catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Recalculate failed.'); }
+  };
   const toggleWhitelist = async (id, whitelisted) => {
     if (whitelisted && !window.confirm('Whitelist this account? It will be treated as renewed (fresh 29 days from today), reactivated if suspended, and never auto-suspended while whitelisted.')) return;
     try { await axios.post(`${API_URL}/admin/billing/whitelist`, { id, whitelisted }); loadSubBilling(); }
@@ -2248,6 +2254,7 @@ const AdminPaymentsSection = () => {
             <h3 style={{ margin: 0 }}>Subscription billing (29-day cycle)</h3>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-secondary" onClick={syncSubBilling}>Sync from Google</button>
+              <button className="btn btn-secondary" onClick={recalcDates}>Recalculate dates</button>
               <button className="btn btn-secondary" onClick={startFromToday}>Start cycle from today</button>
               <button className="btn btn-primary" onClick={runSubBilling}>Run check now</button>
             </div>
