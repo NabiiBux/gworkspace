@@ -1552,6 +1552,20 @@ async function setSubscriptionState(account, domain, skuId, action, subscription
 async function runSubscriptionBillingCheck() {
   const now = new Date();
   const results = { checked: 0, warned: [], suspended: [], skippedWhitelisted: 0 };
+
+  // Diagnostic: count ALL records and why each is or isn't eligible
+  const allRecords = await SubBilling.find();
+  const diag = { totalRecords: allRecords.length, statusCounts: {}, whitelistedCount: 0, nullNextDate: 0, pastDueActive: 0 };
+  for (const x of allRecords) {
+    diag.statusCounts[x.billingStatus || 'undefined'] = (diag.statusCounts[x.billingStatus || 'undefined'] || 0) + 1;
+    if (x.whitelisted) diag.whitelistedCount++;
+    if (!x.nextBillingDate) diag.nullNextDate++;
+    const dl = x.nextBillingDate ? (new Date(x.nextBillingDate).getTime() - now.getTime()) / 86400000 : null;
+    if (dl != null && dl <= 0 && ['active', 'warned'].includes(x.billingStatus) && !x.whitelisted) diag.pastDueActive++;
+  }
+  console.log('BILLING CHECK DIAGNOSTIC:', JSON.stringify(diag));
+  results.diagnostic = diag;
+
   // Exclude whitelisted accounts entirely — they're treated as renewed.
   const records = await SubBilling.find({
     billingStatus: { $in: ['active', 'warned'] },

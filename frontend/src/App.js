@@ -1975,6 +1975,10 @@ const AdminPaymentsSection = () => {
         m = `⚠️ ${r.data.suspended.length} suspended, but ${r.data.suspendErrors.length} FAILED: ` +
           r.data.suspendErrors.map(e => `${e.domain} (${e.error})`).join('; ');
       }
+      if (r.data.diagnostic) {
+        const d = r.data.diagnostic;
+        m += ` | DIAGNOSTIC: total=${d.totalRecords}, statuses=${JSON.stringify(d.statusCounts)}, whitelisted=${d.whitelistedCount}, noDate=${d.nullNextDate}, pastDueActive=${d.pastDueActive}`;
+      }
       setSubBillingMsg(m);
       loadSubBilling();
     }
