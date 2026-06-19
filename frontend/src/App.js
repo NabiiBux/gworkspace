@@ -1968,8 +1968,22 @@ const AdminPaymentsSection = () => {
   };
   const runSubBilling = async () => {
     setSubBillingMsg('Running check…');
-    try { const r = await axios.post(`${API_URL}/admin/billing/run`, {}); setSubBillingMsg(`✓ Checked ${r.data.checked} · warned ${r.data.warned.length} · suspended ${r.data.suspended.length}`); loadSubBilling(); }
+    try {
+      const r = await axios.post(`${API_URL}/admin/billing/run`, {});
+      let m = `✓ Checked ${r.data.checked} · warned ${r.data.warned.length} · suspended ${r.data.suspended.length}`;
+      if (r.data.suspendErrors && r.data.suspendErrors.length) {
+        m = `⚠️ ${r.data.suspended.length} suspended, but ${r.data.suspendErrors.length} FAILED: ` +
+          r.data.suspendErrors.map(e => `${e.domain} (${e.error})`).join('; ');
+      }
+      setSubBillingMsg(m);
+      loadSubBilling();
+    }
     catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Check failed.'); }
+  };
+  const toggleWhitelist = async (id, whitelisted) => {
+    if (whitelisted && !window.confirm('Whitelist this account? It will be treated as renewed (fresh 29 days from today), reactivated if suspended, and never auto-suspended while whitelisted.')) return;
+    try { await axios.post(`${API_URL}/admin/billing/whitelist`, { id, whitelisted }); loadSubBilling(); }
+    catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Whitelist update failed.'); }
   };
   const startFromToday = async () => {
     if (!window.confirm('Reset past-due / suspended subscriptions to start a fresh 29-day cycle from today? This reactivates any we suspended.')) return;
@@ -2240,16 +2254,27 @@ const AdminPaymentsSection = () => {
           {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
           {subBilling.length === 0 ? <p>No subscriptions tracked yet. Click "Sync from Google" to load them.</p> : (
             <table className="data-table">
-              <thead><tr><th>Domain</th><th>SKU</th><th>Acct</th><th>Purchased</th><th>Next bill (29d)</th><th>Status</th></tr></thead>
+              <thead><tr><th>Domain</th><th>SKU</th><th>Acct</th><th>Purchased</th><th>Next bill (29d)</th><th>Status</th><th>Whitelist</th></tr></thead>
               <tbody>
                 {subBilling.map(r => (
-                  <tr key={r._id}>
+                  <tr key={r._id} style={r.whitelisted ? { background: '#f0fdf4' } : undefined}>
                     <td>{r.domain}</td>
                     <td>{r.skuId}</td>
                     <td>{(r.account || 'pk').toUpperCase()}</td>
                     <td>{r.purchaseDate ? new Date(r.purchaseDate).toLocaleDateString() : '—'}</td>
                     <td>{r.nextBillingDate ? new Date(r.nextBillingDate).toLocaleDateString() : '—'}</td>
                     <td><span className={`status ${r.billingStatus === 'active' ? 'active' : r.billingStatus === 'suspended' ? 'suspended' : 'pending'}`}>{r.billingStatus}</span></td>
+                    <td>
+                      {r.whitelisted ? (
+                        <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => toggleWhitelist(r._id, false)}>
+                          ✓ Whitelisted — remove
+                        </button>
+                      ) : (
+                        <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px', color: '#166534', borderColor: '#166534' }} onClick={() => toggleWhitelist(r._id, true)}>
+                          Whitelist (renew)
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

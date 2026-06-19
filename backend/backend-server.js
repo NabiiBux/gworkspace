@@ -252,6 +252,8 @@ const SubBillingSchema = new mongoose.Schema({
   lastPaymentDate: Date,
   warnedAt: Date,
   suspendedAt: Date,
+  whitelisted: { type: Boolean, default: false },   // whitelisted = treated as renewed, never auto-suspended
+  whitelistedAt: Date,
   updatedAt: { type: Date, default: Date.now },
 });
 SubBillingSchema.index({ domain: 1, skuId: 1 }, { unique: true });
@@ -1532,26 +1534,38 @@ async function syncSubscriptionsForBilling(account) {
 }
 
 // Suspend / reactivate a subscription by domain + sku on the right account
-async function setSubscriptionState(account, domain, skuId, action) {
+async function setSubscriptionState(account, domain, skuId, action, subscriptionId) {
   const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
   const reseller = google.reseller({ version: 'v1', auth });
+  // Google Reseller API needs the customer's subscriptionId. For resold subs this is often
+  // the skuId, but use the stored subscriptionId when we have it.
+  const subId = subscriptionId || skuId;
+  console.log(`SET SUB STATE: ${action} ${domain} subId=${subId} (sku=${skuId}, acct=${account})`);
   if (action === 'suspend') {
-    await reseller.subscriptions.suspend({ customerId: domain, subscriptionId: skuId });
+    await reseller.subscriptions.suspend({ customerId: domain, subscriptionId: subId });
   } else {
-    await reseller.subscriptions.activate({ customerId: domain, subscriptionId: skuId });
+    await reseller.subscriptions.activate({ customerId: domain, subscriptionId: subId });
   }
 }
 
 // The 29-day check for ALL tracked subscriptions (existing + new).
 async function runSubscriptionBillingCheck() {
   const now = new Date();
-  const results = { checked: 0, warned: [], suspended: [] };
-  const records = await SubBilling.find({ billingStatus: { $in: ['active', 'warned'] }, nextBillingDate: { $ne: null } });
+  const results = { checked: 0, warned: [], suspended: [], skippedWhitelisted: 0 };
+  // Exclude whitelisted accounts entirely — they're treated as renewed.
+  const records = await SubBilling.find({
+    billingStatus: { $in: ['active', 'warned'] },
+    nextBillingDate: { $ne: null },
+    whitelisted: { $ne: true },
+  });
+  const wlCount = await SubBilling.countDocuments({ whitelisted: true });
+  results.skippedWhitelisted = wlCount;
+
   for (const r of records) {
     results.checked++;
     const daysLeft = (new Date(r.nextBillingDate).getTime() - now.getTime()) / (24 * 60 * 60 * 1000);
 
-    // Warn ~4 days before
+    // Warn ~4 days before (still sent, but suspension does NOT depend on it)
     if (daysLeft <= 4 && daysLeft > 0 && r.billingStatus === 'active') {
       r.billingStatus = 'warned';
       r.warnedAt = now;
@@ -1560,10 +1574,10 @@ async function runSubscriptionBillingCheck() {
       try { await sendRenewalWarningEmail(await emailForDomain(r.domain), r.domain, r.nextBillingDate); } catch (_) { }
     }
 
-    // Suspend when past the 29-day mark
+    // Suspend DIRECTLY once 29 days pass (no warning required first), unless whitelisted (already excluded)
     if (daysLeft <= 0 && r.billingStatus !== 'suspended') {
       try {
-        await setSubscriptionState(r.account, r.domain, r.skuId, 'suspend');
+        await setSubscriptionState(r.account, r.domain, r.skuId, 'suspend', r.subscriptionId);
         r.billingStatus = 'suspended';
         r.suspendedAt = now;
         await r.save();
@@ -1571,7 +1585,10 @@ async function runSubscriptionBillingCheck() {
         console.log('SUB SUSPENDED (29-day, non-payment):', r.domain, r.skuId);
         try { await sendSuspensionEmail(await emailForDomain(r.domain), r.domain); } catch (_) { }
       } catch (e) {
-        console.error('SUB SUSPEND FAILED', r.domain, r.skuId, e.message);
+        const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
+        console.error('SUB SUSPEND FAILED', r.domain, 'sku=' + r.skuId, 'subId=' + r.subscriptionId, '→', detail);
+        results.suspendErrors = results.suspendErrors || [];
+        results.suspendErrors.push({ domain: r.domain, skuId: r.skuId, error: detail });
       }
     }
   }
@@ -1604,6 +1621,37 @@ app.post('/api/admin/billing/start-from-today', authenticateCustomer, requireAdm
       reset++;
     }
     res.json({ success: true, reset, onlyPastDue });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: whitelist (= treat as renewed, fresh 29 days from today) or un-whitelist a subscription
+app.post('/api/admin/billing/whitelist', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { id, whitelisted } = req.body;
+    const r = await SubBilling.findById(id);
+    if (!r) return res.status(404).json({ error: 'Subscription not found.' });
+    const now = new Date();
+    if (whitelisted) {
+      // Whitelisting = renew: fresh 29-day cycle from today, reactivate if it was suspended
+      if (r.billingStatus === 'suspended') {
+        try { await setSubscriptionState(r.account, r.domain, r.skuId, 'activate', r.subscriptionId); } catch (_) { }
+      }
+      r.whitelisted = true;
+      r.whitelistedAt = now;
+      r.lastPaymentDate = now;
+      r.nextBillingDate = new Date(now.getTime() + 29 * 24 * 60 * 60 * 1000);
+      r.billingStatus = 'active';
+      r.warnedAt = null;
+      r.suspendedAt = null;
+    } else {
+      r.whitelisted = false;
+      r.whitelistedAt = null;
+    }
+    r.updatedAt = now;
+    await r.save();
+    res.json({ success: true, record: r });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
