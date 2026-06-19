@@ -1626,6 +1626,30 @@ app.post('/api/admin/billing/start-from-today', authenticateCustomer, requireAdm
   }
 });
 
+// Admin: diagnostic — show status breakdown of billing records (why are some not checked?)
+app.get('/api/admin/billing/diagnostic', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const now = new Date();
+    const all = await SubBilling.find();
+    const breakdown = { total: all.length, byStatus: {}, whitelisted: 0, pastDue: 0, pastDueAndCheckable: 0, futureDue: 0, noNextDate: 0 };
+    const samples = [];
+    for (const r of all) {
+      breakdown.byStatus[r.billingStatus] = (breakdown.byStatus[r.billingStatus] || 0) + 1;
+      if (r.whitelisted) breakdown.whitelisted++;
+      if (!r.nextBillingDate) { breakdown.noNextDate++; continue; }
+      const daysLeft = (new Date(r.nextBillingDate).getTime() - now.getTime()) / 86400000;
+      if (daysLeft <= 0) {
+        breakdown.pastDue++;
+        if (['active', 'warned'].includes(r.billingStatus) && !r.whitelisted) breakdown.pastDueAndCheckable++;
+      } else breakdown.futureDue++;
+      if (samples.length < 10) samples.push({ domain: r.domain, status: r.billingStatus, whitelisted: !!r.whitelisted, nextBillingDate: r.nextBillingDate, daysLeft: Math.round(daysLeft) });
+    }
+    res.json({ breakdown, samples });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Admin: whitelist (= treat as renewed, fresh 29 days from today) or un-whitelist a subscription
 app.post('/api/admin/billing/whitelist', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
