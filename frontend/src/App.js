@@ -374,6 +374,14 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              className={`menu-item ${activeSection === 'addon-pricing' ? 'active' : ''}`}
+              onClick={() => setActiveSection('addon-pricing')}
+            >
+              🧩 Add-on Pricing
+            </button>
+          </li>
+          <li>
+            <button
               className={`menu-item ${activeSection === 'orders' ? 'active' : ''}`}
               onClick={() => setActiveSection('orders')}
             >
@@ -447,6 +455,7 @@ const Dashboard = () => {
         {activeSection === 'overview' && <OverviewSection stats={stats} />}
         {activeSection === 'order-workspace' && <WorkspaceOrderFlow />}
         {activeSection === 'products' && <ProductsSection />}
+        {activeSection === 'addon-pricing' && <AdminAddonPricing />}
         {activeSection === 'orders' && <OrdersSection />}
         {activeSection === 'subs-pk' && <SubscriptionsSection account="PK" />}
         {activeSection === 'subs-usa' && <SubscriptionsSection account="USA" />}
@@ -549,6 +558,82 @@ const OverviewSection = ({ stats }) => {
 };
 
 // ==================== PRODUCTS SECTION ====================
+// ==================== ADMIN: ADD-ON & SKU PRICING ====================
+const AdminAddonPricing = () => {
+  const [catalog, setCatalog] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [edits, setEdits] = useState({});
+  const [msg, setMsg] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try { const r = await axios.get(`${API_URL}/admin/sku-catalog`); setCatalog(r.data.catalog || []); }
+    catch (e) { setMsg(e?.response?.data?.error || 'Could not load catalog.'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const savePrice = async (skuId) => {
+    const price = edits[skuId];
+    if (price == null || price === '') { setMsg('Enter a price first.'); return; }
+    setMsg('Saving…');
+    try {
+      await axios.post(`${API_URL}/admin/sku-price`, { skuId, price: Number(price) });
+      setMsg(`✓ Price saved for ${skuId}.`);
+      setEdits(prev => { const n = { ...prev }; delete n[skuId]; return n; });
+      load();
+    } catch (e) { setMsg(e?.response?.data?.error || 'Save failed.'); }
+  };
+
+  const groups = { core: [], voice: [], addon: [] };
+  catalog.forEach(c => { (groups[c.category] || groups.addon).push(c); });
+  const labels = { core: 'Google Workspace Core Plans', voice: 'Google Voice', addon: 'Add-on Subscriptions' };
+
+  const inp = { width: 110, borderRadius: 6, border: '1px solid #d8dbe6', padding: '6px 10px', fontSize: 14 };
+
+  return (
+    <div className="section">
+      <h2 style={{ marginTop: 0 }}>🧩 Add-on & SKU Pricing</h2>
+      <p style={{ color: '#6b7280' }}>Set your selling price (per user / month) for each plan and add-on. <strong>Add-ons with no price set cannot be purchased by customers</strong> — they'll see "Contact support" instead.</p>
+
+      {msg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 16, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a' }}>{msg}</div>}
+
+      {loading ? <p>Loading…</p> : ['core', 'voice', 'addon'].map(cat => (
+        <div key={cat} style={{ marginBottom: 28 }}>
+          <h3>{labels[cat]}</h3>
+          <table className="data-table">
+            <thead><tr><th>Plan / Add-on</th><th>SKU ID</th><th>Price ($/user/mo)</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              {groups[cat].map(c => (
+                <tr key={c.skuId}>
+                  <td>{c.name}</td>
+                  <td style={{ color: '#6b7280', fontSize: 13 }}>{c.skuId}</td>
+                  <td>
+                    <input
+                      style={inp}
+                      type="number" step="0.01" min="0"
+                      placeholder={c.price != null ? '' : 'not set'}
+                      value={edits[c.skuId] != null ? edits[c.skuId] : (c.price != null ? c.price : '')}
+                      onChange={e => setEdits({ ...edits, [c.skuId]: e.target.value })}
+                    />
+                  </td>
+                  <td>
+                    {c.price != null
+                      ? <span style={{ color: '#166534', fontWeight: 600, fontSize: 13 }}>Purchasable</span>
+                      : <span style={{ color: '#b42318', fontWeight: 600, fontSize: 13 }}>No price (hidden checkout)</span>}
+                  </td>
+                  <td><button className="btn btn-primary" style={{ fontSize: 12, padding: '5px 12px' }} onClick={() => savePrice(c.skuId)}>Save</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+
 const ProductsSection = () => {
   const [plans, setPlans] = useState(null);
   const [editing, setEditing] = useState(null); // plan being edited (or 'new')
@@ -1967,17 +2052,29 @@ const AdminPaymentsSection = () => {
 
   const loadSuspended = async () => {
     try { const r = await axios.get(`${API_URL}/admin/billing/suspended`); setSuspendedList(r.data.suspended || []); }
-    catch (_) { }
+    catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Could not load suspended list.'); }
+  };
+  const reactivateDomain = async (s) => {
+    if (!window.confirm(`Reactivate ALL suspended subscriptions for ${s.domain}?`)) return;
+    setSubBillingMsg('Reactivating ' + s.domain + '…');
+    try {
+      const r = await axios.post(`${API_URL}/admin/billing/unsuspend`, { domain: s.domain, all: true });
+      const out = r.data.outcomes.map(o => `${o.skuId}: ${o.result}`).join(' | ');
+      setSubBillingMsg(`✓ ${s.domain} → ${out}`);
+      loadSuspended();
+    } catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Reactivate failed.'); }
   };
   const doUnsuspend = async (all) => {
     if (!selectedDomain) { setSubBillingMsg('Select a suspended domain first.'); return; }
-    const payload = all ? { domain: selectedDomain.domain, all: true } : { ids: selectedSubs };
     if (!all && !selectedSubs.length) { setSubBillingMsg('Select at least one subscription, or use Unsuspend all.'); return; }
+    const payload = all
+      ? { domain: selectedDomain.domain, all: true }
+      : { domain: selectedDomain.domain, skuItems: selectedSubs };
     if (!window.confirm(all ? `Reactivate ALL subscriptions for ${selectedDomain.domain}?` : `Reactivate ${selectedSubs.length} selected subscription(s)?`)) return;
     setSubBillingMsg('Reactivating…');
     try {
       const r = await axios.post(`${API_URL}/admin/billing/unsuspend`, payload);
-      const out = r.data.outcomes.map(o => `${o.domain} ${o.skuId}: ${o.result}`).join(' | ');
+      const out = r.data.outcomes.map(o => `${o.skuId}: ${o.result}`).join(' | ');
       setSubBillingMsg(`✓ ${out}`);
       setSelectedDomain(null); setSelectedSubs([]);
       loadSuspended();
@@ -2409,41 +2506,23 @@ const AdminPaymentsSection = () => {
       {tab === 'suspended' && (
         <>
           <h3 style={{ marginTop: 0 }}>⛔ Suspended Accounts</h3>
-          <p style={{ color: '#6b7280', fontSize: 14 }}>Accounts currently suspended for non-payment. To reactivate a paid customer, use the <strong>Unsuspend</strong> tab.</p>
-          <button className="btn btn-secondary" style={{ marginBottom: 12 }} onClick={loadSuspended}>Refresh</button>
-          {suspendedList.length === 0 ? <p>No suspended accounts.</p> : (
+          <p style={{ color: '#6b7280', fontSize: 14 }}>Live list of suspended subscriptions fetched directly from Google. Click Reactivate to restore a customer's service.</p>
+          {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
+          <button className="btn btn-secondary" style={{ marginBottom: 12 }} onClick={loadSuspended}>Refresh from Google</button>
+          {suspendedList.length === 0 ? <p>No suspended accounts found in Google.</p> : (
             <table className="data-table">
-              <thead><tr><th>Domain</th><th>Subscriptions</th><th>Accounts</th><th>Suspended on</th></tr></thead>
-              <tbody>
-                {suspendedList.map(s => (
-                  <tr key={s.domain} style={{ background: '#fef2f2' }}>
-                    <td><strong>{s.domain}</strong></td>
-                    <td>{s.subscriptions.map(x => x.skuId).join(', ')}</td>
-                    <td>{[...new Set(s.subscriptions.map(x => (x.account || 'pk').toUpperCase()))].join(', ')}</td>
-                    <td>{s.subscriptions[0]?.suspendedAt ? new Date(s.subscriptions[0].suspendedAt).toLocaleDateString() : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </>
-      )}
-
-      {tab === 'suspended' && (
-        <>
-          <h3 style={{ marginTop: 0 }}>⛔ Suspended Accounts</h3>
-          <p style={{ color: '#6b7280', fontSize: 14 }}>Read-only list of all currently suspended subscriptions. To reactivate, use the <strong>Unsuspend</strong> tab.</p>
-          <button className="btn btn-secondary" style={{ marginBottom: 12 }} onClick={loadSuspended}>Refresh</button>
-          {suspendedList.length === 0 ? <p>No suspended accounts.</p> : (
-            <table className="data-table">
-              <thead><tr><th>Domain</th><th>Subscriptions</th><th>Accounts</th><th>Suspended on</th></tr></thead>
+              <thead><tr><th>Domain</th><th>Subscriptions</th><th>Accounts</th><th>Action</th></tr></thead>
               <tbody>
                 {suspendedList.map(s => (
                   <tr key={s.domain} style={{ background: '#fef2f2' }}>
                     <td>{s.domain}</td>
-                    <td>{s.subscriptions.map(x => x.skuId).join(', ')}</td>
+                    <td>{s.subscriptions.map(x => x.skuName || x.skuId).join(', ')}</td>
                     <td>{[...new Set(s.subscriptions.map(x => (x.account || 'pk').toUpperCase()))].join(', ')}</td>
-                    <td>{s.subscriptions[0]?.suspendedAt ? new Date(s.subscriptions[0].suspendedAt).toLocaleDateString() : '—'}</td>
+                    <td>
+                      <button className="btn btn-secondary" style={{ color: '#166534', borderColor: '#166534', fontSize: 12, padding: '4px 12px' }} onClick={() => reactivateDomain(s)}>
+                        Reactivate
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2470,8 +2549,10 @@ const AdminPaymentsSection = () => {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               {/* Domain list (filtered) */}
               <div style={{ maxHeight: 360, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 10 }}>
-                {suspendedList
-                  .filter(s => s.domain.toLowerCase().includes(unsuspendSearch.toLowerCase()))
+                {suspendedList.filter(s => s.domain.toLowerCase().includes(unsuspendSearch.trim().toLowerCase())).length === 0 ? (
+                  <div style={{ padding: '14px', color: '#6b7280', fontSize: 13 }}>No domains match "{unsuspendSearch}".</div>
+                ) : suspendedList
+                  .filter(s => s.domain.toLowerCase().includes(unsuspendSearch.trim().toLowerCase()))
                   .map(s => (
                     <div key={s.domain}
                       onClick={() => { setSelectedDomain(s); setSelectedSubs([]); }}
@@ -2488,10 +2569,10 @@ const AdminPaymentsSection = () => {
                   <>
                     <h4 style={{ marginTop: 0 }}>{selectedDomain.domain}</h4>
                     {selectedDomain.subscriptions.map(sub => (
-                      <label key={sub.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', fontSize: 14 }}>
-                        <input type="checkbox" checked={selectedSubs.includes(sub.id)}
-                          onChange={e => { if (e.target.checked) setSelectedSubs([...selectedSubs, sub.id]); else setSelectedSubs(selectedSubs.filter(x => x !== sub.id)); }} />
-                        <span>{sub.skuId} <span style={{ color: '#6b7280', fontSize: 12 }}>({(sub.account || 'pk').toUpperCase()})</span></span>
+                      <label key={sub.subscriptionId || sub.skuId} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', fontSize: 14 }}>
+                        <input type="checkbox" checked={selectedSubs.some(x => x.skuId === sub.skuId && x.account === sub.account)}
+                          onChange={e => { if (e.target.checked) setSelectedSubs([...selectedSubs, sub]); else setSelectedSubs(selectedSubs.filter(x => !(x.skuId === sub.skuId && x.account === sub.account))); }} />
+                        <span>{sub.skuName || sub.skuId} <span style={{ color: '#6b7280', fontSize: 12 }}>({(sub.account || 'pk').toUpperCase()})</span></span>
                       </label>
                     ))}
                     <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
@@ -2524,6 +2605,7 @@ const CustomerPortal = () => {
     { key: 'order', label: 'New subscription', icon: '✨' },
     { key: 'domains', label: 'Domains', icon: '🌐' },
     { key: 'voice', label: 'Google Voice', icon: '📞' },
+    { key: 'addons', label: 'Add-ons', icon: '🧩' },
     { key: 'payments', label: 'Payments', icon: '💳' },
     { key: 'support', label: 'Support', icon: '🎫' },
     { key: 'settings', label: 'Account settings', icon: '⚙️' },
@@ -2573,6 +2655,7 @@ const CustomerPortal = () => {
           {section === 'order' && <WorkspaceOrderFlow />}
           {section === 'domains' && <CustomerDomains />}
           {section === 'voice' && <CustomerVoice />}
+          {section === 'addons' && <CustomerAddons />}
           {section === 'payments' && <CustomerPayments />}
           {section === 'support' && <CustomerSupport />}
           {section === 'settings' && <CustomerSettings />}
@@ -2955,6 +3038,67 @@ const CustomerSubscriptions = () => {
 };
 
 // Customer: Google Voice info + guidance (number assignment happens in their Admin console)
+// ==================== CUSTOMER: ADD-ONS ====================
+const CustomerAddons = () => {
+  const [addons, setAddons] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try { const r = await axios.get(`${API_URL}/customer/addons`); setAddons(r.data.addons || []); }
+      catch (_) { }
+      finally { setLoading(false); }
+    })();
+  }, []);
+
+  const purchase = async (a) => {
+    setMsg('');
+    if (!a.purchasable) {
+      setMsg(`"${a.name}" isn't available for self-service purchase yet. Please contact support to enable it.`);
+      return;
+    }
+    try {
+      const r = await axios.post(`${API_URL}/customer/addons/purchase`, { skuId: a.skuId });
+      // Price is set → would proceed to checkout. For now confirm availability.
+      setMsg(`✓ ${a.name} ($${r.data.price}/user/mo) is ready — proceeding to checkout.`);
+      // TODO: hook into existing checkout flow with this sku + price
+    } catch (e) {
+      setMsg(e?.response?.data?.error || 'Could not start purchase. Please contact support.');
+    }
+  };
+
+  const TEAL = '#0F766E';
+  return (
+    <div>
+      <h2 style={{ marginTop: 0 }}>🧩 Add-ons</h2>
+      <p style={{ color: '#6b7280' }}>Enhance your Google Workspace with add-ons like Gemini AI, AppSheet, Cloud Identity, and more.</p>
+
+      {msg && <div style={{ padding: '12px 16px', borderRadius: 8, marginBottom: 16, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a' }}>{msg}</div>}
+
+      {loading ? <p>Loading add-ons…</p> : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
+          {addons.map(a => (
+            <div key={a.skuId} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>{a.name}</h3>
+              <div style={{ color: a.purchasable ? TEAL : '#9ca3af', fontWeight: 700, fontSize: 18 }}>
+                {a.purchasable ? `$${a.price}/user/mo` : 'Contact support'}
+              </div>
+              <button
+                className="btn btn-primary"
+                style={{ marginTop: 'auto', opacity: a.purchasable ? 1 : 0.6 }}
+                onClick={() => purchase(a)}>
+                {a.purchasable ? 'Add to my plan' : 'Contact support'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
 const CustomerVoice = () => {
   const { user } = useAuth();
   return (

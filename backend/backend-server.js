@@ -1702,6 +1702,52 @@ app.post('/api/admin/billing/test-activate', authenticateCustomer, requireAdmin,
   }
 });
 
+// ===== CENTRAL SKU CATALOG (names for all core plans + add-ons) =====
+const SKU_CATALOG = {
+  // Core Workspace
+  '1010020027': { name: 'Google Workspace Business Starter', category: 'core' },
+  '1010020028': { name: 'Google Workspace Business Standard', category: 'core' },
+  '1010020025': { name: 'Google Workspace Business Plus', category: 'core' },
+  '1010060003': { name: 'Google Workspace Enterprise Essentials', category: 'core' },
+  '1010020029': { name: 'Google Workspace Enterprise Starter', category: 'core' },
+  '1010020026': { name: 'Google Workspace Enterprise Standard', category: 'core' },
+  '1010020020': { name: 'Google Workspace Enterprise Plus', category: 'core' },
+  '1010060005': { name: 'Google Workspace Enterprise Essentials Plus', category: 'core' },
+  '1010020030': { name: 'Google Workspace Frontline Starter', category: 'core' },
+  '1010020031': { name: 'Google Workspace Frontline Standard', category: 'core' },
+  '1010020034': { name: 'Google Workspace Frontline Plus', category: 'core' },
+  // Voice
+  '1010330003': { name: 'Google Voice Starter', category: 'voice' },
+  '1010330004': { name: 'Google Voice Standard', category: 'voice' },
+  '1010330002': { name: 'Google Voice Premier', category: 'voice' },
+  // Gemini
+  '1010470001': { name: 'Gemini Enterprise', category: 'addon' },
+  '1010470002': { name: 'Gemini Labs', category: 'addon' },
+  '1010470003': { name: 'Gemini Business', category: 'addon' },
+  '1010470006': { name: 'Gemini Security', category: 'addon' },
+  '1010470007': { name: 'Gemini Meet', category: 'addon' },
+  '1010470009': { name: 'AI Expanded Access', category: 'addon' },
+  // AppSheet
+  '1010380001': { name: 'AppSheet Core', category: 'addon' },
+  '1010380002': { name: 'AppSheet Enterprise Standard', category: 'addon' },
+  '1010380003': { name: 'AppSheet Enterprise Plus', category: 'addon' },
+  '1010540001': { name: 'AppSheet User Pass', category: 'addon' },
+  // Cloud Identity
+  '1010010001': { name: 'Cloud Identity', category: 'addon' },
+  '1010050001': { name: 'Cloud Identity Premium', category: 'addon' },
+  // Assured Controls
+  '1010390001': { name: 'Assured Controls', category: 'addon' },
+  '1010390002': { name: 'Assured Controls Plus', category: 'addon' },
+  // Chrome Enterprise Premium
+  '1010400001': { name: 'Chrome Enterprise Premium', category: 'addon' },
+  // Google Colab
+  '1010500001': { name: 'Colab Pro', category: 'addon' },
+  '1010500002': { name: 'Colab Pro+', category: 'addon' },
+};
+function skuName(skuId) {
+  return SKU_CATALOG[String(skuId)]?.name || String(skuId);
+}
+
 // ===== WORKSPACE-ANCHORED BILLING (customer-grouped) =====
 // Billing is driven by the customer's Google WORKSPACE creation date. When that 29-day cycle is
 // overdue, ALL of the customer's subscriptions (Workspace + Voice + others) are suspended together.
@@ -1825,48 +1871,155 @@ async function runWorkspaceAnchoredBillingCheck(dryRun) {
   return results;
 }
 
-// Admin: list all suspended subscriptions (for the Unsuspend tab dropdown)
-app.get('/api/admin/billing/suspended', authenticateCustomer, requireAdmin, async (req, res) => {
+// Customer: list available add-on subscriptions (Gemini, AppSheet, etc.) with admin-set prices.
+// An add-on is purchasable ONLY if the admin has set a price.
+app.get('/api/customer/addons', authenticateCustomer, async (req, res) => {
   try {
-    const recs = await SubBilling.find({ billingStatus: 'suspended' }).sort({ domain: 1 });
-    // Group by domain for the dropdown
-    const byDomain = {};
-    for (const r of recs) {
-      if (!byDomain[r.domain]) byDomain[r.domain] = { domain: r.domain, subscriptions: [] };
-      byDomain[r.domain].subscriptions.push({ id: r._id, skuId: r.skuId, account: r.account, suspendedAt: r.suspendedAt });
-    }
-    res.json({ suspended: Object.values(byDomain) });
+    const plans = await Plan.find({ category: 'addon', active: true });
+    const priceBySku = {};
+    for (const p of plans) if (p.skuId) priceBySku[String(p.skuId)] = p.monthlyPrice;
+    const addons = Object.entries(SKU_CATALOG)
+      .filter(([, v]) => v.category === 'addon')
+      .map(([skuId, v]) => {
+        const price = priceBySku[skuId];
+        return { skuId, name: v.name, price: price != null ? price : null, purchasable: price != null && price > 0 };
+      });
+    res.json({ addons });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// Admin: unsuspend (reactivate) selected subscriptions — pass an array of billing record ids,
-// or a domain + 'all' to reactivate everything for that domain. Marks as renewed (fresh 30 days).
+// Admin: full SKU catalog with any admin-set prices
+app.get('/api/admin/sku-catalog', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const plans = await Plan.find();
+    const priceBySku = {};
+    for (const p of plans) if (p.skuId) priceBySku[String(p.skuId)] = { price: p.monthlyPrice, planId: p.planId };
+    const catalog = Object.entries(SKU_CATALOG).map(([skuId, v]) => ({
+      skuId, name: v.name, category: v.category,
+      price: priceBySku[skuId]?.price ?? null,
+    }));
+    res.json({ catalog });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: set/update the price for any SKU (creates/updates its Plan record)
+app.post('/api/admin/sku-price', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { skuId, price } = req.body;
+    const sku = String(skuId || '');
+    if (!SKU_CATALOG[sku]) return res.status(400).json({ error: 'Unknown SKU.' });
+    if (price == null || isNaN(Number(price)) || Number(price) < 0) return res.status(400).json({ error: 'Valid price required.' });
+    const meta = SKU_CATALOG[sku];
+    const planId = `sku_${sku}`;
+    const plan = await Plan.findOneAndUpdate(
+      { planId },
+      { planId, category: meta.category === 'core' ? 'workspace' : meta.category, name: meta.name, monthlyPrice: Number(price), skuId: sku, active: true },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true, plan });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: attempt an add-on purchase. Blocks if no admin price → contact support message.
+app.post('/api/customer/addons/purchase', authenticateCustomer, async (req, res) => {
+  try {
+    const sku = String(req.body.skuId || '');
+    const meta = SKU_CATALOG[sku];
+    if (!meta || meta.category !== 'addon') return res.status(400).json({ error: 'Invalid add-on.' });
+    const plan = await Plan.findOne({ skuId: sku, category: 'addon', active: true });
+    if (!plan || !plan.monthlyPrice || plan.monthlyPrice <= 0) {
+      return res.status(400).json({ error: 'This add-on isn\'t available for self-service purchase yet. Please contact support to enable it.' });
+    }
+    res.json({ success: true, skuId: sku, name: meta.name, price: plan.monthlyPrice, message: 'Add-on available — proceed to checkout.' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: list all suspended subscriptions — fetched DIRECTLY from Google (both accounts).
+app.get('/api/admin/billing/suspended', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const byDomain = {};
+    let errors = [];
+    for (const account of ['pk', 'usa']) {
+      let auth;
+      try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
+      catch (e) { errors.push(`${account}: ${e.message}`); continue; }
+      const reseller = google.reseller({ version: 'v1', auth });
+      let pageToken;
+      do {
+        const resp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
+        for (const s of (resp.data.subscriptions || [])) {
+          if (s.status !== 'SUSPENDED') continue;
+          const domain = (s.customerDomain || s.customerId || '').toLowerCase();
+          if (!byDomain[domain]) byDomain[domain] = { domain, subscriptions: [] };
+          byDomain[domain].subscriptions.push({
+            skuId: String(s.skuId), skuName: skuName(s.skuId),
+            account, subscriptionId: s.subscriptionId,
+            createdAt: s.creationTime ? Number(s.creationTime) : null,
+          });
+        }
+        pageToken = resp.data.nextPageToken;
+      } while (pageToken);
+    }
+    res.json({ suspended: Object.values(byDomain), errors });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: unsuspend (reactivate) — pass {domain, skuItems:[{account,skuId,subscriptionId}]} for selected,
+// or {domain, all:true} to reactivate everything suspended for that domain (fetched from Google).
 app.post('/api/admin/billing/unsuspend', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
-    const { ids, domain, all } = req.body;
-    let records = [];
-    if (ids && ids.length) records = await SubBilling.find({ _id: { $in: ids } });
-    else if (domain && all) records = await SubBilling.find({ domain: domain.toLowerCase(), billingStatus: 'suspended' });
-    else return res.status(400).json({ error: 'Provide ids[] or domain+all.' });
+    const { domain, skuItems, all } = req.body;
+    const dom = (domain || '').toLowerCase().trim();
+    if (!dom) return res.status(400).json({ error: 'Domain required.' });
+
+    let items = [];
+    if (skuItems && skuItems.length) {
+      items = skuItems;
+    } else if (all) {
+      // Pull this domain's suspended subs from Google across both accounts
+      for (const account of ['pk', 'usa']) {
+        let auth;
+        try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
+        const reseller = google.reseller({ version: 'v1', auth });
+        try {
+          const resp = await reseller.subscriptions.list({ customerId: dom });
+          for (const s of (resp.data.subscriptions || [])) {
+            if (s.status === 'SUSPENDED') items.push({ account, skuId: String(s.skuId), subscriptionId: s.subscriptionId });
+          }
+        } catch (_) { }
+      }
+    } else {
+      return res.status(400).json({ error: 'Provide skuItems[] or all:true.' });
+    }
 
     const now = new Date();
     const next = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     const outcomes = [];
-    for (const r of records) {
+    for (const it of items) {
       try {
-        await setSubscriptionState(r.account, r.domain, r.skuId, 'activate', r.subscriptionId);
-        r.billingStatus = 'active';
-        r.suspendedAt = null;
-        r.lastPaymentDate = now;       // treat unsuspend as paid → fresh cycle
-        r.nextBillingDate = next;
-        r.updatedAt = now;
-        await r.save();
-        outcomes.push({ domain: r.domain, skuId: r.skuId, result: 'REACTIVATED ✓' });
+        await setSubscriptionState(it.account, dom, it.skuId, 'activate', it.subscriptionId);
+        // Update or create the billing record so it's marked active + renewed
+        await SubBilling.updateOne(
+          { domain: dom, skuId: it.skuId },
+          { $set: { billingStatus: 'active', suspendedAt: null, lastPaymentDate: now, nextBillingDate: next, account: it.account, updatedAt: now } },
+          { upsert: true }
+        );
+        outcomes.push({ domain: dom, skuId: it.skuId, result: 'REACTIVATED ✓' });
+        console.log('UNSUSPEND OK:', dom, it.skuId, it.account);
       } catch (e) {
         const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
-        outcomes.push({ domain: r.domain, skuId: r.skuId, result: 'FAILED: ' + detail });
+        outcomes.push({ domain: dom, skuId: it.skuId, result: 'FAILED: ' + detail });
+        console.error('UNSUSPEND FAILED:', dom, it.skuId, '→', detail);
       }
     }
     res.json({ success: true, outcomes });
