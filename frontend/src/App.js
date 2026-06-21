@@ -1984,23 +1984,6 @@ const AdminPaymentsSection = () => {
     } catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Unsuspend failed.'); }
   };
 
-  const runWsAnchored = async (dryRun) => {
-    if (!dryRun && !window.confirm('SUSPEND all overdue customers (Workspace + Voice + all their subscriptions)? Whitelisted customers are protected. This is live.')) return;
-    setSubBillingMsg(dryRun ? 'Previewing overdue customers…' : 'Suspending overdue customers…');
-    try {
-      const r = await axios.post(`${API_URL}/admin/billing/run-workspace-anchored`, { dryRun });
-      setWsPreview(r.data);
-      if (dryRun) {
-        setSubBillingMsg(`Preview: ${r.data.customersChecked} customers checked · ${r.data.overdue.length} overdue · ${r.data.skippedWhitelisted} whitelisted (none suspended — preview only).`);
-      } else {
-        let m = `✓ Suspended ${r.data.suspended.length} subscription(s) across ${r.data.overdue.length} overdue customer(s).`;
-        if (r.data.suspendErrors?.length) m += ` ⚠️ ${r.data.suspendErrors.length} failed: ` + r.data.suspendErrors.map(e => `${e.domain} (${e.error})`).join('; ');
-        setSubBillingMsg(m);
-      }
-      loadSubBilling();
-    } catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Check failed.'); }
-  };
-
   const testSuspend = async () => {
     const d = testDomain.trim().toLowerCase();
     if (!d) { setSubBillingMsg('Enter a domain to test.'); return; }
@@ -2040,21 +2023,21 @@ const AdminPaymentsSection = () => {
   };
   const syncSubBilling = async () => {
     setSubBillingMsg('Syncing from Google…');
-    try { const r = await axios.post(`${API_URL}/admin/billing/sync`, {}); setSubBillingMsg(`✓ Synced. PK seeded ${r.data.pk?.seeded || 0}, USA seeded ${r.data.usa?.seeded || 0}`); loadSubBilling(); }
+    try {
+      const r = await axios.post(`${API_URL}/admin/billing/sync`, {});
+      const pk = r.data.pk || {}, usa = r.data.usa || {};
+      setSubBillingMsg(`✓ Synced. PK: ${pk.total || 0} found (${pk.seeded || 0} new)${pk.error ? ' [' + pk.error + ']' : ''} · USA: ${usa.total || 0} found (${usa.seeded || 0} new)${usa.error ? ' [' + usa.error + ']' : ''}`);
+      loadSubBilling();
+    }
     catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Sync failed.'); }
   };
   const runSubBilling = async () => {
     setSubBillingMsg('Running check…');
     try {
       const r = await axios.post(`${API_URL}/admin/billing/run`, {});
-      let m = `✓ Checked ${r.data.checked} · warned ${r.data.warned.length} · suspended ${r.data.suspended.length}`;
+      let m = `✓ ${r.data.checked} customers checked · warned ${r.data.warned.length} · suspended ${r.data.suspended.length} · overdue ${r.data.overdue.length} · whitelisted skipped ${r.data.skippedWhitelisted || 0}`;
       if (r.data.suspendErrors && r.data.suspendErrors.length) {
-        m = `⚠️ ${r.data.suspended.length} suspended, but ${r.data.suspendErrors.length} FAILED: ` +
-          r.data.suspendErrors.map(e => `${e.domain} (${e.error})`).join('; ');
-      }
-      if (r.data.diagnostic) {
-        const d = r.data.diagnostic;
-        m += ` | DIAGNOSTIC: total=${d.totalRecords}, statuses=${JSON.stringify(d.statusCounts)}, whitelisted=${d.whitelistedCount}, noDate=${d.nullNextDate}, pastDueActive=${d.pastDueActive}`;
+        m += ` | ⚠️ ${r.data.suspendErrors.length} FAILED: ` + r.data.suspendErrors.map(e => `${e.domain} (${e.error})`).join('; ');
       }
       setSubBillingMsg(m);
       loadSubBilling();
@@ -2153,6 +2136,7 @@ const AdminPaymentsSection = () => {
         <button className={`btn ${tab === 'domains' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('domains'); loadDomainOrders(); }}>Domain Orders</button>
         <button className={`btn ${tab === 'subbilling' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('subbilling'); loadSubBilling(); }}>Subscription Billing</button>
         <button className={`btn ${tab === 'renewed' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('renewed'); loadSubBilling(); }}>Renewed Accounts</button>
+        <button className={`btn ${tab === 'suspended' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('suspended'); loadSuspended(); }}>Suspended Accounts</button>
         <button className={`btn ${tab === 'unsuspend' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('unsuspend'); loadSuspended(); }}>Unsuspend</button>
       </div>
 
@@ -2330,7 +2314,7 @@ const AdminPaymentsSection = () => {
       {tab === 'subbilling' && (
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <h3 style={{ margin: 0 }}>Subscription billing (29-day cycle)</h3>
+            <h3 style={{ margin: 0 }}>Subscription billing (30-day cycle)</h3>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="btn btn-secondary" onClick={syncSubBilling}>Sync from Google</button>
               <button className="btn btn-secondary" onClick={recalcDates}>Recalculate dates</button>
@@ -2344,43 +2328,16 @@ const AdminPaymentsSection = () => {
             <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 16, marginBottom: 14 }}>
               <h4 style={{ margin: '0 0 8px' }}>Bulk whitelist paid customers</h4>
               <p style={{ color: '#166534', fontSize: 13, margin: '0 0 10px' }}>
-                Paste the domains of customers who have PAID (one per line, or comma-separated). They'll be protected from suspension and given a fresh 29 days. Do this BEFORE running the check.
+                Paste the domains of customers who have PAID (one per line, or comma-separated). They'll be protected from suspension and given a fresh 30 days. Do this BEFORE running the check.
               </p>
               <textarea value={bulkDomains} onChange={e => setBulkDomains(e.target.value)} placeholder={"customer1.com\ncustomer2.com\ncustomer3.com"} style={{ width: '100%', minHeight: 120, borderRadius: 8, border: '1px solid #bbf7d0', padding: '10px 12px', fontSize: 14, fontFamily: 'monospace', marginBottom: 10 }} />
               <button className="btn btn-primary" onClick={bulkWhitelist}>Whitelist these domains</button>
             </div>
           )}
           <p style={{ color: '#6b7280', fontSize: 14 }}>
-            Each subscription gets a 29-day cycle from its purchase date (Google creation date). Click <strong>Sync from Google</strong> first to load existing subscriptions, then <strong>Run check</strong> warns those near due and suspends those past 29 days. Set up a daily cron at <code>/api/cron/subscription-billing?secret=YOUR_JWT_SECRET&sync=1</code>.
+            Each customer is billed on a 30-day cycle from their Google Workspace creation date. The daily check warns on day 25 and suspends on day 29 (unless whitelisted). Click <strong>Sync from Google</strong> first to load subscriptions, then <strong>Run check</strong>. Set up a daily cron at <code>/api/cron/subscription-billing?secret=YOUR_JWT_SECRET&sync=1</code>.
           </p>
           {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
-
-          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: 16, marginBottom: 14 }}>
-            <h4 style={{ margin: '0 0 8px' }}>📅 Workspace-anchored billing (suspends ALL of a customer's subscriptions)</h4>
-            <p style={{ color: '#92600a', fontSize: 13, margin: '0 0 10px' }}>
-              Bills each customer from their <strong>Google Workspace creation date</strong> (+29 days). When overdue, suspends ALL their subscriptions together (Workspace + Voice + others). Customers grouped by email. <strong>Always Preview first.</strong>
-            </p>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="btn btn-secondary" onClick={() => runWsAnchored(true)}>Preview (dry run)</button>
-              <button className="btn btn-primary" style={{ background: '#b42318' }} onClick={() => runWsAnchored(false)}>Suspend overdue now</button>
-            </div>
-            {wsPreview && wsPreview.overdue && wsPreview.overdue.length > 0 && (
-              <table className="data-table" style={{ marginTop: 12 }}>
-                <thead><tr><th>Customer</th><th>Domains</th><th>WS anchor</th><th>Due</th><th>Subs</th></tr></thead>
-                <tbody>
-                  {wsPreview.overdue.map((o, i) => (
-                    <tr key={i}>
-                      <td style={{ fontSize: 13 }}>{o.customer}</td>
-                      <td style={{ fontSize: 13 }}>{o.domains.join(', ')}</td>
-                      <td>{o.anchor}</td>
-                      <td style={{ color: '#b42318' }}>{o.due}</td>
-                      <td>{o.subs}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
 
           <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: 16, marginBottom: 14 }}>
             <h4 style={{ margin: '0 0 8px' }}>🧪 Test suspension on one domain</h4>
@@ -2447,6 +2404,52 @@ const AdminPaymentsSection = () => {
               </table>
             );
           })()}
+        </>
+      )}
+
+      {tab === 'suspended' && (
+        <>
+          <h3 style={{ marginTop: 0 }}>⛔ Suspended Accounts</h3>
+          <p style={{ color: '#6b7280', fontSize: 14 }}>Accounts currently suspended for non-payment. To reactivate a paid customer, use the <strong>Unsuspend</strong> tab.</p>
+          <button className="btn btn-secondary" style={{ marginBottom: 12 }} onClick={loadSuspended}>Refresh</button>
+          {suspendedList.length === 0 ? <p>No suspended accounts.</p> : (
+            <table className="data-table">
+              <thead><tr><th>Domain</th><th>Subscriptions</th><th>Accounts</th><th>Suspended on</th></tr></thead>
+              <tbody>
+                {suspendedList.map(s => (
+                  <tr key={s.domain} style={{ background: '#fef2f2' }}>
+                    <td><strong>{s.domain}</strong></td>
+                    <td>{s.subscriptions.map(x => x.skuId).join(', ')}</td>
+                    <td>{[...new Set(s.subscriptions.map(x => (x.account || 'pk').toUpperCase()))].join(', ')}</td>
+                    <td>{s.subscriptions[0]?.suspendedAt ? new Date(s.subscriptions[0].suspendedAt).toLocaleDateString() : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+
+      {tab === 'suspended' && (
+        <>
+          <h3 style={{ marginTop: 0 }}>⛔ Suspended Accounts</h3>
+          <p style={{ color: '#6b7280', fontSize: 14 }}>Read-only list of all currently suspended subscriptions. To reactivate, use the <strong>Unsuspend</strong> tab.</p>
+          <button className="btn btn-secondary" style={{ marginBottom: 12 }} onClick={loadSuspended}>Refresh</button>
+          {suspendedList.length === 0 ? <p>No suspended accounts.</p> : (
+            <table className="data-table">
+              <thead><tr><th>Domain</th><th>Subscriptions</th><th>Accounts</th><th>Suspended on</th></tr></thead>
+              <tbody>
+                {suspendedList.map(s => (
+                  <tr key={s.domain} style={{ background: '#fef2f2' }}>
+                    <td>{s.domain}</td>
+                    <td>{s.subscriptions.map(x => x.skuId).join(', ')}</td>
+                    <td>{[...new Set(s.subscriptions.map(x => (x.account || 'pk').toUpperCase()))].join(', ')}</td>
+                    <td>{s.subscriptions[0]?.suspendedAt ? new Date(s.subscriptions[0].suspendedAt).toLocaleDateString() : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </>
       )}
 

@@ -1351,7 +1351,7 @@ async function markPaidAndProvision(payment) {
         // Set billing cycle: next bill = now + 29 days
         const now = new Date();
         order.lastPaymentDate = now;
-        order.nextBillingDate = new Date(now.getTime() + 29 * 24 * 60 * 60 * 1000);
+        order.nextBillingDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
         order.renewalWarnedAt = null;
 
         // First-time provisioning
@@ -1385,7 +1385,7 @@ async function markPaidAndProvision(payment) {
           const planDoc = await Plan.findOne({ planId: order.plan?.id });
           if (domain && planDoc?.skuId) {
             const nowD = new Date();
-            const next = new Date(nowD.getTime() + 29 * 24 * 60 * 60 * 1000);
+            const next = new Date(nowD.getTime() + 30 * 24 * 60 * 60 * 1000);
             const rec = await SubBilling.findOne({ domain, skuId: planDoc.skuId });
             if (rec) {
               if (rec.billingStatus === 'suspended') {
@@ -1510,21 +1510,20 @@ async function syncSubscriptionsForBilling(account) {
       ? new Date(Number(s.creationTime))
       : new Date();
 
-    // Due date = purchase + 29 days. If purchase was >29 days ago and never paid, this is in the
-    // past → the account is overdue and will be suspended on the next check. Paying resets it.
-    const PERIOD_MS = 29 * 24 * 60 * 60 * 1000;
+    // Due date = purchase + 30 days (cycle). Overdue accounts (past this) suspend on the check.
+    const PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
     const nextBillingDate = new Date(purchaseDate.getTime() + PERIOD_MS);
 
     try {
-      // Atomic upsert: insert if new (setting seed fields once), otherwise just touch subscriptionId.
+      // Atomic upsert: insert if new, AND refresh the billing date from purchase date each sync.
       const r = await SubBilling.updateOne(
         { domain, skuId },
         {
           $setOnInsert: {
-            account, purchaseDate, nextBillingDate,
+            account, purchaseDate,
             billingStatus: s.status === 'SUSPENDED' ? 'suspended' : 'active',
           },
-          $set: { subscriptionId: s.subscriptionId || '', updatedAt: new Date() },
+          $set: { subscriptionId: s.subscriptionId || '', nextBillingDate, updatedAt: new Date() },
         },
         { upsert: true }
       );
@@ -1585,8 +1584,8 @@ async function runSubscriptionBillingCheck() {
     results.checked++;
     const daysLeft = (new Date(r.nextBillingDate).getTime() - now.getTime()) / (24 * 60 * 60 * 1000);
 
-    // Warn ~4 days before (still sent, but suspension does NOT depend on it)
-    if (daysLeft <= 4 && daysLeft > 0 && r.billingStatus === 'active') {
+    // Warn at day 25 of the 30-day cycle = 5 days before due (4 days before the day-29 suspend)
+    if (daysLeft <= 5 && daysLeft > 1 && r.billingStatus === 'active') {
       r.billingStatus = 'warned';
       r.warnedAt = now;
       await r.save();
@@ -1594,8 +1593,8 @@ async function runSubscriptionBillingCheck() {
       try { await sendRenewalWarningEmail(await emailForDomain(r.domain), r.domain, r.nextBillingDate); } catch (_) { }
     }
 
-    // Suspend DIRECTLY once 29 days pass (no warning required first), unless whitelisted (already excluded)
-    if (daysLeft <= 0 && r.billingStatus !== 'suspended') {
+    // Suspend on DAY 29 = 1 day before the 30-day due date (daysLeft <= 1)
+    if (daysLeft <= 1 && r.billingStatus !== 'suspended') {
       try {
         await setSubscriptionState(r.account, r.domain, r.skuId, 'suspend', r.subscriptionId);
         r.billingStatus = 'suspended';
@@ -1620,7 +1619,7 @@ app.post('/api/admin/billing/start-from-today', authenticateCustomer, requireAdm
   try {
     const onlyPastDue = req.body?.onlyPastDue !== false; // default: only reset those already past due / suspended
     const now = new Date();
-    const next = new Date(now.getTime() + 29 * 24 * 60 * 60 * 1000);
+    const next = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     const filter = onlyPastDue
       ? { $or: [{ nextBillingDate: { $lte: now } }, { billingStatus: 'suspended' }, { billingStatus: 'warned' }] }
       : {};
@@ -1892,7 +1891,7 @@ app.post('/api/admin/billing/whitelist-bulk', authenticateCustomer, requireAdmin
     const domains = (req.body.domains || []).map((d) => String(d).toLowerCase().trim()).filter(Boolean);
     if (!domains.length) return res.status(400).json({ error: 'Provide a list of domains.' });
     const now = new Date();
-    const next = new Date(now.getTime() + 29 * 24 * 60 * 60 * 1000);
+    const next = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     const result = await SubBilling.updateMany(
       { domain: { $in: domains } },
       { $set: { whitelisted: true, whitelistedAt: now, lastPaymentDate: now, nextBillingDate: next, billingStatus: 'active', warnedAt: null, suspendedAt: null, updatedAt: now } }
@@ -1908,18 +1907,17 @@ app.post('/api/admin/billing/whitelist-bulk', authenticateCustomer, requireAdmin
 // Fixes records whose dates were stored incorrectly (e.g. pushed into the future).
 app.post('/api/admin/billing/recalculate', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
-    const PERIOD_MS = 29 * 24 * 60 * 60 * 1000;
+    const PERIOD_MS = 30 * 24 * 60 * 60 * 1000;   // 30-day cycle
     const nowMs = Date.now();
     const all = await SubBilling.find({ whitelisted: { $ne: true } });
     let updated = 0, nowPastDue = 0;
     for (const r of all) {
-      // The cycle starts from the last payment, or (if never paid) the purchase date.
       const anchor = r.lastPaymentDate ? new Date(r.lastPaymentDate).getTime()
         : (r.purchaseDate ? new Date(r.purchaseDate).getTime() : nowMs);
-      // Due date = anchor + 29 days. If that's in the past, the current period is UNPAID → overdue.
       const nextMs = anchor + PERIOD_MS;
       r.nextBillingDate = new Date(nextMs);
-      if (nextMs <= nowMs) nowPastDue++;
+      // "past due" for the check = within 1 day of due or beyond (day 29+)
+      if (nextMs - nowMs <= 24 * 60 * 60 * 1000) nowPastDue++;
       r.updatedAt = new Date();
       await r.save();
       updated++;
@@ -1954,7 +1952,7 @@ app.get('/api/admin/billing/diagnostic', authenticateCustomer, requireAdmin, asy
   }
 });
 
-// Admin: whitelist (= treat as renewed, fresh 29 days from today) or un-whitelist a subscription
+// Admin: whitelist (= treat as renewed, fresh 30 days from today) or un-whitelist a subscription
 app.post('/api/admin/billing/whitelist', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const { id, whitelisted } = req.body;
@@ -1962,14 +1960,14 @@ app.post('/api/admin/billing/whitelist', authenticateCustomer, requireAdmin, asy
     if (!r) return res.status(404).json({ error: 'Subscription not found.' });
     const now = new Date();
     if (whitelisted) {
-      // Whitelisting = renew: fresh 29-day cycle from today, reactivate if it was suspended
+      // Whitelisting = renew: fresh 30-day cycle from today, reactivate if it was suspended
       if (r.billingStatus === 'suspended') {
         try { await setSubscriptionState(r.account, r.domain, r.skuId, 'activate', r.subscriptionId); } catch (_) { }
       }
       r.whitelisted = true;
       r.whitelistedAt = now;
       r.lastPaymentDate = now;
-      r.nextBillingDate = new Date(now.getTime() + 29 * 24 * 60 * 60 * 1000);
+      r.nextBillingDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
       r.billingStatus = 'active';
       r.warnedAt = null;
       r.suspendedAt = null;
@@ -2009,8 +2007,8 @@ app.get('/api/admin/billing/subscriptions', authenticateCustomer, requireAdmin, 
 // Admin: run the subscription billing check now
 app.post('/api/admin/billing/run', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
-    const results = await runSubscriptionBillingCheck();
-    res.json({ success: true, ...results });
+    const results = await runWorkspaceAnchoredBillingCheck(false);
+    res.json({ success: true, checked: results.customersChecked, warned: results.warned, suspended: results.suspended, overdue: results.overdue, suspendErrors: results.suspendErrors, skippedWhitelisted: results.skippedWhitelisted });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -4011,20 +4009,13 @@ app.get('/api/health', (req, res) => {
 async function runDailyBillingTasks() {
   console.log('⏰ DAILY BILLING TASKS running at', new Date().toISOString());
   try {
-    // Sync existing subscriptions from Google, then run the 29-day check
+    // Sync existing subscriptions from Google, then run the workspace-anchored 30-day check
     await syncSubscriptionsForBilling('pk');
     await syncSubscriptionsForBilling('usa');
-    const subResults = await runSubscriptionBillingCheck();
-    console.log('⏰ Subscription billing:', JSON.stringify(subResults));
+    const subResults = await runWorkspaceAnchoredBillingCheck(false);
+    console.log('⏰ Workspace-anchored billing:', JSON.stringify({ warned: subResults.warned.length, suspended: subResults.suspended.length, overdue: subResults.overdue.length }));
   } catch (e) {
     console.error('Daily subscription billing error:', e.message);
-  }
-  try {
-    // Also run the portal-order billing check (new orders)
-    const orderResults = await runBillingCheck();
-    console.log('⏰ Order billing:', JSON.stringify(orderResults));
-  } catch (e) {
-    console.error('Daily order billing error:', e.message);
   }
 }
 
