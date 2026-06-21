@@ -2362,7 +2362,7 @@ const AdminPaymentsSection = () => {
           </div>
           {payments.length === 0 ? <p>No payments yet.</p> : (
             <table className="data-table">
-              <thead><tr><th>Date</th><th>Customer</th><th>Domain</th><th>Amount</th><th>Method</th><th>Status</th></tr></thead>
+              <thead><tr><th>Date</th><th>Customer</th><th>Domain</th><th>Amount</th><th>Method</th><th>Status</th><th>Action</th></tr></thead>
               <tbody>
                 {payments.map(p => (
                   <tr key={p._id}>
@@ -2372,6 +2372,18 @@ const AdminPaymentsSection = () => {
                     <td>${Number(p.amount || 0).toFixed(2)}</td>
                     <td>{p.method === 'nicky' ? 'Crypto' : 'Card'}</td>
                     <td><span className={`status ${p.status}`}>{p.status}</span></td>
+                    <td>
+                      {p.status !== 'paid' && (
+                        <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}
+                          onClick={async () => {
+                            if (!window.confirm('Mark this payment as PAID and provision the order? Only do this if you confirmed the payment succeeded on the provider side.')) return;
+                            try { const r = await axios.post(`${API_URL}/admin/payments/mark-paid`, { paymentId: p._id }); alert(r.data.message || 'Done'); load(); }
+                            catch (e) { alert(e?.response?.data?.error || 'Failed'); }
+                          }}>
+                          Mark paid
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2787,15 +2799,17 @@ const CustomerPayments = () => {
         load();
         return;
       }
-      // Not confirmed yet — crypto may still be confirming. Retry up to ~10 times (every 6s = ~1 min).
-      if (attempt < 10) {
-        setMsg(`✓ Payment received — confirming on the blockchain… (this can take a few minutes)`);
-        setTimeout(() => verifyPayment(pid, attempt + 1), 6000);
+      // Not confirmed yet. Retry up to 20 times (every 8s ≈ 2.5 min).
+      if (attempt < 20) {
+        const mins = Math.ceil(((20 - attempt) * 8) / 60);
+        setMsg(`Payment received — waiting for blockchain confirmation. This can take several minutes for crypto. (still checking…)`);
+        setTimeout(() => verifyPayment(pid, attempt + 1), 8000);
       } else {
-        setMsg('Payment is still confirming on the blockchain. This can take a few minutes for crypto — your order will activate automatically once confirmed. You can refresh this page to check.');
+        setMsg('Your crypto payment is still confirming on the network. Once it confirms, your order activates automatically — you can safely close this page and check "My subscriptions" shortly. If it doesn\'t activate within 30 minutes, contact support.');
       }
     } catch (_) {
-      if (attempt < 10) setTimeout(() => verifyPayment(pid, attempt + 1), 6000);
+      if (attempt < 20) setTimeout(() => verifyPayment(pid, attempt + 1), 8000);
+      else setMsg('We couldn\'t confirm the payment status automatically. If you completed payment, your order will activate once it confirms. Contact support if it doesn\'t appear soon.');
     }
   };
 

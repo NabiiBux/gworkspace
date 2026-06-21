@@ -2529,27 +2529,56 @@ async function checkNickyPaymentStatus(payment) {
   if (!payment || !payment.providerRef) return { paid: false, reason: 'no providerRef' };
   const token = process.env.NICKY_API_TOKEN;
   const base = process.env.NICKY_API_BASE || 'https://api-public.pay.nicky.me';
-  // Try to fetch the payment request by id
+  const id = payment.providerRef;
+  // Try several possible Nicky status endpoints (we log each result to discover the working one).
   const tryUrls = [
-    `${base}/api/public/PaymentRequestPublicApi/${payment.providerRef}`,
-    `${base}/api/public/PaymentRequestPublicApi/get?id=${payment.providerRef}`,
+    `${base}/api/public/PaymentRequestPublicApi/${id}`,
+    `${base}/api/public/PaymentRequestPublicApi/get/${id}`,
+    `${base}/api/public/PaymentRequestPublicApi/get?id=${id}`,
+    `${base}/api/public/PaymentRequestPublicApi?id=${id}`,
   ];
   for (const u of tryUrls) {
     try {
-      const resp = await fetch(u, { headers: { 'X-API-KEY': token } });
+      const resp = await fetch(u, { headers: { 'X-API-KEY': token, 'Accept': 'application/json' } });
+      const bodyText = await resp.text();
+      console.log(`NICKY STATUS TRY ${u} → HTTP ${resp.status} body: ${bodyText.slice(0, 300)}`);
       if (!resp.ok) continue;
-      const data = await resp.json();
-      const status = (data.status || data.bill?.status || '').toString().toLowerCase();
-      console.log('NICKY STATUS CHECK', payment.providerRef, '→', status);
-      if (/paid|completed|success|confirmed|settled/.test(status)) {
+      let data; try { data = JSON.parse(bodyText); } catch (_) { continue; }
+      const status = (data.status || data.bill?.status || '').toString();
+      console.log('NICKY STATUS for', id, '→', status);
+      // Nicky uses statuses like "PaymentPending", "PaymentCompleted", "Paid", "Completed"
+      if (/completed|paid|success|confirmed|settled/i.test(status) && !/pending/i.test(status)) {
         if (payment.status !== 'paid') await markPaidAndProvision(payment);
         return { paid: true, status };
       }
       return { paid: false, status };
-    } catch (e) { continue; }
+    } catch (e) {
+      console.log(`NICKY STATUS TRY ${u} → error ${e.message}`);
+      continue;
+    }
   }
-  return { paid: false, reason: 'status endpoint not reachable' };
+  return { paid: false, reason: 'status endpoint not reachable — check NICKY STATUS TRY logs for the working URL' };
 }
+
+// Admin: manually mark a payment as paid + provision (for payments confirmed on the provider
+// side but not auto-caught, e.g. before the webhook was configured). Use carefully.
+app.post('/api/admin/payments/mark-paid', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { paymentId, orderNumber } = req.body;
+    let payment = null;
+    if (paymentId) { try { payment = await Payment.findById(paymentId); } catch (_) { } }
+    if (!payment && orderNumber) {
+      const order = await WorkspaceOrder.findOne({ orderNumber });
+      if (order) payment = await Payment.findOne({ orderId: order._id }).sort({ createdAt: -1 });
+    }
+    if (!payment) return res.status(404).json({ error: 'Payment not found. Provide a valid paymentId or orderNumber.' });
+    if (payment.status === 'paid') return res.json({ success: true, alreadyPaid: true, message: 'Payment was already marked paid.' });
+    await markPaidAndProvision(payment);
+    res.json({ success: true, message: `Payment ${payment._id} marked paid and provisioning started.` });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // Customer/endpoint: check my payment status (called when returning from Nicky, or polled)
 app.get('/api/customer/payment-status/:paymentId', authenticateCustomer, async (req, res) => {
