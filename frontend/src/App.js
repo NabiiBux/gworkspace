@@ -139,6 +139,11 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
 
   const handleRegister = async (e) => {
     e.preventDefault();
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((registerForm.businessEmail || '').trim());
+    if (!emailOk) {
+      setError('Please enter a valid email address (e.g. you@example.com).');
+      return;
+    }
     if (!registerForm.aupAccepted) {
       setError('Please accept the Voice Acceptable Use Policy to continue.');
       return;

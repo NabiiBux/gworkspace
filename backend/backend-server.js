@@ -583,6 +583,33 @@ async function emailForDomain(domain) {
   return c?.businessEmail || null;
 }
 
+// Welcome / registration email
+async function sendWelcomeEmail(to, name) {
+  if (!to) return;
+  const html = emailShell('Welcome to ' + BRAND_NAME, `
+    <p>Hi ${name || 'there'},</p>
+    <p>Your account has been created successfully. You can now sign in to your portal to order Google Workspace, Google Voice, domains, and add-ons.</p>
+    <p>If you have any questions, just reply to this email or contact our support team.</p>`);
+  await sendEmail(to, `Welcome to ${BRAND_NAME}`, html);
+}
+
+// Order-placed notification
+async function sendOrderPlacedEmail(to, name, orderDesc, amount) {
+  if (!to) return;
+  const amt = amount != null ? ` Total: $${Number(amount).toFixed(2)}.` : '';
+  const html = emailShell('Order received', `
+    <p>Hi ${name || 'there'},</p>
+    <p>We've received your order:</p>
+    <p style="background:#f8fafc;padding:12px 16px;border-radius:8px"><strong>${orderDesc || 'Your order'}</strong>${amt}</p>
+    <p>To activate your service, please complete payment in your portal. Once paid, your subscription is set up automatically.</p>`);
+  await sendEmail(to, `Order received — ${BRAND_NAME}`, html);
+}
+
+// Simple email format validation (server-side)
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+}
+
 // ==================== GOOGLE WORKSPACE INTEGRATION ====================
 const getGoogleAuth = () => {
   return new google.auth.JWT({
@@ -743,6 +770,9 @@ app.post('/api/auth/register', async (req, res) => {
     if (!businessEmail || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
+    if (!isValidEmail(businessEmail)) {
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
+    }
     if (!aupAccepted) {
       return res.status(400).json({ error: 'You must accept the Voice Acceptable Use Policy to create an account.' });
     }
@@ -779,6 +809,9 @@ app.post('/api/auth/register', async (req, res) => {
     });
 
     const token = generateToken(customer._id, customer.businessEmail, customer.role);
+
+    // Send welcome email (non-blocking)
+    try { await sendWelcomeEmail(customer.businessEmail, customer.firstName || customer.username); } catch (_) { }
 
     res.status(201).json({
       success: true,
@@ -3135,6 +3168,13 @@ app.post('/api/workspace-orders', authenticateCustomer, async (req, res) => {
       if (dom) {
         await Customer.findByIdAndUpdate(req.customerId, { domain: dom });
       }
+    } catch (_) { }
+
+    // Order-placed email (non-blocking)
+    try {
+      const me = await Customer.findById(req.customerId);
+      const desc = `${order.plan?.name || 'Workspace'} (${order.seats || 1} seat${order.seats === 1 ? '' : 's'}) for ${order.organization?.domain || ''}`;
+      await sendOrderPlacedEmail(me?.businessEmail, me?.firstName || me?.username, desc, order.monthlyTotal);
     } catch (_) { }
 
     res.json({ orderNumber: order.orderNumber, id: order._id, status: order.status });
