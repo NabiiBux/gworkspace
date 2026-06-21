@@ -2790,7 +2790,7 @@ const CustomerPayments = () => {
     }
   }, []);
 
-  // Poll the backend to confirm a payment cleared (crypto can take time to confirm on-chain).
+  // Poll the backend, which checks Nicky's real status API. Marks paid only when Nicky says "Finished".
   const verifyPayment = async (pid, attempt) => {
     try {
       const r = await axios.get(`${API_URL}/customer/payment-status/${pid}`);
@@ -2799,17 +2799,20 @@ const CustomerPayments = () => {
         load();
         return;
       }
-      // Not confirmed yet. Retry up to 20 times (every 8s ≈ 2.5 min).
-      if (attempt < 20) {
-        const mins = Math.ceil(((20 - attempt) * 8) / 60);
-        setMsg(`Payment received — waiting for blockchain confirmation. This can take several minutes for crypto. (still checking…)`);
+      if (r.data.cancelled) {
+        setMsg('This payment was cancelled. You can place the order again anytime.');
+        return;
+      }
+      // Crypto can take a few minutes to confirm. Poll every 8s for up to ~4 minutes.
+      if (attempt < 30) {
+        setMsg('Waiting for your crypto payment to confirm on the network… (this can take a few minutes)');
         setTimeout(() => verifyPayment(pid, attempt + 1), 8000);
       } else {
-        setMsg('Your crypto payment is still confirming on the network. Once it confirms, your order activates automatically — you can safely close this page and check "My subscriptions" shortly. If it doesn\'t activate within 30 minutes, contact support.');
+        setMsg('Your payment is still confirming. Once the network confirms it, your order activates automatically — check "My subscriptions" shortly, or contact support if it doesn\'t appear.');
       }
     } catch (_) {
-      if (attempt < 20) setTimeout(() => verifyPayment(pid, attempt + 1), 8000);
-      else setMsg('We couldn\'t confirm the payment status automatically. If you completed payment, your order will activate once it confirms. Contact support if it doesn\'t appear soon.');
+      if (attempt < 30) setTimeout(() => verifyPayment(pid, attempt + 1), 8000);
+      else setMsg('We couldn\'t confirm the payment automatically. If you paid, your order will activate once confirmed — contact support if needed.');
     }
   };
 

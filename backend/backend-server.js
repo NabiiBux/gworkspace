@@ -217,7 +217,8 @@ const PaymentSchema = new mongoose.Schema({
   currency: { type: String, default: 'USD' },
   method: { type: String, enum: ['stripe', 'nicky'], default: 'stripe' },
   status: { type: String, enum: ['pending', 'paid', 'failed', 'cancelled'], default: 'pending' },
-  providerRef: String,     // Stripe session id or Nicky bill/order id
+  providerRef: String,     // Stripe session id or Nicky bill/order id (GUID)
+  providerShortId: String, // Nicky shortId (e.g. 6DBY95) — used for status lookups
   checkoutUrl: String,     // hosted checkout URL (Stripe or Nicky)
   isTest: { type: Boolean, default: false },  // true if made in Stripe test mode — does NOT provision real Google subs
   createdAt: { type: Date, default: Date.now },
@@ -1247,6 +1248,7 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
       });
       payment.checkoutUrl = nicky.url;
       payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id);
+      payment.providerShortId = nicky.shortId || null;
       await payment.save();
       return res.json({ checkoutUrl: nicky.url, paymentId: payment._id });
     } catch (e) {
@@ -2526,38 +2528,42 @@ app.post('/api/admin/run-billing-check', authenticateCustomer, requireAdmin, asy
 // Check a Nicky payment's status directly (reliable fallback when webhooks aren't firing).
 // Call this when the customer returns, or poll it. If paid, it provisions the order.
 async function checkNickyPaymentStatus(payment) {
-  if (!payment || !payment.providerRef) return { paid: false, reason: 'no providerRef' };
+  if (!payment || (!payment.providerRef && !payment.providerShortId)) return { paid: false, reason: 'no provider reference' };
   const token = process.env.NICKY_API_TOKEN;
   const base = process.env.NICKY_API_BASE || 'https://api-public.pay.nicky.me';
-  const id = payment.providerRef;
-  // Try several possible Nicky status endpoints (we log each result to discover the working one).
-  const tryUrls = [
-    `${base}/api/public/PaymentRequestPublicApi/${id}`,
-    `${base}/api/public/PaymentRequestPublicApi/get/${id}`,
-    `${base}/api/public/PaymentRequestPublicApi/get?id=${id}`,
-    `${base}/api/public/PaymentRequestPublicApi?id=${id}`,
-  ];
+  const guid = payment.providerRef;
+  const shortId = payment.providerShortId;
+
+  // Endpoints confirmed from Nicky's official plugin source:
+  //   GET /api/public/PaymentRequestPublicApi/get-by-short-id?shortId=<shortId>
+  //   GET /api/public/PaymentRequestPublicApi/get-by-id?id=<guid>
+  // Auth header: x-api-key. Paid status string: "Finished". Cancelled: "Canceled".
+  const tryUrls = [];
+  if (shortId) tryUrls.push(`${base}/api/public/PaymentRequestPublicApi/get-by-short-id?shortId=${encodeURIComponent(shortId)}`);
+  if (guid) tryUrls.push(`${base}/api/public/PaymentRequestPublicApi/get-by-id?id=${encodeURIComponent(guid)}`);
+
   for (const u of tryUrls) {
     try {
-      const resp = await fetch(u, { headers: { 'X-API-KEY': token, 'Accept': 'application/json' } });
+      const resp = await fetch(u, { headers: { 'x-api-key': token, 'Accept': 'application/json' } });
       const bodyText = await resp.text();
-      console.log(`NICKY STATUS TRY ${u} → HTTP ${resp.status} body: ${bodyText.slice(0, 300)}`);
+      console.log(`NICKY STATUS ${u} → HTTP ${resp.status} body: ${bodyText.slice(0, 200)}`);
       if (!resp.ok) continue;
       let data; try { data = JSON.parse(bodyText); } catch (_) { continue; }
       const status = (data.status || data.bill?.status || '').toString();
-      console.log('NICKY STATUS for', id, '→', status);
-      // Nicky uses statuses like "PaymentPending", "PaymentCompleted", "Paid", "Completed"
-      if (/completed|paid|success|confirmed|settled/i.test(status) && !/pending/i.test(status)) {
+      console.log('NICKY STATUS resolved →', status);
+      // "Finished" = paid (per Nicky's official plugin)
+      if (status === 'Finished') {
         if (payment.status !== 'paid') await markPaidAndProvision(payment);
         return { paid: true, status };
       }
+      if (status === 'Canceled') return { paid: false, status, cancelled: true };
       return { paid: false, status };
     } catch (e) {
-      console.log(`NICKY STATUS TRY ${u} → error ${e.message}`);
+      console.log(`NICKY STATUS ${u} → error ${e.message}`);
       continue;
     }
   }
-  return { paid: false, reason: 'status endpoint not reachable — check NICKY STATUS TRY logs for the working URL' };
+  return { paid: false, reason: 'status endpoint not reachable' };
 }
 
 // Admin: manually mark a payment as paid + provision (for payments confirmed on the provider
@@ -2580,8 +2586,33 @@ app.post('/api/admin/payments/mark-paid', authenticateCustomer, requireAdmin, as
   }
 });
 
-// Customer/endpoint: check my payment status (called when returning from Nicky, or polled)
+// Customer/endpoint: check a Nicky payment's status using Nicky's real status API.
 app.get('/api/customer/payment-status/:paymentId', authenticateCustomer, async (req, res) => {
+  try {
+    const payment = await Payment.findById(req.params.paymentId);
+    if (!payment) return res.status(404).json({ error: 'Payment not found.' });
+    if (payment.status === 'paid') return res.json({ paid: true, alreadyPaid: true });
+
+    // Security: only the owner can check their own payment
+    if (String(payment.customerId) !== String(req.customerId)) {
+      return res.status(403).json({ error: 'Not your payment.' });
+    }
+
+    if (payment.method === 'nicky') {
+      // Ask Nicky directly. Only "Finished" marks the order paid (+ provisions).
+      const result = await checkNickyPaymentStatus(payment);
+      if (result.paid) return res.json({ paid: true, via: 'api', status: result.status });
+      if (result.cancelled) return res.json({ paid: false, cancelled: true, status: result.status });
+      return res.json({ paid: false, status: result.status || 'pending' });
+    }
+    res.json({ paid: payment.status === 'paid', status: payment.status });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// (legacy alias kept for safety) — Customer/endpoint: check my payment status
+app.get('/api/customer/payment-status-legacy/:paymentId', authenticateCustomer, async (req, res) => {
   try {
     const payment = await Payment.findById(req.params.paymentId);
     if (!payment) return res.status(404).json({ error: 'Payment not found.' });
@@ -2599,37 +2630,35 @@ app.get('/api/customer/payment-status/:paymentId', authenticateCustomer, async (
 // Nicky webhook — Nicky notifies us when crypto payment completes
 app.post('/api/webhooks/nicky', async (req, res) => {
   try {
-    console.log('NICKY WEBHOOK:', JSON.stringify(req.body));  // log payload to confirm/adjust fields
-    // Nicky sends the bill/payment info. invoiceReference = our order number; also try our payment id.
+    console.log('NICKY WEBHOOK:', JSON.stringify(req.body));
     const b = req.body || {};
+    // Nicky's real webhook format: { WebHookType: 'PaymentRequest_StatusChanged', ItemId: <guid>, Data: { NewStatus: 'Finished' } }
+    const webhookType = b.WebHookType || b.webHookType || b.webhookType || '';
+    const newStatus = b.Data?.NewStatus || b.data?.newStatus || b.status || '';
+    const itemId = b.ItemId || b.itemId || b.id || '';
+    // Also support a flatter format (invoiceReference / shortId) just in case.
     const invoiceRef = b.invoiceReference || b.bill?.invoiceReference || b.reference;
-    const status = (b.status || b.bill?.status || '').toString().toLowerCase();
-    const paid = /paid|completed|success|confirmed/.test(status);
+    const shortIdIn = b.shortId || b.bill?.shortId;
 
-    if (paid) {
+    const isFinished = newStatus === 'Finished' || /finished|paid|completed|confirmed/i.test(String(newStatus));
+
+    if (isFinished) {
       let payment = null;
-      // Match by order number (invoiceReference) first
-      if (invoiceRef) {
+      // 1) Match by Nicky GUID (ItemId) stored in providerRef
+      if (itemId) payment = await Payment.findOne({ providerRef: itemId }).sort({ createdAt: -1 });
+      // 2) Match by shortId
+      if (!payment && shortIdIn) payment = await Payment.findOne({ providerShortId: shortIdIn }).sort({ createdAt: -1 });
+      // 3) Match by our order number (invoiceReference)
+      if (!payment && invoiceRef) {
         const order = await WorkspaceOrder.findOne({ orderNumber: invoiceRef });
         if (order) payment = await Payment.findOne({ orderId: order._id }).sort({ createdAt: -1 });
-      }
-      // Fallback: maybe reference is our payment id
-      if (!payment && invoiceRef) {
-        try { payment = await Payment.findById(invoiceRef); } catch (_) { }
-      }
-      // Fallback: match by Nicky payment id / shortId stored in providerRef
-      if (!payment) {
-        const nickyId = b.id || b.bill?.id;
-        const shortId = b.shortId || b.bill?.shortId;
-        if (nickyId || shortId) {
-          payment = await Payment.findOne({ providerRef: { $in: [nickyId, shortId].filter(Boolean) } }).sort({ createdAt: -1 });
-        }
+        if (!payment) { try { payment = await Payment.findById(invoiceRef); } catch (_) { } }
       }
       if (payment) {
         await markPaidAndProvision(payment);
         console.log('NICKY WEBHOOK: payment marked paid + provisioned:', String(payment._id));
       } else {
-        console.error('NICKY WEBHOOK: paid but no matching payment found. invoiceRef=', invoiceRef);
+        console.error('NICKY WEBHOOK: Finished but no matching payment. itemId=', itemId, 'shortId=', shortIdIn, 'invoiceRef=', invoiceRef);
       }
     }
     res.json({ received: true });
@@ -4319,6 +4348,33 @@ function scheduleDailyBilling() {
   }, wait);
 }
 
+// Background poller: check pending Nicky crypto payments and provision when "Finished".
+// Mirrors Nicky's official plugin which polls every 30s. Catches payments even if the
+// customer closed the tab before confirmation.
+async function pollPendingNickyPayments() {
+  try {
+    const pending = await Payment.find({
+      method: 'nicky',
+      status: { $ne: 'paid' },
+      createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, // only last 24h
+    }).limit(50);
+    for (const p of pending) {
+      try {
+        const r = await checkNickyPaymentStatus(p); // marks paid + provisions if Finished
+        if (r.paid) console.log('NICKY POLL: provisioned payment', String(p._id));
+      } catch (_) { }
+    }
+  } catch (e) {
+    console.error('NICKY POLL error:', e.message);
+  }
+}
+
+function scheduleNickyPolling() {
+  // Poll every 60 seconds
+  setInterval(pollPendingNickyPayments, 60 * 1000);
+  console.log('⏰ Nicky payment poller started (every 60s).');
+}
+
 // ==================== SERVER START ====================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
@@ -4328,6 +4384,8 @@ app.listen(PORT, () => {
   console.log(`☁️ Google Workspace configured: ${process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? 'Yes' : 'No'}`);
   // Start the daily midnight billing scheduler
   scheduleDailyBilling();
+  // Start the Nicky crypto payment poller
+  scheduleNickyPolling();
 });
 
 module.exports = app;
