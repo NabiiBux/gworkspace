@@ -2319,7 +2319,6 @@ const AdminPaymentsSection = () => {
               <button className="btn btn-secondary" onClick={syncSubBilling}>Sync from Google</button>
               <button className="btn btn-secondary" onClick={recalcDates}>Recalculate dates</button>
               <button className="btn btn-secondary" style={{ color: '#166534', borderColor: '#166534' }} onClick={() => setShowBulk(!showBulk)}>Bulk whitelist paid</button>
-              <button className="btn btn-secondary" onClick={startFromToday}>Start cycle from today</button>
               <button className="btn btn-primary" onClick={runSubBilling}>Run check now</button>
             </div>
           </div>
@@ -2335,7 +2334,7 @@ const AdminPaymentsSection = () => {
             </div>
           )}
           <p style={{ color: '#6b7280', fontSize: 14 }}>
-            Each customer is billed on a 30-day cycle from their Google Workspace creation date. The daily check warns on day 25 and suspends on day 29 (unless whitelisted). Click <strong>Sync from Google</strong> first to load subscriptions, then <strong>Run check</strong>. Set up a daily cron at <code>/api/cron/subscription-billing?secret=YOUR_JWT_SECRET&sync=1</code>.
+            Billing cycles are anchored to <strong>January 1, 2026</strong>, counted in 30-day periods (warn day 25, suspend day 29). Paid customers' cycles count from their last payment instead. The daily background check runs automatically at midnight. Whitelisted (renewed) customers are skipped.
           </p>
           {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
 

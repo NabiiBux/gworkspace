@@ -1744,8 +1744,11 @@ async function customerKeyFor(domain) {
   return (c?.businessEmail || '').toLowerCase() || `domain:${domain.toLowerCase()}`;
 }
 
-// Workspace-anchored check: group by customer, anchor to Workspace creation date, suspend all if at/after day 29.
-// Cycle = 30 days. Suspend fires on DAY 29 (1 day before the 30-day mark). Warning is sent on day 25.
+// Workspace-anchored check: cycles are anchored to a fixed BILLING_EPOCH (Jan 1, 2026), counted in
+// 30-day periods. Suspend fires on DAY 29 of the current period; warning on day 25.
+// If a customer has paid, their cycle counts from the last payment instead.
+const BILLING_EPOCH = new Date('2026-01-01T00:00:00Z').getTime();
+
 async function runWorkspaceAnchoredBillingCheck(dryRun) {
   const DAY_MS = 24 * 60 * 60 * 1000;
   const CYCLE_DAYS = 30;
@@ -1770,39 +1773,38 @@ async function runWorkspaceAnchoredBillingCheck(dryRun) {
     const g = groups[key];
     results.customersChecked++;
 
-    // Anchor = earliest Workspace subscription creation date for this customer
-    const wsSubs = g.subs.filter((s) => WORKSPACE_SKUS.includes(s.skuId) && s.creationTime);
-    const anchorTime = wsSubs.length
-      ? Math.min(...wsSubs.map((s) => s.creationTime))
-      : Math.min(...g.subs.filter((s) => s.creationTime).map((s) => s.creationTime) || [now]);
-    if (!anchorTime || !isFinite(anchorTime)) continue;
-
     // Whitelist protects the whole customer
     const wl = await SubBilling.findOne({ domain: { $in: [...g.domains] }, whitelisted: true });
     if (wl) { results.skippedWhitelisted++; continue; }
 
-    // Cycle start = last payment OR workspace anchor
+    // Cycle start = last payment if paid, otherwise the fixed billing epoch (Jan 1, 2026).
     const billRecs = await SubBilling.find({ domain: { $in: [...g.domains] } });
     const lastPaid = billRecs.map((r) => r.lastPaymentDate ? new Date(r.lastPaymentDate).getTime() : 0).reduce((a, b) => Math.max(a, b), 0);
-    const cycleStart = lastPaid || anchorTime;
+    const cycleStart = lastPaid || BILLING_EPOCH;
 
-    // How many days into the current 30-day cycle is this customer?
-    const daysElapsed = Math.floor((now - cycleStart) / DAY_MS) % CYCLE_DAYS;
-    const absoluteDays = Math.floor((now - cycleStart) / DAY_MS);
+    // Days elapsed within the CURRENT 30-day period since cycle start.
+    const totalDays = Math.floor((now - cycleStart) / DAY_MS);
+    if (totalDays < 0) continue; // cycle hasn't started yet
+    const dayInCycle = totalDays % CYCLE_DAYS;
+    // An account is overdue if it's at/after the suspend day in its current cycle,
+    // OR it has rolled past at least one full cycle unpaid (totalDays >= CYCLE_DAYS while unpaid).
+    const overduePastCycle = !lastPaid && totalDays >= SUSPEND_DAY;
+    const atSuspendDay = dayInCycle >= SUSPEND_DAY;
+    const atWarnDay = dayInCycle >= WARN_DAY && dayInCycle < SUSPEND_DAY;
 
-    // WARN on day 25 (only if not yet at suspend day)
-    if (absoluteDays >= WARN_DAY && absoluteDays < SUSPEND_DAY) {
-      results.warned.push({ customer: key, domains: [...g.domains], day: absoluteDays });
+    // WARN on day 25
+    if (atWarnDay) {
+      results.warned.push({ customer: key, domains: [...g.domains], dayInCycle });
       if (!dryRun) {
         for (const d of g.domains) {
-          try { await sendRenewalWarningEmail(await emailForDomain(d), d, new Date(cycleStart + SUSPEND_DAY * DAY_MS)); } catch (_) { }
+          try { await sendRenewalWarningEmail(await emailForDomain(d), d, new Date(cycleStart + (totalDays - dayInCycle + SUSPEND_DAY) * DAY_MS)); } catch (_) { }
         }
       }
     }
 
-    // SUSPEND on day 29 or later (past due)
-    if (absoluteDays >= SUSPEND_DAY) {
-      results.overdue.push({ customer: key, domains: [...g.domains], anchor: new Date(anchorTime).toISOString().slice(0, 10), suspendOn: new Date(cycleStart + SUSPEND_DAY * DAY_MS).toISOString().slice(0, 10), day: absoluteDays, subs: g.subs.length });
+    // SUSPEND on day 29 (or past a full unpaid cycle)
+    if (atSuspendDay || overduePastCycle) {
+      results.overdue.push({ customer: key, domains: [...g.domains], cycleStart: new Date(cycleStart).toISOString().slice(0, 10), totalDays, dayInCycle, subs: g.subs.length });
       if (!dryRun) {
         for (const s of g.subs) {
           if (s.status === 'SUSPENDED') continue;
@@ -1810,7 +1812,7 @@ async function runWorkspaceAnchoredBillingCheck(dryRun) {
             await setSubscriptionState(s.account, s.domain, s.skuId, 'suspend', s.subscriptionId);
             await SubBilling.updateOne({ domain: s.domain, skuId: s.skuId }, { $set: { billingStatus: 'suspended', suspendedAt: new Date(), updatedAt: new Date() } });
             results.suspended.push(`${s.domain} (${s.skuId})`);
-            console.log('WS-ANCHORED SUSPEND (day ' + absoluteDays + '):', s.domain, s.skuId, 'acct', s.account);
+            console.log('WS-ANCHORED SUSPEND (totalDays ' + totalDays + '):', s.domain, s.skuId, 'acct', s.account);
           } catch (e) {
             const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
             results.suspendErrors.push({ domain: s.domain, skuId: s.skuId, error: detail });
