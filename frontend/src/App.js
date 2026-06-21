@@ -2759,11 +2759,40 @@ const CustomerPayments = () => {
   };
   useEffect(() => {
     load();
-    // If returning from checkout, show a message
+    // If returning from checkout, verify the payment status (works for both Stripe and Nicky/crypto)
     const params = new URLSearchParams(window.location.search);
-    if (params.get('payment') === 'success') setMsg('✓ Payment received — thank you! It may take a moment to confirm.');
-    if (params.get('payment') === 'cancelled') setMsg('Payment was cancelled. You can try again anytime.');
+    const payStatus = params.get('payment');
+    const pid = params.get('pid');
+    if (payStatus === 'cancelled') {
+      setMsg('Payment was cancelled. You can try again anytime.');
+    } else if (payStatus === 'success' && pid) {
+      setMsg('✓ Payment received — confirming with the network…');
+      verifyPayment(pid, 0);
+    } else if (payStatus === 'success') {
+      setMsg('✓ Payment received — thank you! It may take a moment to confirm.');
+    }
   }, []);
+
+  // Poll the backend to confirm a payment cleared (crypto can take time to confirm on-chain).
+  const verifyPayment = async (pid, attempt) => {
+    try {
+      const r = await axios.get(`${API_URL}/customer/payment-status/${pid}`);
+      if (r.data.paid) {
+        setMsg('✓ Payment confirmed — your order is being set up. Thank you!');
+        load();
+        return;
+      }
+      // Not confirmed yet — crypto may still be confirming. Retry up to ~10 times (every 6s = ~1 min).
+      if (attempt < 10) {
+        setMsg(`✓ Payment received — confirming on the blockchain… (this can take a few minutes)`);
+        setTimeout(() => verifyPayment(pid, attempt + 1), 6000);
+      } else {
+        setMsg('Payment is still confirming on the blockchain. This can take a few minutes for crypto — your order will activate automatically once confirmed. You can refresh this page to check.');
+      }
+    } catch (_) {
+      if (attempt < 10) setTimeout(() => verifyPayment(pid, attempt + 1), 6000);
+    }
+  };
 
   const pay = async (orderId, method) => {
     setBusy(orderId + method); setMsg('');

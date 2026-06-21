@@ -1200,7 +1200,7 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
 
     // ===== NICKY (crypto) =====
     try {
-      const nickyUrl = await createNickyPayment({
+      const nicky = await createNickyPayment({
         amount,
         currency: 'USD',
         description: orderDesc,
@@ -1212,9 +1212,10 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
         redirectUrl: successUrl,
         cancelUrl: cancelUrl,
       });
-      payment.checkoutUrl = nickyUrl;
+      payment.checkoutUrl = nicky.url;
+      payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id);
       await payment.save();
-      return res.json({ checkoutUrl: nickyUrl, paymentId: payment._id });
+      return res.json({ checkoutUrl: nicky.url, paymentId: payment._id });
     } catch (e) {
       return res.status(500).json({ error: 'Crypto checkout not available yet: ' + e.message });
     }
@@ -1268,7 +1269,7 @@ async function createNickyPayment({ amount, currency, description, orderNumber, 
   if (!url) {
     throw new Error('Nicky created the request but no checkout URL was found. Response keys: ' + Object.keys(data).join(', ') + (shortId ? ` (shortId=${shortId})` : ''));
   }
-  return url;
+  return { url, nickyId: data.id || data.bill?.id || null, shortId: shortId || null };
 }
 
 // Stripe webhook — confirms payment truly completed
@@ -2484,6 +2485,50 @@ app.post('/api/admin/run-billing-check', authenticateCustomer, requireAdmin, asy
   try {
     const results = await runBillingCheck();
     res.json({ success: true, ...results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Check a Nicky payment's status directly (reliable fallback when webhooks aren't firing).
+// Call this when the customer returns, or poll it. If paid, it provisions the order.
+async function checkNickyPaymentStatus(payment) {
+  if (!payment || !payment.providerRef) return { paid: false, reason: 'no providerRef' };
+  const token = process.env.NICKY_API_TOKEN;
+  const base = process.env.NICKY_API_BASE || 'https://api-public.pay.nicky.me';
+  // Try to fetch the payment request by id
+  const tryUrls = [
+    `${base}/api/public/PaymentRequestPublicApi/${payment.providerRef}`,
+    `${base}/api/public/PaymentRequestPublicApi/get?id=${payment.providerRef}`,
+  ];
+  for (const u of tryUrls) {
+    try {
+      const resp = await fetch(u, { headers: { 'X-API-KEY': token } });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const status = (data.status || data.bill?.status || '').toString().toLowerCase();
+      console.log('NICKY STATUS CHECK', payment.providerRef, '→', status);
+      if (/paid|completed|success|confirmed|settled/.test(status)) {
+        if (payment.status !== 'paid') await markPaidAndProvision(payment);
+        return { paid: true, status };
+      }
+      return { paid: false, status };
+    } catch (e) { continue; }
+  }
+  return { paid: false, reason: 'status endpoint not reachable' };
+}
+
+// Customer/endpoint: check my payment status (called when returning from Nicky, or polled)
+app.get('/api/customer/payment-status/:paymentId', authenticateCustomer, async (req, res) => {
+  try {
+    const payment = await Payment.findById(req.params.paymentId);
+    if (!payment) return res.status(404).json({ error: 'Payment not found.' });
+    if (payment.status === 'paid') return res.json({ paid: true, alreadyPaid: true });
+    if (payment.method === 'nicky') {
+      const result = await checkNickyPaymentStatus(payment);
+      return res.json(result);
+    }
+    res.json({ paid: payment.status === 'paid', status: payment.status });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
