@@ -1959,6 +1959,24 @@ const AdminPaymentsSection = () => {
   const [bulkDomains, setBulkDomains] = useState('');
   const [showBulk, setShowBulk] = useState(false);
   const [testDomain, setTestDomain] = useState('');
+  const [wsPreview, setWsPreview] = useState(null);
+
+  const runWsAnchored = async (dryRun) => {
+    if (!dryRun && !window.confirm('SUSPEND all overdue customers (Workspace + Voice + all their subscriptions)? Whitelisted customers are protected. This is live.')) return;
+    setSubBillingMsg(dryRun ? 'Previewing overdue customers…' : 'Suspending overdue customers…');
+    try {
+      const r = await axios.post(`${API_URL}/admin/billing/run-workspace-anchored`, { dryRun });
+      setWsPreview(r.data);
+      if (dryRun) {
+        setSubBillingMsg(`Preview: ${r.data.customersChecked} customers checked · ${r.data.overdue.length} overdue · ${r.data.skippedWhitelisted} whitelisted (none suspended — preview only).`);
+      } else {
+        let m = `✓ Suspended ${r.data.suspended.length} subscription(s) across ${r.data.overdue.length} overdue customer(s).`;
+        if (r.data.suspendErrors?.length) m += ` ⚠️ ${r.data.suspendErrors.length} failed: ` + r.data.suspendErrors.map(e => `${e.domain} (${e.error})`).join('; ');
+        setSubBillingMsg(m);
+      }
+      loadSubBilling();
+    } catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Check failed.'); }
+  };
 
   const testSuspend = async () => {
     const d = testDomain.trim().toLowerCase();
@@ -2311,6 +2329,33 @@ const AdminPaymentsSection = () => {
             Each subscription gets a 29-day cycle from its purchase date (Google creation date). Click <strong>Sync from Google</strong> first to load existing subscriptions, then <strong>Run check</strong> warns those near due and suspends those past 29 days. Set up a daily cron at <code>/api/cron/subscription-billing?secret=YOUR_JWT_SECRET&sync=1</code>.
           </p>
           {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
+
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: 16, marginBottom: 14 }}>
+            <h4 style={{ margin: '0 0 8px' }}>📅 Workspace-anchored billing (suspends ALL of a customer's subscriptions)</h4>
+            <p style={{ color: '#92600a', fontSize: 13, margin: '0 0 10px' }}>
+              Bills each customer from their <strong>Google Workspace creation date</strong> (+29 days). When overdue, suspends ALL their subscriptions together (Workspace + Voice + others). Customers grouped by email. <strong>Always Preview first.</strong>
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-secondary" onClick={() => runWsAnchored(true)}>Preview (dry run)</button>
+              <button className="btn btn-primary" style={{ background: '#b42318' }} onClick={() => runWsAnchored(false)}>Suspend overdue now</button>
+            </div>
+            {wsPreview && wsPreview.overdue && wsPreview.overdue.length > 0 && (
+              <table className="data-table" style={{ marginTop: 12 }}>
+                <thead><tr><th>Customer</th><th>Domains</th><th>WS anchor</th><th>Due</th><th>Subs</th></tr></thead>
+                <tbody>
+                  {wsPreview.overdue.map((o, i) => (
+                    <tr key={i}>
+                      <td style={{ fontSize: 13 }}>{o.customer}</td>
+                      <td style={{ fontSize: 13 }}>{o.domains.join(', ')}</td>
+                      <td>{o.anchor}</td>
+                      <td style={{ color: '#b42318' }}>{o.due}</td>
+                      <td>{o.subs}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
 
           <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: 16, marginBottom: 14 }}>
             <h4 style={{ margin: '0 0 8px' }}>🧪 Test suspension on one domain</h4>

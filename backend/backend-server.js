@@ -1703,6 +1703,125 @@ app.post('/api/admin/billing/test-activate', authenticateCustomer, requireAdmin,
   }
 });
 
+// ===== WORKSPACE-ANCHORED BILLING (customer-grouped) =====
+// Billing is driven by the customer's Google WORKSPACE creation date. When that 29-day cycle is
+// overdue, ALL of the customer's subscriptions (Workspace + Voice + others) are suspended together.
+// Customers are grouped by email (falling back to domain when email isn't available).
+const WORKSPACE_SKUS = ['1010020027', '1010020028', '1010020025', '1010020030',
+  '1010020020', '1010020029', '1010020026', '1010020031'];
+const VOICE_SKUS = ['1010330003', '1010330004', '1010330002', '1010330005', '1010330006'];
+
+// Pull every subscription from both accounts, with the customer email resolved where possible.
+async function gatherAllSubscriptions() {
+  const out = [];
+  for (const account of ['pk', 'usa']) {
+    let auth;
+    try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
+    catch (e) { console.error(`gatherAllSubscriptions: ${account} auth failed:`, e.message); continue; }
+    const reseller = google.reseller({ version: 'v1', auth });
+    let pageToken;
+    do {
+      const resp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
+      for (const s of (resp.data.subscriptions || [])) {
+        out.push({
+          account,
+          domain: (s.customerDomain || s.customerId || '').toLowerCase(),
+          skuId: String(s.skuId || ''),
+          subscriptionId: s.subscriptionId,
+          status: s.status,
+          creationTime: s.creationTime ? Number(s.creationTime) : null,
+        });
+      }
+      pageToken = resp.data.nextPageToken;
+    } while (pageToken);
+  }
+  return out;
+}
+
+// Resolve a customer's email by domain (from our Customer DB); fall back to the domain itself as the key.
+async function customerKeyFor(domain) {
+  if (!domain) return null;
+  const c = await Customer.findOne({ domain: domain.toLowerCase() });
+  return (c?.businessEmail || '').toLowerCase() || `domain:${domain.toLowerCase()}`;
+}
+
+// Workspace-anchored check: group by customer, anchor to Workspace creation date, suspend all if overdue.
+async function runWorkspaceAnchoredBillingCheck(dryRun) {
+  const PERIOD_MS = 29 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const subs = await gatherAllSubscriptions();
+
+  // Group subscriptions by customer key (email, fallback domain)
+  const groups = {};
+  for (const s of subs) {
+    const key = await customerKeyFor(s.domain);
+    if (!key) continue;
+    if (!groups[key]) groups[key] = { key, subs: [], domains: new Set() };
+    groups[key].subs.push(s);
+    groups[key].domains.add(s.domain);
+  }
+
+  const results = { dryRun: !!dryRun, customersChecked: 0, overdue: [], suspended: [], skippedWhitelisted: 0, suspendErrors: [] };
+
+  for (const key of Object.keys(groups)) {
+    const g = groups[key];
+    results.customersChecked++;
+
+    // Anchor = earliest Workspace subscription creation date for this customer
+    const wsSubs = g.subs.filter((s) => WORKSPACE_SKUS.includes(s.skuId) && s.creationTime);
+    const anchorTime = wsSubs.length
+      ? Math.min(...wsSubs.map((s) => s.creationTime))
+      : Math.min(...g.subs.filter((s) => s.creationTime).map((s) => s.creationTime) || [now]);
+    if (!anchorTime || !isFinite(anchorTime)) continue;
+
+    // Check whitelist (any record for these domains marked whitelisted protects the whole customer)
+    const wl = await SubBilling.findOne({ domain: { $in: [...g.domains] }, whitelisted: true });
+    if (wl) { results.skippedWhitelisted++; continue; }
+
+    // Has this customer paid? Use the latest lastPaymentDate across their billing records.
+    const billRecs = await SubBilling.find({ domain: { $in: [...g.domains] } });
+    const lastPaid = billRecs.map((r) => r.lastPaymentDate ? new Date(r.lastPaymentDate).getTime() : 0).reduce((a, b) => Math.max(a, b), 0);
+
+    // Due date = (last payment OR workspace anchor) + 29 days
+    const cycleStart = lastPaid || anchorTime;
+    const dueTime = cycleStart + PERIOD_MS;
+    const overdue = dueTime <= now;
+
+    if (overdue) {
+      results.overdue.push({ customer: key, domains: [...g.domains], anchor: new Date(anchorTime).toISOString().slice(0, 10), due: new Date(dueTime).toISOString().slice(0, 10), subs: g.subs.length });
+      if (!dryRun) {
+        // Suspend ALL of this customer's subscriptions
+        for (const s of g.subs) {
+          if (s.status === 'SUSPENDED') continue;
+          try {
+            await setSubscriptionState(s.account, s.domain, s.skuId, 'suspend', s.subscriptionId);
+            await SubBilling.updateOne({ domain: s.domain, skuId: s.skuId }, { $set: { billingStatus: 'suspended', suspendedAt: new Date(), updatedAt: new Date() } });
+            results.suspended.push(`${s.domain} (${s.skuId})`);
+            console.log('WS-ANCHORED SUSPEND:', s.domain, s.skuId, 'acct', s.account);
+          } catch (e) {
+            const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
+            results.suspendErrors.push({ domain: s.domain, skuId: s.skuId, error: detail });
+            console.error('WS-ANCHORED SUSPEND FAILED:', s.domain, s.skuId, '→', detail);
+          }
+        }
+      }
+    }
+  }
+  return results;
+}
+
+// Admin: run the workspace-anchored check. ?dryRun=1 to PREVIEW without suspending.
+app.post('/api/admin/billing/run-workspace-anchored', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const dryRun = req.body?.dryRun === true || req.query.dryRun === '1';
+    const results = await runWorkspaceAnchoredBillingCheck(dryRun);
+    res.json({ success: true, ...results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+// ===== END WORKSPACE-ANCHORED BILLING =====
+
 // Admin: bulk whitelist by a list of domains (protect paying customers before a suspension run)
 app.post('/api/admin/billing/whitelist-bulk', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
