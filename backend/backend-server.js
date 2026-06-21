@@ -466,9 +466,9 @@ const transporter = nodemailer.createTransport({
 });
 
 // Send email via Resend HTTP API (works on Railway where SMTP ports are blocked).
-// Set RESEND_API_KEY and EMAIL_FROM (e.g. "Artisan Drywall LLC <noreply@yourdomain>").
+// Set RESEND_API_KEY and EMAIL_FROM (e.g. "GNB MENTOR LLC <noreply@yourdomain>").
 async function sendViaResend(to, subject, html) {
-  const fromName = process.env.EMAIL_FROM_NAME || process.env.BRAND_NAME || 'Artisan Drywall LLC';
+  const fromName = process.env.EMAIL_FROM_NAME || process.env.BRAND_NAME || 'GNB MENTOR LLC';
   // Resend requires a verified domain sender; falls back to onboarding sender if EMAIL_FROM unset
   const from = process.env.EMAIL_FROM || `${fromName} <onboarding@resend.dev>`;
   const resp = await fetch('https://api.resend.com/emails', {
@@ -486,7 +486,7 @@ async function sendViaResend(to, subject, html) {
 
 const sendEmail = async (to, subject, htmlContent) => {
   try {
-    const fromName = process.env.EMAIL_FROM_NAME || process.env.BRAND_NAME || 'Artisan Drywall LLC';
+    const fromName = process.env.EMAIL_FROM_NAME || process.env.BRAND_NAME || 'GNB MENTOR LLC';
     // Prefer Resend (HTTP API — works on Railway where SMTP is blocked)
     if (process.env.RESEND_API_KEY) {
       await sendViaResend(to, subject, htmlContent);
@@ -506,9 +506,9 @@ const sendEmail = async (to, subject, htmlContent) => {
   }
 };
 
-// ===== Billing email templates (brand: Artisan Drywall LLC, teal theme) =====
-const BRAND_NAME = process.env.BRAND_NAME || 'Artisan Drywall LLC';
-const PORTAL_URL = process.env.CORS_ORIGIN || 'https://gworkspaceresellere.vercel.app';
+// ===== Billing email templates (brand: GNB MENTOR LLC, teal theme) =====
+const BRAND_NAME = process.env.BRAND_NAME || 'GNB MENTOR LLC';
+const PORTAL_URL = process.env.PORTAL_URL || process.env.CORS_ORIGIN || 'https://portal.gnbmentor.com';
 
 function emailShell(title, bodyHtml) {
   return `<div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
@@ -1156,7 +1156,7 @@ app.patch('/api/admin/tickets/:id/status', authenticateCustomer, requireAdmin, a
 });
 
 // ==================== PAYMENTS ====================
-const FRONTEND_URL = process.env.CORS_ORIGIN || 'https://gworkspaceresellere.vercel.app';
+const FRONTEND_URL = process.env.PORTAL_URL || process.env.CORS_ORIGIN || 'https://portal.gnbmentor.com';
 
 // Customer: create a checkout for an order (method = 'stripe' | 'nicky')
 app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
@@ -2242,7 +2242,7 @@ app.get('/api/admin/email/templates', authenticateCustomer, requireAdmin, async 
       templates: out,
       emailConfigured: !!(process.env.RESEND_API_KEY || (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD)),
       fromAddress: process.env.EMAIL_USER || null,
-      fromName: process.env.EMAIL_FROM_NAME || process.env.BRAND_NAME || 'Artisan Drywall LLC',
+      fromName: process.env.EMAIL_FROM_NAME || process.env.BRAND_NAME || 'GNB MENTOR LLC',
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -2588,7 +2588,20 @@ app.post('/api/webhooks/nicky', async (req, res) => {
       if (!payment && invoiceRef) {
         try { payment = await Payment.findById(invoiceRef); } catch (_) { }
       }
-      await markPaidAndProvision(payment);
+      // Fallback: match by Nicky payment id / shortId stored in providerRef
+      if (!payment) {
+        const nickyId = b.id || b.bill?.id;
+        const shortId = b.shortId || b.bill?.shortId;
+        if (nickyId || shortId) {
+          payment = await Payment.findOne({ providerRef: { $in: [nickyId, shortId].filter(Boolean) } }).sort({ createdAt: -1 });
+        }
+      }
+      if (payment) {
+        await markPaidAndProvision(payment);
+        console.log('NICKY WEBHOOK: payment marked paid + provisioned:', String(payment._id));
+      } else {
+        console.error('NICKY WEBHOOK: paid but no matching payment found. invoiceRef=', invoiceRef);
+      }
     }
     res.json({ received: true });
   } catch (e) {

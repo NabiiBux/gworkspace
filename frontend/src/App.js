@@ -2624,7 +2624,7 @@ const CustomerPortal = () => {
       <header style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '14px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ width: 36, height: 36, borderRadius: 8, background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>A</div>
-          <strong style={{ fontSize: 18, color: TEAL }}>Artisan Drywall LLC</strong>
+          <strong style={{ fontSize: 18, color: TEAL }}>GNB MENTOR LLC</strong>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <span style={{ color: MUTE }}>Welcome, <strong style={{ color: INK }}>{name}</strong></span>
@@ -3348,7 +3348,7 @@ const LandingPage = () => {
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 40px', maxWidth: 1200, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ width: 40, height: 40, borderRadius: 10, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>A</div>
-          <strong style={{ fontSize: 22, color: T }}>Artisan Drywall LLC</strong>
+          <strong style={{ fontSize: 22, color: T }}>GNB MENTOR LLC</strong>
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
           <button onClick={() => go('/login')} style={{ background: 'transparent', border: 'none', color: INKL, fontSize: 16, cursor: 'pointer', padding: '10px 16px' }}>↪ Login</button>
@@ -3484,7 +3484,7 @@ const LandingPage = () => {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
               <div style={{ width: 36, height: 36, borderRadius: 9, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>A</div>
-              <strong style={{ color: '#fff', fontSize: 18 }}>Artisan Drywall LLC</strong>
+              <strong style={{ color: '#fff', fontSize: 18 }}>GNB MENTOR LLC</strong>
             </div>
             <p style={{ maxWidth: 320, lineHeight: 1.6, color: '#9fb4ae' }}>
               Google Workspace for your domain — simple ordering, secure payment, and support while you get set up.
@@ -3504,7 +3504,7 @@ const LandingPage = () => {
           </div>
         </div>
         <div style={{ maxWidth: 1200, margin: '32px auto 0', paddingTop: 24, borderTop: '1px solid #1e3a33', color: '#7e948e', fontSize: 14 }}>
-          © {new Date().getFullYear()} Artisan Drywall LLC · Google Workspace Reseller
+          © {new Date().getFullYear()} GNB MENTOR LLC · Google Workspace Reseller
         </div>
       </footer>
     </div>
