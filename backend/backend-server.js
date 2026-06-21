@@ -1745,9 +1745,13 @@ async function customerKeyFor(domain) {
   return (c?.businessEmail || '').toLowerCase() || `domain:${domain.toLowerCase()}`;
 }
 
-// Workspace-anchored check: group by customer, anchor to Workspace creation date, suspend all if overdue.
+// Workspace-anchored check: group by customer, anchor to Workspace creation date, suspend all if at/after day 29.
+// Cycle = 30 days. Suspend fires on DAY 29 (1 day before the 30-day mark). Warning is sent on day 25.
 async function runWorkspaceAnchoredBillingCheck(dryRun) {
-  const PERIOD_MS = 29 * 24 * 60 * 60 * 1000;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const CYCLE_DAYS = 30;
+  const SUSPEND_DAY = 29;   // suspend 1 day before the 30-day mark
+  const WARN_DAY = 25;      // warn 4 days before suspension
   const now = Date.now();
   const subs = await gatherAllSubscriptions();
 
@@ -1761,7 +1765,7 @@ async function runWorkspaceAnchoredBillingCheck(dryRun) {
     groups[key].domains.add(s.domain);
   }
 
-  const results = { dryRun: !!dryRun, customersChecked: 0, overdue: [], suspended: [], skippedWhitelisted: 0, suspendErrors: [] };
+  const results = { dryRun: !!dryRun, customersChecked: 0, overdue: [], warned: [], suspended: [], skippedWhitelisted: 0, suspendErrors: [] };
 
   for (const key of Object.keys(groups)) {
     const g = groups[key];
@@ -1774,30 +1778,40 @@ async function runWorkspaceAnchoredBillingCheck(dryRun) {
       : Math.min(...g.subs.filter((s) => s.creationTime).map((s) => s.creationTime) || [now]);
     if (!anchorTime || !isFinite(anchorTime)) continue;
 
-    // Check whitelist (any record for these domains marked whitelisted protects the whole customer)
+    // Whitelist protects the whole customer
     const wl = await SubBilling.findOne({ domain: { $in: [...g.domains] }, whitelisted: true });
     if (wl) { results.skippedWhitelisted++; continue; }
 
-    // Has this customer paid? Use the latest lastPaymentDate across their billing records.
+    // Cycle start = last payment OR workspace anchor
     const billRecs = await SubBilling.find({ domain: { $in: [...g.domains] } });
     const lastPaid = billRecs.map((r) => r.lastPaymentDate ? new Date(r.lastPaymentDate).getTime() : 0).reduce((a, b) => Math.max(a, b), 0);
-
-    // Due date = (last payment OR workspace anchor) + 29 days
     const cycleStart = lastPaid || anchorTime;
-    const dueTime = cycleStart + PERIOD_MS;
-    const overdue = dueTime <= now;
 
-    if (overdue) {
-      results.overdue.push({ customer: key, domains: [...g.domains], anchor: new Date(anchorTime).toISOString().slice(0, 10), due: new Date(dueTime).toISOString().slice(0, 10), subs: g.subs.length });
+    // How many days into the current 30-day cycle is this customer?
+    const daysElapsed = Math.floor((now - cycleStart) / DAY_MS) % CYCLE_DAYS;
+    const absoluteDays = Math.floor((now - cycleStart) / DAY_MS);
+
+    // WARN on day 25 (only if not yet at suspend day)
+    if (absoluteDays >= WARN_DAY && absoluteDays < SUSPEND_DAY) {
+      results.warned.push({ customer: key, domains: [...g.domains], day: absoluteDays });
       if (!dryRun) {
-        // Suspend ALL of this customer's subscriptions
+        for (const d of g.domains) {
+          try { await sendRenewalWarningEmail(await emailForDomain(d), d, new Date(cycleStart + SUSPEND_DAY * DAY_MS)); } catch (_) { }
+        }
+      }
+    }
+
+    // SUSPEND on day 29 or later (past due)
+    if (absoluteDays >= SUSPEND_DAY) {
+      results.overdue.push({ customer: key, domains: [...g.domains], anchor: new Date(anchorTime).toISOString().slice(0, 10), suspendOn: new Date(cycleStart + SUSPEND_DAY * DAY_MS).toISOString().slice(0, 10), day: absoluteDays, subs: g.subs.length });
+      if (!dryRun) {
         for (const s of g.subs) {
           if (s.status === 'SUSPENDED') continue;
           try {
             await setSubscriptionState(s.account, s.domain, s.skuId, 'suspend', s.subscriptionId);
             await SubBilling.updateOne({ domain: s.domain, skuId: s.skuId }, { $set: { billingStatus: 'suspended', suspendedAt: new Date(), updatedAt: new Date() } });
             results.suspended.push(`${s.domain} (${s.skuId})`);
-            console.log('WS-ANCHORED SUSPEND:', s.domain, s.skuId, 'acct', s.account);
+            console.log('WS-ANCHORED SUSPEND (day ' + absoluteDays + '):', s.domain, s.skuId, 'acct', s.account);
           } catch (e) {
             const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
             results.suspendErrors.push({ domain: s.domain, skuId: s.skuId, error: detail });
@@ -1809,6 +1823,56 @@ async function runWorkspaceAnchoredBillingCheck(dryRun) {
   }
   return results;
 }
+
+// Admin: list all suspended subscriptions (for the Unsuspend tab dropdown)
+app.get('/api/admin/billing/suspended', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const recs = await SubBilling.find({ billingStatus: 'suspended' }).sort({ domain: 1 });
+    // Group by domain for the dropdown
+    const byDomain = {};
+    for (const r of recs) {
+      if (!byDomain[r.domain]) byDomain[r.domain] = { domain: r.domain, subscriptions: [] };
+      byDomain[r.domain].subscriptions.push({ id: r._id, skuId: r.skuId, account: r.account, suspendedAt: r.suspendedAt });
+    }
+    res.json({ suspended: Object.values(byDomain) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: unsuspend (reactivate) selected subscriptions — pass an array of billing record ids,
+// or a domain + 'all' to reactivate everything for that domain. Marks as renewed (fresh 30 days).
+app.post('/api/admin/billing/unsuspend', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { ids, domain, all } = req.body;
+    let records = [];
+    if (ids && ids.length) records = await SubBilling.find({ _id: { $in: ids } });
+    else if (domain && all) records = await SubBilling.find({ domain: domain.toLowerCase(), billingStatus: 'suspended' });
+    else return res.status(400).json({ error: 'Provide ids[] or domain+all.' });
+
+    const now = new Date();
+    const next = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const outcomes = [];
+    for (const r of records) {
+      try {
+        await setSubscriptionState(r.account, r.domain, r.skuId, 'activate', r.subscriptionId);
+        r.billingStatus = 'active';
+        r.suspendedAt = null;
+        r.lastPaymentDate = now;       // treat unsuspend as paid → fresh cycle
+        r.nextBillingDate = next;
+        r.updatedAt = now;
+        await r.save();
+        outcomes.push({ domain: r.domain, skuId: r.skuId, result: 'REACTIVATED ✓' });
+      } catch (e) {
+        const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
+        outcomes.push({ domain: r.domain, skuId: r.skuId, result: 'FAILED: ' + detail });
+      }
+    }
+    res.json({ success: true, outcomes });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // Admin: run the workspace-anchored check. ?dryRun=1 to PREVIEW without suspending.
 app.post('/api/admin/billing/run-workspace-anchored', authenticateCustomer, requireAdmin, async (req, res) => {

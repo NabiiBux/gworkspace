@@ -1960,6 +1960,29 @@ const AdminPaymentsSection = () => {
   const [showBulk, setShowBulk] = useState(false);
   const [testDomain, setTestDomain] = useState('');
   const [wsPreview, setWsPreview] = useState(null);
+  const [suspendedList, setSuspendedList] = useState([]);
+  const [unsuspendSearch, setUnsuspendSearch] = useState('');
+  const [selectedDomain, setSelectedDomain] = useState(null);
+  const [selectedSubs, setSelectedSubs] = useState([]);
+
+  const loadSuspended = async () => {
+    try { const r = await axios.get(`${API_URL}/admin/billing/suspended`); setSuspendedList(r.data.suspended || []); }
+    catch (_) { }
+  };
+  const doUnsuspend = async (all) => {
+    if (!selectedDomain) { setSubBillingMsg('Select a suspended domain first.'); return; }
+    const payload = all ? { domain: selectedDomain.domain, all: true } : { ids: selectedSubs };
+    if (!all && !selectedSubs.length) { setSubBillingMsg('Select at least one subscription, or use Unsuspend all.'); return; }
+    if (!window.confirm(all ? `Reactivate ALL subscriptions for ${selectedDomain.domain}?` : `Reactivate ${selectedSubs.length} selected subscription(s)?`)) return;
+    setSubBillingMsg('Reactivating…');
+    try {
+      const r = await axios.post(`${API_URL}/admin/billing/unsuspend`, payload);
+      const out = r.data.outcomes.map(o => `${o.domain} ${o.skuId}: ${o.result}`).join(' | ');
+      setSubBillingMsg(`✓ ${out}`);
+      setSelectedDomain(null); setSelectedSubs([]);
+      loadSuspended();
+    } catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Unsuspend failed.'); }
+  };
 
   const runWsAnchored = async (dryRun) => {
     if (!dryRun && !window.confirm('SUSPEND all overdue customers (Workspace + Voice + all their subscriptions)? Whitelisted customers are protected. This is live.')) return;
@@ -2045,8 +2068,8 @@ const AdminPaymentsSection = () => {
     catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Recalculate failed.'); }
   };
   const toggleWhitelist = async (id, whitelisted) => {
-    if (whitelisted && !window.confirm('Whitelist this account? It will be treated as renewed (fresh 29 days from today), reactivated if suspended, and never auto-suspended while whitelisted.')) return;
-    try { await axios.post(`${API_URL}/admin/billing/whitelist`, { id, whitelisted }); loadSubBilling(); }
+    if (whitelisted && !window.confirm('Whitelist this account? It will be treated as renewed (fresh 30 days from today), reactivated if suspended, and never auto-suspended while whitelisted.')) return;
+    try { await axios.post(`${API_URL}/admin/billing/whitelist`, { id, whitelisted }); loadSubBilling(); if (whitelisted) setTab('renewed'); }
     catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Whitelist update failed.'); }
   };
   const startFromToday = async () => {
@@ -2129,6 +2152,8 @@ const AdminPaymentsSection = () => {
         <button className={`btn ${tab === 'transactions' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('transactions')}>Transactions</button>
         <button className={`btn ${tab === 'domains' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('domains'); loadDomainOrders(); }}>Domain Orders</button>
         <button className={`btn ${tab === 'subbilling' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('subbilling'); loadSubBilling(); }}>Subscription Billing</button>
+        <button className={`btn ${tab === 'renewed' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('renewed'); loadSubBilling(); }}>Renewed Accounts</button>
+        <button className={`btn ${tab === 'unsuspend' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('unsuspend'); loadSuspended(); }}>Unsuspend</button>
       </div>
 
       {tab === 'settings' && (
@@ -2395,6 +2420,86 @@ const AdminPaymentsSection = () => {
                 ))}
               </tbody>
             </table>
+          )}
+        </>
+      )}
+
+      {tab === 'renewed' && (
+        <>
+          <h3 style={{ marginTop: 0 }}>✓ Renewed Accounts (whitelisted)</h3>
+          <p style={{ color: '#6b7280', fontSize: 14 }}>These customers are protected from suspension — treated as paid/renewed. Remove to put them back on the normal billing cycle.</p>
+          {(() => {
+            const renewed = subBilling.filter(r => r.whitelisted);
+            return renewed.length === 0 ? <p>No renewed accounts yet. Whitelist an account to add it here.</p> : (
+              <table className="data-table">
+                <thead><tr><th>Domain</th><th>SKU</th><th>Acct</th><th>Renewed until</th><th></th></tr></thead>
+                <tbody>
+                  {renewed.map(r => (
+                    <tr key={r._id} style={{ background: '#f0fdf4' }}>
+                      <td>{r.domain}</td>
+                      <td>{r.skuId}</td>
+                      <td>{(r.account || 'pk').toUpperCase()}</td>
+                      <td>{r.nextBillingDate ? new Date(r.nextBillingDate).toLocaleDateString() : '—'}</td>
+                      <td><button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => toggleWhitelist(r._id, false)}>Remove</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            );
+          })()}
+        </>
+      )}
+
+      {tab === 'unsuspend' && (
+        <>
+          <h3 style={{ marginTop: 0 }}>Unsuspend a paid customer</h3>
+          <p style={{ color: '#6b7280', fontSize: 14 }}>Search and select a suspended domain, then reactivate all of their subscriptions or pick specific ones.</p>
+          {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
+          <button className="btn btn-secondary" style={{ marginBottom: 12 }} onClick={loadSuspended}>Refresh list</button>
+
+          <input
+            value={unsuspendSearch}
+            onChange={e => setUnsuspendSearch(e.target.value)}
+            placeholder="🔍 Search suspended domain…"
+            style={{ width: '100%', borderRadius: 8, border: '1px solid #d8dbe6', padding: '10px 12px', fontSize: 14, marginBottom: 12 }}
+          />
+
+          {suspendedList.length === 0 ? <p>No suspended domains found.</p> : (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              {/* Domain list (filtered) */}
+              <div style={{ maxHeight: 360, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 10 }}>
+                {suspendedList
+                  .filter(s => s.domain.toLowerCase().includes(unsuspendSearch.toLowerCase()))
+                  .map(s => (
+                    <div key={s.domain}
+                      onClick={() => { setSelectedDomain(s); setSelectedSubs([]); }}
+                      style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', background: selectedDomain?.domain === s.domain ? '#eff6ff' : '#fff' }}>
+                      <strong>{s.domain}</strong>
+                      <span style={{ color: '#6b7280', fontSize: 12, marginLeft: 8 }}>{s.subscriptions.length} sub(s)</span>
+                    </div>
+                  ))}
+              </div>
+
+              {/* Selected domain's subscriptions */}
+              <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 16 }}>
+                {!selectedDomain ? <p style={{ color: '#6b7280' }}>Select a domain to see its suspended subscriptions.</p> : (
+                  <>
+                    <h4 style={{ marginTop: 0 }}>{selectedDomain.domain}</h4>
+                    {selectedDomain.subscriptions.map(sub => (
+                      <label key={sub.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', fontSize: 14 }}>
+                        <input type="checkbox" checked={selectedSubs.includes(sub.id)}
+                          onChange={e => { if (e.target.checked) setSelectedSubs([...selectedSubs, sub.id]); else setSelectedSubs(selectedSubs.filter(x => x !== sub.id)); }} />
+                        <span>{sub.skuId} <span style={{ color: '#6b7280', fontSize: 12 }}>({(sub.account || 'pk').toUpperCase()})</span></span>
+                      </label>
+                    ))}
+                    <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+                      <button className="btn btn-primary" onClick={() => doUnsuspend(false)}>Unsuspend selected</button>
+                      <button className="btn btn-secondary" style={{ color: '#166534', borderColor: '#166534' }} onClick={() => doUnsuspend(true)}>Unsuspend ALL for this domain</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           )}
         </>
       )}
