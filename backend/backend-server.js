@@ -1646,6 +1646,63 @@ app.post('/api/admin/billing/start-from-today', authenticateCustomer, requireAdm
   }
 });
 
+// Admin: TEST suspend a single domain immediately (confirms the Google suspend call works).
+// Suspends the subscription(s) for ONE domain you specify. Use a domain you own.
+app.post('/api/admin/billing/test-suspend', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const domain = (req.body.domain || '').toLowerCase().trim();
+    if (!domain) return res.status(400).json({ error: 'Enter a domain to test.' });
+
+    const records = await SubBilling.find({ domain });
+    if (!records.length) return res.status(404).json({ error: `No billing record found for ${domain}. Sync from Google first.` });
+
+    const outcomes = [];
+    for (const r of records) {
+      try {
+        await setSubscriptionState(r.account, r.domain, r.skuId, 'suspend', r.subscriptionId);
+        r.billingStatus = 'suspended';
+        r.suspendedAt = new Date();
+        await r.save();
+        outcomes.push({ skuId: r.skuId, account: r.account, result: 'SUSPENDED ✓' });
+        console.log('TEST SUSPEND OK:', domain, r.skuId);
+      } catch (e) {
+        const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
+        outcomes.push({ skuId: r.skuId, account: r.account, result: 'FAILED: ' + detail });
+        console.error('TEST SUSPEND FAILED:', domain, r.skuId, '→', detail);
+      }
+    }
+    res.json({ success: true, domain, outcomes });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: TEST reactivate a single domain (undo the test suspend)
+app.post('/api/admin/billing/test-activate', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const domain = (req.body.domain || '').toLowerCase().trim();
+    if (!domain) return res.status(400).json({ error: 'Enter a domain.' });
+    const records = await SubBilling.find({ domain });
+    if (!records.length) return res.status(404).json({ error: `No billing record found for ${domain}.` });
+    const outcomes = [];
+    for (const r of records) {
+      try {
+        await setSubscriptionState(r.account, r.domain, r.skuId, 'activate', r.subscriptionId);
+        r.billingStatus = 'active';
+        r.suspendedAt = null;
+        await r.save();
+        outcomes.push({ skuId: r.skuId, result: 'REACTIVATED ✓' });
+      } catch (e) {
+        const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
+        outcomes.push({ skuId: r.skuId, result: 'FAILED: ' + detail });
+      }
+    }
+    res.json({ success: true, domain, outcomes });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Admin: bulk whitelist by a list of domains (protect paying customers before a suspension run)
 app.post('/api/admin/billing/whitelist-bulk', authenticateCustomer, requireAdmin, async (req, res) => {
   try {

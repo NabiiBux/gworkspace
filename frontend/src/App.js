@@ -1958,6 +1958,31 @@ const AdminPaymentsSection = () => {
   const [subBillingMsg, setSubBillingMsg] = useState('');
   const [bulkDomains, setBulkDomains] = useState('');
   const [showBulk, setShowBulk] = useState(false);
+  const [testDomain, setTestDomain] = useState('');
+
+  const testSuspend = async () => {
+    const d = testDomain.trim().toLowerCase();
+    if (!d) { setSubBillingMsg('Enter a domain to test.'); return; }
+    if (!window.confirm(`Suspend ${d} now via Google? (You can reactivate it right after.)`)) return;
+    setSubBillingMsg('Suspending ' + d + '…');
+    try {
+      const r = await axios.post(`${API_URL}/admin/billing/test-suspend`, { domain: d });
+      const out = r.data.outcomes.map(o => `${o.skuId}: ${o.result}`).join(' | ');
+      setSubBillingMsg(`Test suspend ${d} → ${out}`);
+      loadSubBilling();
+    } catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Test suspend failed.'); }
+  };
+  const testActivate = async () => {
+    const d = testDomain.trim().toLowerCase();
+    if (!d) { setSubBillingMsg('Enter a domain.'); return; }
+    setSubBillingMsg('Reactivating ' + d + '…');
+    try {
+      const r = await axios.post(`${API_URL}/admin/billing/test-activate`, { domain: d });
+      const out = r.data.outcomes.map(o => `${o.skuId}: ${o.result}`).join(' | ');
+      setSubBillingMsg(`Reactivate ${d} → ${out}`);
+      loadSubBilling();
+    } catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Reactivate failed.'); }
+  };
 
   const bulkWhitelist = async () => {
     const domains = bulkDomains.split(/[\s,\n]+/).map(d => d.trim().toLowerCase()).filter(Boolean);
@@ -2286,6 +2311,18 @@ const AdminPaymentsSection = () => {
             Each subscription gets a 29-day cycle from its purchase date (Google creation date). Click <strong>Sync from Google</strong> first to load existing subscriptions, then <strong>Run check</strong> warns those near due and suspends those past 29 days. Set up a daily cron at <code>/api/cron/subscription-billing?secret=YOUR_JWT_SECRET&sync=1</code>.
           </p>
           {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
+
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: 16, marginBottom: 14 }}>
+            <h4 style={{ margin: '0 0 8px' }}>🧪 Test suspension on one domain</h4>
+            <p style={{ color: '#1e40af', fontSize: 13, margin: '0 0 10px' }}>
+              Enter a domain you own to confirm the suspend works against Google right now. This affects only that one domain — you can reactivate it immediately after.
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input value={testDomain} onChange={e => setTestDomain(e.target.value)} placeholder="yourtestdomain.com" style={{ flex: 1, minWidth: 220, borderRadius: 8, border: '1px solid #bfdbfe', padding: '10px 12px', fontSize: 14 }} />
+              <button className="btn btn-secondary" style={{ color: '#b42318', borderColor: '#b42318' }} onClick={testSuspend}>Test suspend</button>
+              <button className="btn btn-secondary" style={{ color: '#166534', borderColor: '#166534' }} onClick={testActivate}>Reactivate</button>
+            </div>
+          </div>
           {subBilling.length === 0 ? <p>No subscriptions tracked yet. Click "Sync from Google" to load them.</p> : (
             <table className="data-table">
               <thead><tr><th>Domain</th><th>SKU</th><th>Acct</th><th>Purchased</th><th>Next bill (29d)</th><th>Status</th><th>Whitelist</th></tr></thead>
