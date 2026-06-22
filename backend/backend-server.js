@@ -1045,22 +1045,31 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
   }
 });
 
-// Customer: list MY domains (registered + pending + failed) — these are DomainOrder records.
+// Customer: list MY domains (registered + pending-with-payment + failed).
 app.get('/api/customer/my-domains', authenticateCustomer, async (req, res) => {
   try {
     const orders = await DomainOrder.find({ customerId: req.customerId }).sort({ createdAt: -1 });
-    const domains = orders.map((o) => ({
-      id: o._id,
-      domainName: o.domainName,
-      status: o.status,            // pending | registered | failed | test_paid
-      period: o.period,
-      price: o.price,
-      registeredAt: o.registeredAt,
-      createdAt: o.createdAt,
-      // expiry = registeredAt + period years (approx, for display)
-      expiresAt: o.registeredAt ? new Date(new Date(o.registeredAt).setFullYear(new Date(o.registeredAt).getFullYear() + (o.period || 1))) : null,
-      error: o.status === 'failed' ? o.registrationResult : null,
-    }));
+    const domains = [];
+    for (const o of orders) {
+      // Only show registered/failed, or pending orders that actually have a payment.
+      let show = (o.status === 'registered' || o.status === 'failed' || o.status === 'test_paid');
+      if (!show && o.status === 'pending') {
+        const p = await Payment.findOne({ orderId: o._id, orderType: 'domain' });
+        show = !!p;
+      }
+      if (!show) continue;
+      domains.push({
+        id: o._id,
+        domainName: o.domainName,
+        status: o.status,
+        period: o.period,
+        price: o.price,
+        registeredAt: o.registeredAt,
+        createdAt: o.createdAt,
+        expiresAt: o.registeredAt ? new Date(new Date(o.registeredAt).setFullYear(new Date(o.registeredAt).getFullYear() + (o.period || 1))) : null,
+        error: o.status === 'failed' ? o.registrationResult : null,
+      });
+    }
     res.json({ domains });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -3242,59 +3251,10 @@ app.post('/api/customer/nc/domains/search', authenticateCustomer, async (req, re
 });
 
 // ---- Customer: register a domain (creates order + payment) ----
-app.post('/api/customer/nc/domains/register', authenticateCustomer, async (req, res) => {
-  try {
-    const { domain, years, contact } = req.body;
-    if (!domain) return res.status(400).json({ error: 'Domain required.' });
-    const me = await Customer.findById(req.customerId);
-    // Price it
-    const tld = tldOf(domain);
-    const pricing = await ncGetTldPricing(tld, 'REGISTER');
-    if (!pricing.ok) return res.status(502).json({ error: 'Could not price this domain: ' + pricing.error });
-    const price = await ncCustomerPriceForTld(tld, pricing.cost) * (years || 1);
-
-    const order = await DomainOrder.create({
-      customerId: req.customerId,
-      orderNumber: `DM-${Date.now()}`,
-      domainName: domain.toLowerCase(),
-      period: years || 1,
-      price,
-      status: 'pending',
-    });
-    // Store contact for fulfillment on payment
-    order.registrationResult = JSON.stringify({ contact });
-    await order.save();
-
-    res.json({ orderNumber: order.orderNumber, id: order._id, price, domain: order.domainName });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ---- Customer: renew a domain ----
-app.post('/api/customer/nc/domains/renew', authenticateCustomer, async (req, res) => {
-  try {
-    const { domain, years } = req.body;
-    if (!domain) return res.status(400).json({ error: 'Domain required.' });
-    const tld = tldOf(domain);
-    const pricing = await ncGetTldPricing(tld, 'RENEW');
-    if (!pricing.ok) return res.status(502).json({ error: 'Could not price renewal: ' + pricing.error });
-    const price = await ncCustomerPriceForTld(tld, pricing.cost) * (years || 1);
-    const order = await DomainOrder.create({
-      customerId: req.customerId,
-      orderNumber: `DR-${Date.now()}`,
-      domainName: domain.toLowerCase(),
-      period: years || 1,
-      price,
-      status: 'pending',
-    });
-    order.registrationResult = JSON.stringify({ renew: true });
-    await order.save();
-    res.json({ orderNumber: order.orderNumber, id: order._id, price });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+// NOTE: Domain register/renew go through the pay-first endpoints
+// /api/customer/domains/register and /api/customer/domains/renew (which create a Payment
+// and only register on payment). The earlier /nc/domains/register & /renew endpoints were
+// removed because they created orders without a payment ("no payment found").
 
 // ---- Customer: list available SSL products with customer pricing ----
 app.get('/api/customer/nc/ssl', authenticateCustomer, async (req, res) => {
