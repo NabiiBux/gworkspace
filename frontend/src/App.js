@@ -2708,14 +2708,22 @@ const CustomerOverview = ({ onNavigate }) => {
   const { user } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [draft, setDraft] = useState(null);
 
   useEffect(() => {
     (async () => {
       try { const res = await axios.get(`${API_URL}/customer/my-subscriptions`); setData(res.data); }
       catch (_) { setData({ subscriptions: [] }); }
       finally { setLoading(false); }
+      try { const dr = await axios.get(`${API_URL}/workspace-orders/draft`); setDraft(dr.data.draft || null); }
+      catch (_) { }
     })();
   }, []);
+
+  const discardDraft = async () => {
+    if (!window.confirm('Discard your saved order in progress?')) return;
+    try { await axios.delete(`${API_URL}/workspace-orders/draft`); setDraft(null); } catch (_) { }
+  };
 
   const name = user?.username || (user?.businessEmail || '').split('@')[0];
   const subs = data?.subscriptions || [];
@@ -2729,6 +2737,21 @@ const CustomerOverview = ({ onNavigate }) => {
     <div>
       <h1 style={{ fontSize: 32, margin: '0 0 6px', color: INK }}>Welcome back, {name}</h1>
       <p style={{ color: MUTE, margin: '0 0 24px' }}>Your Workspace orders, payments, and mailboxes in one place.</p>
+
+      {draft && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 14, padding: 20, marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div style={{ fontWeight: 700, color: '#92600a', marginBottom: 4 }}>⏳ You have an unfinished order</div>
+            <div style={{ color: '#92600a', fontSize: 14 }}>
+              {draft.draftData?.form?.domain ? `For ${draft.draftData.form.domain}. ` : ''}Pick up right where you left off — your details are saved.
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => onNavigate('order')} style={{ border: 'none', background: TEAL, color: '#fff', borderRadius: 999, padding: '10px 22px', cursor: 'pointer', fontWeight: 700 }}>Resume order</button>
+            <button onClick={discardDraft} style={{ border: '1px solid #e5e7eb', background: '#fff', borderRadius: 999, padding: '10px 18px', cursor: 'pointer', color: '#92600a' }}>Discard</button>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, marginBottom: 24 }}>
         <div style={card}>
@@ -3630,6 +3653,7 @@ function WorkspaceOrderFlow() {
   const [provisionSuccess, setProvisionSuccess] = useState(false);
   const [loginInfo, setLoginInfo] = useState(null);
   const [domainStatus, setDomainStatus] = useState({ state: 'idle', message: '' }); // idle|checking|available|taken|invalid
+  const [draftLoaded, setDraftLoaded] = useState(false);
   const [mapsReady, setMapsReady] = useState(false);
   const streetInputRef = useRef(null);
   const autocompleteRef = useRef(null);
@@ -3645,8 +3669,34 @@ function WorkspaceOrderFlow() {
       } catch (e) {
         setPlansError('Could not load plans. Please try again shortly.');
       }
+      // Load any saved draft so the customer can resume an interrupted order.
+      try {
+        const dr = await axios.get(`${API_URL}/workspace-orders/draft`);
+        if (dr.data.draft && dr.data.draft.draftData) {
+          const d = dr.data.draft.draftData;
+          if (d.form) setForm((prev) => ({ ...prev, ...d.form }));
+          if (d.selectedPlanId) setSelectedPlanId(d.selectedPlanId);
+          if (d.seats) setSeats(d.seats);
+          if (d.step) setStep(d.step);
+          setDraftLoaded(true);
+        }
+      } catch (_) { }
     })();
   }, []);
+
+  // Autosave the in-progress order as a draft (debounced) so it survives reload/disconnect.
+  const draftLoadedRef = useRef(false);
+  useEffect(() => {
+    // Don't autosave until plans are loaded and we're past the first render.
+    if (!plans) return;
+    const t = setTimeout(() => {
+      axios.post(`${API_URL}/workspace-orders/draft`, {
+        draftData: { form, selectedPlanId, seats, step },
+        draftStep: step,
+      }).catch(() => { });
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [form, selectedPlanId, seats, step, plans]);
 
   // Load the Google Maps JavaScript API (with Places) once
   useEffect(() => {
@@ -3874,6 +3924,11 @@ function WorkspaceOrderFlow() {
   return (
     <div className="wof-wrap">
       <style>{wofStyles}</style>
+      {draftLoaded && (
+        <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#065f46', borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontSize: 14 }}>
+          ✓ We restored your previous order details so you can continue where you left off.
+        </div>
+      )}
       <header className="wof-head">
         <h2>Set up Google Workspace</h2>
         <p>Choose a plan, tell us about your organization, and place your order.</p>

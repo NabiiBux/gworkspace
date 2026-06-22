@@ -385,9 +385,11 @@ const WorkspaceOrderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'domain_verification', 'provisioned', 'cancelled', 'test_paid'],
+      enum: ['draft', 'pending', 'domain_verification', 'provisioned', 'cancelled', 'test_paid'],
       default: 'pending',
     },
+    draftData: { type: mongoose.Schema.Types.Mixed }, // saved in-progress form for resume
+    draftStep: { type: Number, default: 0 },          // which step the customer was on
     domainVerified: { type: Boolean, default: false },
     googleProvisioned: { type: Boolean, default: false },
     txtRecord: String,
@@ -2664,6 +2666,24 @@ app.get('/api/customer/payment-status/:paymentId', authenticateCustomer, async (
       if (result.cancelled) return res.json({ paid: false, cancelled: true, status: result.status });
       return res.json({ paid: false, status: result.status || 'pending' });
     }
+
+    if (payment.method === 'stripe' && payment.providerRef) {
+      // Verify directly with Stripe: is the checkout session paid?
+      try {
+        const stripe = await getStripeForMode();
+        const session = await stripe.checkout.sessions.retrieve(payment.providerRef);
+        console.log('STRIPE STATUS', payment.providerRef, '→', session.payment_status);
+        if (session.payment_status === 'paid') {
+          await markPaidAndProvision(payment);
+          return res.json({ paid: true, via: 'stripe-api' });
+        }
+        return res.json({ paid: false, status: session.payment_status || 'pending' });
+      } catch (e) {
+        console.error('STRIPE STATUS check failed:', e.message);
+        return res.json({ paid: false, status: 'pending' });
+      }
+    }
+
     res.json({ paid: payment.status === 'paid', status: payment.status });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -2861,19 +2881,38 @@ function ncConfig() {
   };
 }
 
+// Outbound IP detection. Railway rotates between several shared IPs, so we re-detect
+// periodically (cache for 5 min) rather than caching forever. Whitelist ALL Railway IPs in Namecheap.
+let _ncOutboundIp = null;
+let _ncOutboundIpAt = 0;
+async function ncGetOutboundIp() {
+  // Fixed env IP always wins (use only if you have a static IP).
+  if (process.env.NAMECHEAP_CLIENT_IP) return process.env.NAMECHEAP_CLIENT_IP;
+  const fresh = _ncOutboundIp && (Date.now() - _ncOutboundIpAt < 5 * 60 * 1000);
+  if (fresh) return _ncOutboundIp;
+  try {
+    const r = await axios.get('https://api.ipify.org?format=json', { timeout: 8000 });
+    _ncOutboundIp = r.data.ip;
+    _ncOutboundIpAt = Date.now();
+    console.log('NAMECHEAP outbound IP detected:', _ncOutboundIp);
+  } catch (_) { /* keep last known */ }
+  return _ncOutboundIp || '';
+}
+
 async function ncCall(command, params = {}) {
   await ncResolveSandbox(); // refresh sandbox/live mode from admin setting
   const cfg = ncConfig();
-  if (!cfg.apiUser || !cfg.apiKey || !cfg.clientIp) {
+  const clientIp = cfg.clientIp || await ncGetOutboundIp();
+  if (!cfg.apiUser || !cfg.apiKey || !clientIp) {
     return { ok: false, error: 'Namecheap not configured: set NAMECHEAP_API_USER, NAMECHEAP_API_KEY, NAMECHEAP_CLIENT_IP.' };
   }
   const query = new URLSearchParams({
     ApiUser: cfg.apiUser, ApiKey: cfg.apiKey, UserName: cfg.userName,
-    ClientIp: cfg.clientIp, Command: command, ...params,
+    ClientIp: clientIp, Command: command, ...params,
   });
   const url = `${cfg.baseUrl}?${query.toString()}`;
   try {
-    console.log('NAMECHEAP CALL ->', command, '| sandbox:', cfg.sandbox);
+    console.log('NAMECHEAP CALL ->', command, '| sandbox:', cfg.sandbox, '| clientIp:', clientIp);
     const resp = await axios.get(url, { timeout: 30000, responseType: 'text' });
     const parsed = ncParser.parse(resp.data);
     const api = parsed.ApiResponse;
@@ -3155,6 +3194,17 @@ app.get('/api/customer/nc/hosting', authenticateCustomer, async (req, res) => {
   try {
     const plans = await HostingPlan.find({ active: true }).sort({ sortOrder: 1 });
     res.json({ plans: plans.map((p) => ({ planId: p.planId, name: p.name, description: p.description, price: p.price, billingCycle: p.billingCycle, features: p.features })) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Admin: show the server's current outbound IP (whitelist THIS in Namecheap) ----
+app.get('/api/admin/nc/outbound-ip', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    _ncOutboundIp = null; // force fresh detection
+    const ip = await ncGetOutboundIp();
+    res.json({ outboundIp: ip, envClientIp: process.env.NAMECHEAP_CLIENT_IP || null, note: 'Whitelist this IP in Namecheap (Profile → Tools → API Access → Whitelisted IPs) and set it as NAMECHEAP_CLIENT_IP.' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -3745,6 +3795,9 @@ app.post('/api/workspace-orders', authenticateCustomer, async (req, res) => {
       await sendOrderPlacedEmail(me?.businessEmail, me?.firstName || me?.username, desc, order.monthlyTotal);
     } catch (_) { }
 
+    // Order created successfully — discard any saved draft.
+    try { await WorkspaceOrder.deleteMany({ customerId: req.customerId, status: 'draft' }); } catch (_) { }
+
     res.json({ orderNumber: order.orderNumber, id: order._id, status: order.status });
   } catch (error) {
     res.status(500).json({ error: 'Could not create order' });
@@ -3753,10 +3806,56 @@ app.post('/api/workspace-orders', authenticateCustomer, async (req, res) => {
 
 app.get('/api/workspace-orders', authenticateCustomer, async (req, res) => {
   try {
-    const orders = await WorkspaceOrder.find({ customerId: req.customerId }).sort({ createdAt: -1 });
+    const orders = await WorkspaceOrder.find({ customerId: req.customerId, status: { $ne: 'draft' } }).sort({ createdAt: -1 });
     res.json(orders);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ---- DRAFT ORDERS (resume an interrupted checkout) ----
+// Save / update the customer's in-progress order draft (called as they fill the form).
+app.post('/api/workspace-orders/draft', authenticateCustomer, async (req, res) => {
+  try {
+    const { draftData, draftStep } = req.body;
+    // One active draft per customer — upsert it.
+    let draft = await WorkspaceOrder.findOne({ customerId: req.customerId, status: 'draft' });
+    if (!draft) {
+      draft = await WorkspaceOrder.create({
+        customerId: req.customerId,
+        orderNumber: `DRAFT-${Date.now()}`,
+        status: 'draft',
+        draftData, draftStep: draftStep || 0,
+      });
+    } else {
+      draft.draftData = draftData;
+      draft.draftStep = draftStep || 0;
+      await draft.save();
+    }
+    res.json({ success: true, draftId: draft._id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Get the customer's current draft (for the "Resume order" card).
+app.get('/api/workspace-orders/draft', authenticateCustomer, async (req, res) => {
+  try {
+    const draft = await WorkspaceOrder.findOne({ customerId: req.customerId, status: 'draft' }).sort({ updatedAt: -1 });
+    if (!draft) return res.json({ draft: null });
+    res.json({ draft: { id: draft._id, draftData: draft.draftData, draftStep: draft.draftStep, updatedAt: draft.updatedAt } });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Discard the draft (called after successful submit, or if customer cancels).
+app.delete('/api/workspace-orders/draft', authenticateCustomer, async (req, res) => {
+  try {
+    await WorkspaceOrder.deleteMany({ customerId: req.customerId, status: 'draft' });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
