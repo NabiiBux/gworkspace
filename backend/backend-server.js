@@ -8,6 +8,7 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const axios = require('axios');
+const { XMLParser } = require('fast-xml-parser');
 const { google } = require('googleapis');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
@@ -239,6 +240,35 @@ const DomainOrderSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 const DomainOrder = mongoose.model('DomainOrder', DomainOrderSchema);
+
+// Namecheap product pricing overrides (admin-set): per TLD/SSL/hosting.
+// kind: 'tld' | 'ssl' | 'hosting'; key: e.g. 'com', 'PositiveSSL', 'stellar'
+const NcPricingSchema = new mongoose.Schema({
+  kind: { type: String, enum: ['tld', 'ssl', 'hosting'], required: true },
+  key: { type: String, required: true },          // tld/ssl-type/hosting-plan id
+  label: String,                                   // display name
+  markupPercent: Number,                           // optional per-item markup override
+  fixedPrice: Number,                              // optional fixed price (wins over markup)
+  cost: Number,                                     // last-known Namecheap cost (for reference)
+  active: { type: Boolean, default: true },
+  updatedAt: { type: Date, default: Date.now },
+});
+NcPricingSchema.index({ kind: 1, key: 1 }, { unique: true });
+const NcPricing = mongoose.model('NcPricing', NcPricingSchema);
+
+// Hosting plans (admin-defined, since Namecheap hosting isn't a simple API product).
+const HostingPlanSchema = new mongoose.Schema({
+  planId: { type: String, unique: true },
+  name: String,
+  description: String,
+  cost: Number,            // your cost
+  price: Number,           // selling price
+  billingCycle: { type: String, default: 'yearly' },
+  features: [String],
+  active: { type: Boolean, default: true },
+  sortOrder: { type: Number, default: 0 },
+});
+const HostingPlan = mongoose.model('HostingPlan', HostingPlanSchema);
 
 // Tracks a 29-day billing cycle for EACH Google subscription (incl. pre-existing ones).
 // Seeded from the Google subscription creation date.
@@ -1339,30 +1369,51 @@ async function markPaidAndProvision(payment) {
   payment.paidAt = new Date();
   await payment.save();
 
-  // DOMAIN orders: register the domain on payment
+  // DOMAIN orders: register or renew via Namecheap on payment
   if (payment.orderType === 'domain') {
     try {
       const dOrder = await DomainOrder.findById(payment.orderId);
       if (dOrder && dOrder.status === 'pending') {
         if (payment.isTest) {
-          console.log('TEST PAYMENT — skipping real domain registration for', dOrder.domainName);
+          console.log('TEST PAYMENT — skipping real domain action for', dOrder.domainName);
           dOrder.status = 'test_paid';
           await dOrder.save();
           return;
         }
         const me = await Customer.findById(payment.customerId);
-        const result = await registerDomainViaApi(me, dOrder.domainName, dOrder.period);
+        // Read stored meta (contact for register, or renew flag)
+        let meta = {};
+        try { meta = JSON.parse(dOrder.registrationResult || '{}'); } catch (_) { }
+
+        let result;
+        if (meta.renew) {
+          result = await ncRenewDomain(dOrder.domainName, dOrder.period);
+          if (!result.ok) throw new Error(result.error);
+          console.log('DOMAIN RENEWED via Namecheap:', dOrder.domainName);
+        } else {
+          // Build contact from stored meta or the customer's account info
+          const contact = meta.contact || {
+            firstName: me?.firstName || me?.username || 'Domain',
+            lastName: me?.lastName || 'Owner',
+            address: me?.address || 'N/A', city: me?.city || 'N/A',
+            state: me?.state || 'N/A', zip: me?.zip || '00000',
+            country: me?.country || 'US', phone: me?.phone || '+1.0000000000',
+            email: me?.businessEmail,
+          };
+          result = await ncRegisterDomain(dOrder.domainName, dOrder.period, contact);
+          if (!result.ok) throw new Error(result.error);
+          if (!result.registered) throw new Error('Namecheap did not confirm registration.');
+          console.log('DOMAIN REGISTERED via Namecheap:', dOrder.domainName);
+          if (me && !me.domain) { me.domain = dOrder.domainName; await me.save(); }
+        }
         dOrder.status = 'registered';
         dOrder.registeredAt = new Date();
         dOrder.registrationResult = JSON.stringify(result).slice(0, 500);
         await dOrder.save();
-        // Link this domain to the customer's account
-        if (me && !me.domain) { me.domain = dOrder.domainName; await me.save(); }
-        console.log('DOMAIN REGISTERED on payment:', dOrder.domainName);
         try { await sendPaymentConfirmationEmail(me?.businessEmail, dOrder.domainName, payment.amount); } catch (_) { }
       }
     } catch (e) {
-      console.error('DOMAIN REGISTRATION FAILED for payment', String(payment._id), e.message);
+      console.error('DOMAIN ACTION FAILED for payment', String(payment._id), e.message);
       try {
         const dOrder = await DomainOrder.findById(payment.orderId);
         if (dOrder) { dOrder.status = 'failed'; dOrder.registrationResult = e.message; await dOrder.save(); }
@@ -2768,6 +2819,412 @@ app.get('/api/admin/payments', authenticateCustomer, requireAdmin, async (req, r
 });
 
 // PRODUCTS & PRICING (DB-backed, editable via /api/admin/plans)
+// ==================== NAMECHEAP API CLIENT ====================
+// Domains (check/register/renew), SSL, pricing via Namecheap's XML API.
+// Env: NAMECHEAP_API_USER, NAMECHEAP_API_KEY, NAMECHEAP_USERNAME, NAMECHEAP_CLIENT_IP,
+//      NAMECHEAP_SANDBOX ('true'/'false'), NAMECHEAP_MARKUP_PERCENT
+const ncParser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', parseAttributeValue: true });
+
+function ncConfig() {
+  const sandbox = String(process.env.NAMECHEAP_SANDBOX || 'true').toLowerCase() === 'true';
+  return {
+    sandbox,
+    baseUrl: sandbox ? 'https://api.sandbox.namecheap.com/xml.response' : 'https://api.namecheap.com/xml.response',
+    apiUser: process.env.NAMECHEAP_API_USER || '',
+    apiKey: process.env.NAMECHEAP_API_KEY || '',
+    userName: process.env.NAMECHEAP_USERNAME || process.env.NAMECHEAP_API_USER || '',
+    clientIp: process.env.NAMECHEAP_CLIENT_IP || '',
+    markupPercent: Number(process.env.NAMECHEAP_MARKUP_PERCENT || 20),
+  };
+}
+
+async function ncCall(command, params = {}) {
+  const cfg = ncConfig();
+  if (!cfg.apiUser || !cfg.apiKey || !cfg.clientIp) {
+    return { ok: false, error: 'Namecheap not configured: set NAMECHEAP_API_USER, NAMECHEAP_API_KEY, NAMECHEAP_CLIENT_IP.' };
+  }
+  const query = new URLSearchParams({
+    ApiUser: cfg.apiUser, ApiKey: cfg.apiKey, UserName: cfg.userName,
+    ClientIp: cfg.clientIp, Command: command, ...params,
+  });
+  const url = `${cfg.baseUrl}?${query.toString()}`;
+  try {
+    console.log('NAMECHEAP CALL ->', command, '| sandbox:', cfg.sandbox);
+    const resp = await axios.get(url, { timeout: 30000, responseType: 'text' });
+    const parsed = ncParser.parse(resp.data);
+    const api = parsed.ApiResponse;
+    if (!api) return { ok: false, error: 'Unexpected Namecheap response.', raw: resp.data };
+    if (api['@_Status'] === 'ERROR') {
+      let msg = 'Namecheap API error.';
+      const errs = api.Errors?.Error;
+      if (errs) msg = Array.isArray(errs) ? errs.map((e) => e['#text'] || e).join('; ') : (errs['#text'] || errs);
+      console.error('NAMECHEAP ERROR <-', msg);
+      return { ok: false, error: msg, raw: parsed };
+    }
+    return { ok: true, data: api.CommandResponse, raw: parsed };
+  } catch (e) {
+    const detail = e.response?.data ? String(e.response.data).slice(0, 300) : e.message;
+    return { ok: false, error: 'Namecheap request failed: ' + detail };
+  }
+}
+
+// Apply pricing: fixed override wins; else markup % (override or default) on cost.
+function ncApplyPricing(cost, markupPercentOverride, fixedPriceOverride) {
+  if (fixedPriceOverride != null && fixedPriceOverride !== '' && !isNaN(Number(fixedPriceOverride))) {
+    return Number(Number(fixedPriceOverride).toFixed(2));
+  }
+  const cfg = ncConfig();
+  const pct = markupPercentOverride != null && markupPercentOverride !== '' ? Number(markupPercentOverride) : cfg.markupPercent;
+  return Number((Number(cost) * (1 + pct / 100)).toFixed(2));
+}
+
+async function ncCheckDomains(domainList) {
+  const list = Array.isArray(domainList) ? domainList.join(',') : domainList;
+  const r = await ncCall('namecheap.domains.check', { DomainList: list });
+  if (!r.ok) return r;
+  let results = r.data?.DomainCheckResult || [];
+  if (!Array.isArray(results)) results = [results];
+  return {
+    ok: true,
+    domains: results.map((d) => ({
+      domain: d['@_Domain'],
+      available: d['@_Available'] === true || d['@_Available'] === 'true',
+      isPremium: d['@_IsPremiumName'] === true || d['@_IsPremiumName'] === 'true',
+      premiumPrice: d['@_PremiumRegistrationPrice'] ? Number(d['@_PremiumRegistrationPrice']) : null,
+    })),
+  };
+}
+
+async function ncGetTldPricing(tld, actionName = 'REGISTER') {
+  const r = await ncCall('namecheap.users.getPricing', {
+    ProductType: 'DOMAIN', ProductCategory: actionName.toLowerCase(),
+    ActionName: actionName, ProductName: tld,
+  });
+  if (!r.ok) return r;
+  try {
+    const categories = r.data.UserGetPricingResult.ProductType.ProductCategory;
+    const cats = Array.isArray(categories) ? categories : [categories];
+    for (const cat of cats) {
+      let products = cat.Product;
+      if (!products) continue;
+      products = Array.isArray(products) ? products : [products];
+      for (const p of products) {
+        if (String(p['@_Name']).toLowerCase() === String(tld).toLowerCase()) {
+          let prices = p.Price;
+          prices = Array.isArray(prices) ? prices : [prices];
+          const oneYear = prices.find((pr) => Number(pr['@_Duration']) === 1) || prices[0];
+          return { ok: true, cost: Number(oneYear['@_Price']), currency: oneYear['@_Currency'] || 'USD' };
+        }
+      }
+    }
+  } catch (e) { return { ok: false, error: 'Could not parse pricing: ' + e.message }; }
+  return { ok: false, error: 'Pricing not found for TLD ' + tld };
+}
+
+async function ncRegisterDomain(domainName, years, contact) {
+  const c = {
+    FirstName: contact.firstName, LastName: contact.lastName, Address1: contact.address,
+    City: contact.city, StateProvince: contact.state, PostalCode: contact.zip,
+    Country: contact.country, Phone: contact.phone, EmailAddress: contact.email,
+  };
+  const roles = ['Registrant', 'Tech', 'Admin', 'AuxBilling'];
+  const params = { DomainName: domainName, Years: years || 1 };
+  for (const role of roles) {
+    params[`${role}FirstName`] = c.FirstName; params[`${role}LastName`] = c.LastName;
+    params[`${role}Address1`] = c.Address1; params[`${role}City`] = c.City;
+    params[`${role}StateProvince`] = c.StateProvince; params[`${role}PostalCode`] = c.PostalCode;
+    params[`${role}Country`] = c.Country; params[`${role}Phone`] = c.Phone; params[`${role}EmailAddress`] = c.EmailAddress;
+  }
+  const r = await ncCall('namecheap.domains.create', params);
+  if (!r.ok) return r;
+  const result = r.data?.DomainCreateResult;
+  return {
+    ok: true,
+    registered: result?.['@_Registered'] === true || result?.['@_Registered'] === 'true',
+    domainId: result?.['@_DomainID'], chargedAmount: result?.['@_ChargedAmount'], domain: result?.['@_Domain'],
+  };
+}
+
+async function ncRenewDomain(domainName, years) {
+  const r = await ncCall('namecheap.domains.renew', { DomainName: domainName, Years: years || 1 });
+  if (!r.ok) return r;
+  const result = r.data?.DomainRenewResult;
+  return { ok: true, renewed: !!result, domainId: result?.['@_DomainID'], chargedAmount: result?.['@_ChargedAmount'] };
+}
+
+async function ncListDomains(page = 1, pageSize = 50) {
+  const r = await ncCall('namecheap.domains.getList', { Page: page, PageSize: pageSize });
+  if (!r.ok) return r;
+  let domains = r.data?.DomainGetListResult?.Domain || [];
+  if (!Array.isArray(domains)) domains = [domains];
+  return {
+    ok: true,
+    domains: domains.map((d) => ({
+      id: d['@_ID'], name: d['@_Name'], created: d['@_Created'], expires: d['@_Expires'],
+      isExpired: d['@_IsExpired'] === true || d['@_IsExpired'] === 'true',
+      autoRenew: d['@_AutoRenew'] === true || d['@_AutoRenew'] === 'true',
+    })),
+  };
+}
+
+async function ncGetBalance() {
+  const r = await ncCall('namecheap.users.getBalances');
+  if (!r.ok) return r;
+  const b = r.data?.UserGetBalancesResult;
+  return { ok: true, currency: b?.['@_Currency'] || 'USD', availableBalance: Number(b?.['@_AvailableBalance'] || 0) };
+}
+
+async function ncGetSslPricing() {
+  const r = await ncCall('namecheap.users.getPricing', { ProductType: 'SSLCERTIFICATE' });
+  if (!r.ok) return r;
+  try {
+    const cat = r.data.UserGetPricingResult.ProductType.ProductCategory;
+    const cats = Array.isArray(cat) ? cat : [cat];
+    const out = [];
+    for (const c of cats) {
+      let products = c.Product;
+      if (!products) continue;
+      products = Array.isArray(products) ? products : [products];
+      for (const p of products) {
+        let prices = p.Price;
+        prices = Array.isArray(prices) ? prices : [prices];
+        const oneYear = prices.find((pr) => Number(pr['@_Duration']) === 1) || prices[0];
+        out.push({ name: p['@_Name'], cost: Number(oneYear['@_Price']), currency: oneYear['@_Currency'] || 'USD' });
+      }
+    }
+    return { ok: true, products: out };
+  } catch (e) { return { ok: false, error: 'Could not parse SSL pricing: ' + e.message }; }
+}
+
+async function ncPurchaseSsl(type, years) {
+  const r = await ncCall('namecheap.ssl.create', { Type: type, Years: years || 1 });
+  if (!r.ok) return r;
+  const result = r.data?.SSLCreateResult;
+  return { ok: true, created: !!result, certificateId: result?.['@_CertificateID'], chargedAmount: result?.['@_ChargedAmount'] };
+}
+
+// Compute the customer-facing price for a TLD, applying admin overrides.
+async function ncCustomerPriceForTld(tld, cost) {
+  const override = await NcPricing.findOne({ kind: 'tld', key: tld.toLowerCase(), active: true });
+  return ncApplyPricing(cost, override?.markupPercent, override?.fixedPrice);
+}
+
+function tldOf(domain) {
+  const parts = String(domain).toLowerCase().split('.');
+  return parts.slice(1).join('.'); // handles co.uk etc. minimally as last parts
+}
+
+// ---- Customer: domain search (Namecheap) with customer pricing ----
+app.post('/api/customer/nc/domains/search', authenticateCustomer, async (req, res) => {
+  try {
+    const { query } = req.body;
+    if (!query) return res.status(400).json({ error: 'Enter a domain or keyword.' });
+    // If no TLD, check a set of popular TLDs; else check the exact domain.
+    let domains = [];
+    if (query.includes('.')) {
+      domains = [query.toLowerCase().trim()];
+    } else {
+      const tlds = ['com', 'net', 'org', 'io', 'co', 'shop', 'store', 'online', 'site'];
+      domains = tlds.map((t) => `${query.toLowerCase().trim()}.${t}`);
+    }
+    const check = await ncCheckDomains(domains);
+    if (!check.ok) return res.status(502).json({ error: check.error });
+
+    // Add pricing for available domains
+    const out = [];
+    for (const d of check.domains) {
+      let price = null;
+      if (d.available) {
+        const tld = tldOf(d.domain);
+        if (d.isPremium && d.premiumPrice) {
+          price = ncApplyPricing(d.premiumPrice);
+        } else {
+          const pricing = await ncGetTldPricing(tld, 'REGISTER');
+          if (pricing.ok) price = await ncCustomerPriceForTld(tld, pricing.cost);
+        }
+      }
+      out.push({ domain: d.domain, available: d.available, isPremium: d.isPremium, price });
+    }
+    res.json({ results: out });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Customer: register a domain (creates order + payment) ----
+app.post('/api/customer/nc/domains/register', authenticateCustomer, async (req, res) => {
+  try {
+    const { domain, years, contact } = req.body;
+    if (!domain) return res.status(400).json({ error: 'Domain required.' });
+    const me = await Customer.findById(req.customerId);
+    // Price it
+    const tld = tldOf(domain);
+    const pricing = await ncGetTldPricing(tld, 'REGISTER');
+    if (!pricing.ok) return res.status(502).json({ error: 'Could not price this domain: ' + pricing.error });
+    const price = await ncCustomerPriceForTld(tld, pricing.cost) * (years || 1);
+
+    const order = await DomainOrder.create({
+      customerId: req.customerId,
+      orderNumber: `DM-${Date.now()}`,
+      domainName: domain.toLowerCase(),
+      period: years || 1,
+      price,
+      status: 'pending',
+    });
+    // Store contact for fulfillment on payment
+    order.registrationResult = JSON.stringify({ contact });
+    await order.save();
+
+    res.json({ orderNumber: order.orderNumber, id: order._id, price, domain: order.domainName });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Customer: renew a domain ----
+app.post('/api/customer/nc/domains/renew', authenticateCustomer, async (req, res) => {
+  try {
+    const { domain, years } = req.body;
+    if (!domain) return res.status(400).json({ error: 'Domain required.' });
+    const tld = tldOf(domain);
+    const pricing = await ncGetTldPricing(tld, 'RENEW');
+    if (!pricing.ok) return res.status(502).json({ error: 'Could not price renewal: ' + pricing.error });
+    const price = await ncCustomerPriceForTld(tld, pricing.cost) * (years || 1);
+    const order = await DomainOrder.create({
+      customerId: req.customerId,
+      orderNumber: `DR-${Date.now()}`,
+      domainName: domain.toLowerCase(),
+      period: years || 1,
+      price,
+      status: 'pending',
+    });
+    order.registrationResult = JSON.stringify({ renew: true });
+    await order.save();
+    res.json({ orderNumber: order.orderNumber, id: order._id, price });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Customer: list available SSL products with customer pricing ----
+app.get('/api/customer/nc/ssl', authenticateCustomer, async (req, res) => {
+  try {
+    const ssl = await ncGetSslPricing();
+    if (!ssl.ok) return res.status(502).json({ error: ssl.error });
+    const overrides = await NcPricing.find({ kind: 'ssl', active: true });
+    const omap = {}; overrides.forEach((o) => { omap[o.key] = o; });
+    const products = ssl.products
+      .map((p) => {
+        const o = omap[p.name];
+        const price = ncApplyPricing(p.cost, o?.markupPercent, o?.fixedPrice);
+        return { name: p.name, price };
+      })
+      .filter((p) => p.price > 0);
+    res.json({ products });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Customer: list hosting plans (admin-defined) ----
+app.get('/api/customer/nc/hosting', authenticateCustomer, async (req, res) => {
+  try {
+    const plans = await HostingPlan.find({ active: true }).sort({ sortOrder: 1 });
+    res.json({ plans: plans.map((p) => ({ planId: p.planId, name: p.name, description: p.description, price: p.price, billingCycle: p.billingCycle, features: p.features })) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Admin: Namecheap balance ----
+app.get('/api/admin/nc/balance', authenticateCustomer, requireAdmin, async (req, res) => {
+  const b = await ncGetBalance();
+  if (!b.ok) return res.status(502).json({ error: b.error });
+  res.json(b);
+});
+
+// ---- Admin: TLD pricing (cost + your price) for common TLDs, with overrides ----
+app.get('/api/admin/nc/tld-pricing', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const tlds = (req.query.tlds ? String(req.query.tlds).split(',') : ['com', 'net', 'org', 'io', 'co', 'shop', 'store', 'online', 'site', 'xyz']);
+    const overrides = await NcPricing.find({ kind: 'tld' });
+    const omap = {}; overrides.forEach((o) => { omap[o.key] = o; });
+    const out = [];
+    for (const tld of tlds) {
+      const pricing = await ncGetTldPricing(tld, 'REGISTER');
+      if (!pricing.ok) { out.push({ tld, error: pricing.error }); continue; }
+      const o = omap[tld];
+      out.push({
+        tld, cost: pricing.cost,
+        markupPercent: o?.markupPercent ?? null,
+        fixedPrice: o?.fixedPrice ?? null,
+        price: ncApplyPricing(pricing.cost, o?.markupPercent, o?.fixedPrice),
+      });
+    }
+    res.json({ tlds: out, defaultMarkup: ncConfig().markupPercent });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Admin: set pricing override (tld/ssl/hosting) ----
+app.post('/api/admin/nc/pricing', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { kind, key, markupPercent, fixedPrice, label, cost } = req.body;
+    if (!kind || !key) return res.status(400).json({ error: 'kind and key required.' });
+    const doc = await NcPricing.findOneAndUpdate(
+      { kind, key: String(key).toLowerCase() },
+      { kind, key: String(key).toLowerCase(), label, markupPercent: markupPercent === '' ? null : markupPercent, fixedPrice: fixedPrice === '' ? null : fixedPrice, cost, active: true, updatedAt: new Date() },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true, pricing: doc });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Admin: SSL pricing list with overrides ----
+app.get('/api/admin/nc/ssl-pricing', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const ssl = await ncGetSslPricing();
+    if (!ssl.ok) return res.status(502).json({ error: ssl.error });
+    const overrides = await NcPricing.find({ kind: 'ssl' });
+    const omap = {}; overrides.forEach((o) => { omap[o.key] = o; });
+    const products = ssl.products.map((p) => {
+      const o = omap[p.name];
+      return { name: p.name, cost: p.cost, markupPercent: o?.markupPercent ?? null, fixedPrice: o?.fixedPrice ?? null, price: ncApplyPricing(p.cost, o?.markupPercent, o?.fixedPrice) };
+    });
+    res.json({ products, defaultMarkup: ncConfig().markupPercent });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Admin: hosting plans CRUD ----
+app.get('/api/admin/nc/hosting', authenticateCustomer, requireAdmin, async (req, res) => {
+  const plans = await HostingPlan.find().sort({ sortOrder: 1 });
+  res.json({ plans });
+});
+app.post('/api/admin/nc/hosting', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { planId, name, description, cost, price, billingCycle, features, active, sortOrder } = req.body;
+    if (!name || price == null) return res.status(400).json({ error: 'name and price required.' });
+    const id = planId || ('host_' + Date.now());
+    const plan = await HostingPlan.findOneAndUpdate(
+      { planId: id },
+      { planId: id, name, description, cost, price, billingCycle: billingCycle || 'yearly', features: features || [], active: active !== false, sortOrder: sortOrder || 0 },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true, plan });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.delete('/api/admin/nc/hosting/:planId', authenticateCustomer, requireAdmin, async (req, res) => {
+  await HostingPlan.deleteOne({ planId: req.params.planId });
+  res.json({ success: true });
+});
+
 // ==================== DOMAINS (DomainNameAPI) ====================
 // OT&E test base: https://ote.domainresellerapi.com  | Production: https://api.domainresellerapi.com
 const DNA_BASE = process.env.DNA_API_BASE || 'https://ote.domainresellerapi.com';
@@ -3050,14 +3507,17 @@ app.post('/api/customer/domains/register', authenticateCustomer, async (req, res
 
     // Nicky crypto
     try {
-      const nickyUrl = await createNickyPayment({
+      const nicky = await createNickyPayment({
         amount, currency: 'USD', description: orderDesc, orderNumber,
         reference: String(payment._id), billDescription: orderDesc,
         customerEmail: me.businessEmail, customerName: me.firstName ? `${me.firstName} ${me.lastName || ''}`.trim() : me.businessEmail,
         redirectUrl: successUrl, cancelUrl,
       });
-      payment.checkoutUrl = nickyUrl; await payment.save();
-      return res.json({ checkoutUrl: nickyUrl, paymentId: payment._id });
+      payment.checkoutUrl = nicky.url;
+      payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id);
+      payment.providerShortId = nicky.shortId || null;
+      await payment.save();
+      return res.json({ checkoutUrl: nicky.url, paymentId: payment._id });
     } catch (e) {
       return res.status(500).json({ error: 'Crypto checkout not available: ' + e.message });
     }
@@ -3087,7 +3547,20 @@ app.post('/api/admin/domain-orders/:id/retry', authenticateCustomer, requireAdmi
     if (order.status === 'registered') return res.json({ success: true, message: 'Already registered.' });
 
     const customer = await Customer.findById(order.customerId);
-    const result = await registerDomainViaApi(customer, order.domainName, order.period);
+    let meta = {}; try { meta = JSON.parse(order.registrationResult || '{}'); } catch (_) { }
+    let result;
+    if (meta.renew) {
+      result = await ncRenewDomain(order.domainName, order.period);
+    } else {
+      const contact = meta.contact || {
+        firstName: customer?.firstName || customer?.username || 'Domain', lastName: customer?.lastName || 'Owner',
+        address: customer?.address || 'N/A', city: customer?.city || 'N/A', state: customer?.state || 'N/A',
+        zip: customer?.zip || '00000', country: customer?.country || 'US', phone: customer?.phone || '+1.0000000000',
+        email: customer?.businessEmail,
+      };
+      result = await ncRegisterDomain(order.domainName, order.period, contact);
+    }
+    if (!result.ok) return res.status(502).json({ error: result.error });
     order.status = 'registered';
     order.registeredAt = new Date();
     order.registrationResult = JSON.stringify(result).slice(0, 500);
@@ -3099,28 +3572,12 @@ app.post('/api/admin/domain-orders/:id/retry', authenticateCustomer, requireAdmi
   }
 });
 
-// Admin: reseller account balance from DomainNameAPI
+// Admin: reseller account balance from Namecheap
 app.get('/api/admin/domain-balance', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
-    const headers = dnaAuthHeaders();
-    headers['accept'] = 'text/plain';
-    const resp = await fetch(`${DNA_BASE}/api/v1/deposit/accounts/me`, { method: 'GET', headers });
-    const raw = await resp.text();
-    console.log('DNA BALANCE <-', resp.status, raw.slice(0, 300));
-    let data;
-    try { data = JSON.parse(raw); } catch (_) {
-      return res.status(400).json({ error: `Balance response error (${resp.status}): ${raw.slice(0, 150)}` });
-    }
-    if (!resp.ok || data.success === false) {
-      return res.status(400).json({ error: data?.error?.message || data?.reason || `Balance fetch failed (${resp.status})` });
-    }
-    // Return the raw data plus best-guess normalized fields (adjust if field names differ)
-    const info = data.info || data;
-    res.json({
-      balance: info.balance ?? info.amount ?? info.deposit ?? null,
-      currency: info.currency || 'USD',
-      raw: info,
-    });
+    const b = await ncGetBalance();
+    if (!b.ok) return res.status(400).json({ error: b.error });
+    res.json({ balance: b.availableBalance, currency: b.currency, raw: b });
   } catch (e) {
     res.status(500).json({ error: 'Balance error: ' + e.message });
   }
@@ -3134,14 +3591,16 @@ app.post('/api/public/domains/search', async (req, res) => {
     if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) {
       return res.status(400).json({ error: 'Please enter a valid domain like example.com' });
     }
-    const result = await dnaDomainSearch(dom);
-    res.json({
-      domainName: result.domainName,
-      available: result.available,
-      currency: result.currency,
-      period: result.period,
-      price: result.price,
-    });
+    const check = await ncCheckDomains([dom]);
+    if (!check.ok) return res.status(502).json({ error: check.error });
+    const d = check.domains[0];
+    let price = null;
+    if (d.available) {
+      const tld = tldOf(dom);
+      if (d.isPremium && d.premiumPrice) price = ncApplyPricing(d.premiumPrice);
+      else { const pricing = await ncGetTldPricing(tld, 'REGISTER'); if (pricing.ok) price = await ncCustomerPriceForTld(tld, pricing.cost); }
+    }
+    res.json({ domainName: dom, available: d.available, currency: 'USD', period: 1, price });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -3155,8 +3614,22 @@ app.post('/api/customer/domains/search', authenticateCustomer, async (req, res) 
     if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) {
       return res.status(400).json({ error: 'Please enter a valid domain like example.com' });
     }
-    const result = await dnaDomainSearch(dom);
-    res.json(result);
+    // Namecheap availability + pricing
+    const check = await ncCheckDomains([dom]);
+    if (!check.ok) return res.status(502).json({ error: check.error });
+    const d = check.domains[0];
+    let price = null;
+    if (d.available) {
+      const tld = tldOf(dom);
+      if (d.isPremium && d.premiumPrice) {
+        price = ncApplyPricing(d.premiumPrice);
+      } else {
+        const pricing = await ncGetTldPricing(tld, 'REGISTER');
+        if (pricing.ok) price = await ncCustomerPriceForTld(tld, pricing.cost);
+      }
+    }
+    // Return the same shape the existing UI expects
+    res.json({ domainName: dom, available: d.available, isPremium: d.isPremium, price });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
