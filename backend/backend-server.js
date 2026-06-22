@@ -1076,6 +1076,77 @@ app.get('/api/customer/my-domains', authenticateCustomer, async (req, res) => {
   }
 });
 
+// Helper: confirm the logged-in customer owns this domain (registered it through us).
+async function customerOwnsDomain(customerId, domain) {
+  const o = await DomainOrder.findOne({ customerId, domainName: String(domain).toLowerCase(), status: { $in: ['registered', 'test_paid'] } });
+  return !!o;
+}
+
+// Customer: get DNS host records for one of THEIR domains.
+app.get('/api/customer/domains/:domain/dns', authenticateCustomer, async (req, res) => {
+  try {
+    const domain = req.params.domain.toLowerCase();
+    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
+    const hosts = await ncGetDnsHosts(domain);
+    if (!hosts.ok) return res.status(502).json({ error: hosts.error });
+    res.json(hosts);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: replace DNS host records (full set) for their domain.
+app.post('/api/customer/domains/:domain/dns', authenticateCustomer, async (req, res) => {
+  try {
+    const domain = req.params.domain.toLowerCase();
+    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
+    const { hosts } = req.body;
+    if (!Array.isArray(hosts)) return res.status(400).json({ error: 'hosts array required.' });
+    // Basic validation
+    for (const h of hosts) {
+      if (!h.type || !h.address || !h.name) return res.status(400).json({ error: 'Each record needs name, type, and address/value.' });
+    }
+    const result = await ncSetDnsHosts(domain, hosts);
+    if (!result.ok) return res.status(502).json({ error: result.error });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: get nameservers for their domain.
+app.get('/api/customer/domains/:domain/nameservers', authenticateCustomer, async (req, res) => {
+  try {
+    const domain = req.params.domain.toLowerCase();
+    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
+    const ns = await ncGetNameservers(domain);
+    if (!ns.ok) return res.status(502).json({ error: ns.error });
+    res.json(ns);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: set custom nameservers, or reset to Namecheap default.
+app.post('/api/customer/domains/:domain/nameservers', authenticateCustomer, async (req, res) => {
+  try {
+    const domain = req.params.domain.toLowerCase();
+    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
+    const { nameservers, useDefault } = req.body;
+    let result;
+    if (useDefault) {
+      result = await ncSetDefaultNameservers(domain);
+    } else {
+      if (!Array.isArray(nameservers) || nameservers.length < 2) return res.status(400).json({ error: 'Provide at least 2 nameservers, or use the default option.' });
+      result = await ncSetNameservers(domain, nameservers);
+    }
+    if (!result.ok) return res.status(502).json({ error: result.error });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Customer: start a domain RENEWAL (creates an order + checkout, like registration).
 app.post('/api/customer/domains/renew', authenticateCustomer, async (req, res) => {
   try {
@@ -3149,6 +3220,84 @@ async function ncRenewDomain(domainName, years) {
   if (!r.ok) return r;
   const result = r.data?.DomainRenewResult;
   return { ok: true, renewed: !!result, domainId: result?.['@_DomainID'], chargedAmount: result?.['@_ChargedAmount'] };
+}
+
+// ---- DNS MANAGEMENT ----
+function splitDomain(domain) {
+  const parts = String(domain).toLowerCase().split('.');
+  return { sld: parts[0], tld: parts.slice(1).join('.') };
+}
+
+// Get the current DNS host records for a domain.
+async function ncGetDnsHosts(domain) {
+  const { sld, tld } = splitDomain(domain);
+  const r = await ncCall('namecheap.domains.dns.getHosts', { SLD: sld, TLD: tld });
+  if (!r.ok) return r;
+  let hosts = r.data?.DomainDNSGetHostsResult?.host || [];
+  if (!Array.isArray(hosts)) hosts = hosts ? [hosts] : [];
+  const usingOurDns = r.data?.DomainDNSGetHostsResult?.['@_IsUsingOurDNS'] === true || r.data?.DomainDNSGetHostsResult?.['@_IsUsingOurDNS'] === 'true';
+  return {
+    ok: true,
+    usingNamecheapDns: usingOurDns,
+    hosts: hosts.map((h) => ({
+      hostId: h['@_HostId'],
+      name: h['@_Name'],
+      type: h['@_Type'],
+      address: h['@_Address'],
+      mxPref: h['@_MXPref'],
+      ttl: h['@_TTL'],
+    })),
+  };
+}
+
+// Replace ALL host records for a domain (Namecheap's setHosts overwrites the full set).
+// hosts = [{ name, type, address, mxPref, ttl }]
+async function ncSetDnsHosts(domain, hosts) {
+  const { sld, tld } = splitDomain(domain);
+  const params = { SLD: sld, TLD: tld };
+  hosts.forEach((h, i) => {
+    const n = i + 1;
+    params[`HostName${n}`] = h.name || '@';
+    params[`RecordType${n}`] = h.type;
+    params[`Address${n}`] = h.address;
+    if (h.type === 'MX') params[`MXPref${n}`] = h.mxPref || 10;
+    params[`TTL${n}`] = h.ttl || 1800;
+  });
+  const r = await ncCall('namecheap.domains.dns.setHosts', params);
+  if (!r.ok) return r;
+  const result = r.data?.DomainDNSSetHostsResult;
+  return { ok: true, success: result?.['@_IsSuccess'] === true || result?.['@_IsSuccess'] === 'true' };
+}
+
+// Get nameservers for a domain.
+async function ncGetNameservers(domain) {
+  const { sld, tld } = splitDomain(domain);
+  const r = await ncCall('namecheap.domains.dns.getList', { SLD: sld, TLD: tld });
+  if (!r.ok) return r;
+  const result = r.data?.DomainDNSGetListResult;
+  let ns = result?.Nameserver || [];
+  if (!Array.isArray(ns)) ns = ns ? [ns] : [];
+  return {
+    ok: true,
+    usingNamecheapDns: result?.['@_IsUsingOurDNS'] === true || result?.['@_IsUsingOurDNS'] === 'true',
+    nameservers: ns.map((n) => (typeof n === 'string' ? n : n['#text'] || n)),
+  };
+}
+
+// Set custom nameservers for a domain.
+async function ncSetNameservers(domain, nameservers) {
+  const { sld, tld } = splitDomain(domain);
+  const r = await ncCall('namecheap.domains.dns.setCustom', { SLD: sld, TLD: tld, Nameservers: nameservers.join(',') });
+  if (!r.ok) return r;
+  return { ok: true, success: true };
+}
+
+// Reset a domain to Namecheap's DEFAULT (BasicDNS) nameservers.
+async function ncSetDefaultNameservers(domain) {
+  const { sld, tld } = splitDomain(domain);
+  const r = await ncCall('namecheap.domains.dns.setDefault', { SLD: sld, TLD: tld });
+  if (!r.ok) return r;
+  return { ok: true, success: true };
 }
 
 async function ncListDomains(page = 1, pageSize = 50) {

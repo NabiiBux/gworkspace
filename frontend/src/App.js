@@ -328,7 +328,18 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
 // ==================== DASHBOARD ====================
 const Dashboard = () => {
   const { user, logout } = useAuth();
-  const [activeSection, setActiveSection] = useState('overview');
+  const initialAdminSection = (typeof window !== 'undefined' && window.location.hash)
+    ? window.location.hash.replace('#', '') : 'overview';
+  const [activeSection, setActiveSectionState] = useState(initialAdminSection || 'overview');
+  const setActiveSection = (s) => {
+    setActiveSectionState(s);
+    if (typeof window !== 'undefined') window.location.hash = s;
+  };
+  useEffect(() => {
+    const onHash = () => setActiveSectionState(window.location.hash.replace('#', '') || 'overview');
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
   const [stats, setStats] = useState(null);
 
   useEffect(() => {
@@ -2635,8 +2646,27 @@ const MUTE = '#6b7280';
 
 const CustomerPortal = () => {
   const { user, logout } = useAuth();
-  const [section, setSection] = useState('overview');
+  // Restore the section from the URL hash so a refresh keeps you on the same page.
+  const initialSection = (typeof window !== 'undefined' && window.location.hash)
+    ? window.location.hash.replace('#', '') : 'overview';
+  const [section, setSectionState] = useState(initialSection || 'overview');
   const [payBanner, setPayBanner] = useState('');
+
+  // Wrap setSection so changing pages also updates the URL hash.
+  const setSection = (s) => {
+    setSectionState(s);
+    if (typeof window !== 'undefined') window.location.hash = s;
+  };
+
+  // Keep section in sync if the user uses browser back/forward.
+  useEffect(() => {
+    const onHash = () => {
+      const s = window.location.hash.replace('#', '') || 'overview';
+      setSectionState(s);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
 
   // GLOBAL payment-return handler: runs no matter which page the customer lands on
   // after checkout (they return to "/?payment=success&pid=..." which loads Overview).
@@ -2994,6 +3024,7 @@ const CustomerDomains = () => {
   // My domains
   const [myDomains, setMyDomains] = useState([]);
   const [renewBusy, setRenewBusy] = useState('');
+  const [manageDomain, setManageDomain] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -3160,7 +3191,11 @@ const CustomerDomains = () => {
                   <td>{d.expiresAt ? new Date(d.expiresAt).toLocaleDateString() : '—'}</td>
                   <td style={{ textAlign: 'right' }}>
                     {d.status === 'registered' && (
-                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                        <button onClick={() => setManageDomain(d.domainName)}
+                          style={{ background: '#fff', color: INK, border: '1px solid #d8dbe6', borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+                          ⚙️ Manage
+                        </button>
                         <button onClick={() => renewDomain(d, 'stripe')} disabled={renewBusy === d.id}
                           style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
                           {renewBusy === d.id ? '…' : 'Renew (card)'}
@@ -3178,11 +3213,148 @@ const CustomerDomains = () => {
           </table>
         )}
       </div>
+
+      {manageDomain && <DomainManagePanel domain={manageDomain} onClose={() => setManageDomain(null)} />}
     </div>
   );
 };
 
+// ==================== DOMAIN DNS MANAGEMENT PANEL ====================
+const DomainManagePanel = ({ domain, onClose }) => {
+  const [tab, setTab] = useState('dns'); // 'dns' | 'nameservers'
+  const [hosts, setHosts] = useState([]);
+  const [usingNcDns, setUsingNcDns] = useState(true);
+  const [ns, setNs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [customNs, setCustomNs] = useState(['', '']);
 
+  const load = async () => {
+    setLoading(true); setMsg('');
+    try {
+      const [dnsRes, nsRes] = await Promise.all([
+        axios.get(`${API_URL}/customer/domains/${domain}/dns`).catch(e => ({ error: e })),
+        axios.get(`${API_URL}/customer/domains/${domain}/nameservers`).catch(e => ({ error: e })),
+      ]);
+      if (dnsRes.data) { setHosts(dnsRes.data.hosts || []); setUsingNcDns(dnsRes.data.usingNamecheapDns); }
+      if (nsRes.data) { setNs(nsRes.data.nameservers || []); }
+    } catch (e) { setMsg('Could not load DNS settings.'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, [domain]);
+
+  const addRecord = () => setHosts([...hosts, { name: '@', type: 'A', address: '', ttl: 1800, mxPref: 10 }]);
+  const updateRecord = (i, field, val) => { const h = [...hosts]; h[i] = { ...h[i], [field]: val }; setHosts(h); };
+  const removeRecord = (i) => setHosts(hosts.filter((_, idx) => idx !== i));
+
+  const saveDns = async () => {
+    setSaving(true); setMsg('');
+    try {
+      await axios.post(`${API_URL}/customer/domains/${domain}/dns`, { hosts });
+      setMsg('✓ DNS records saved. Changes can take a few minutes to propagate.');
+      load();
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not save DNS records.'); }
+    finally { setSaving(false); }
+  };
+
+  const saveCustomNs = async () => {
+    const valid = customNs.filter(n => n.trim());
+    if (valid.length < 2) { setMsg('Enter at least 2 nameservers.'); return; }
+    setSaving(true); setMsg('');
+    try {
+      await axios.post(`${API_URL}/customer/domains/${domain}/nameservers`, { nameservers: valid });
+      setMsg('✓ Custom nameservers set. This can take time to propagate.');
+      load();
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not set nameservers.'); }
+    finally { setSaving(false); }
+  };
+
+  const useDefaultNs = async () => {
+    if (!window.confirm('Reset to Namecheap default nameservers? This restores default DNS.')) return;
+    setSaving(true); setMsg('');
+    try {
+      await axios.post(`${API_URL}/customer/domains/${domain}/nameservers`, { useDefault: true });
+      setMsg('✓ Reset to Namecheap default nameservers.');
+      load();
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not reset nameservers.'); }
+    finally { setSaving(false); }
+  };
+
+  const inp = { borderRadius: 8, border: '1px solid #d8dbe6', padding: '7px 10px', fontSize: 14 };
+  const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1000, overflowY: 'auto' };
+  const modal = { background: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 760, boxShadow: '0 10px 40px rgba(0,0,0,0.2)' };
+
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={modal} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h2 style={{ margin: 0 }}>Manage {domain}</h2>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', fontSize: 24, cursor: 'pointer', color: MUTE }}>×</button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <button onClick={() => setTab('dns')} style={{ background: tab === 'dns' ? TEAL : '#fff', color: tab === 'dns' ? '#fff' : INK, border: '1px solid ' + (tab === 'dns' ? TEAL : '#d8dbe6'), borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}>DNS Records</button>
+          <button onClick={() => setTab('nameservers')} style={{ background: tab === 'nameservers' ? TEAL : '#fff', color: tab === 'nameservers' ? '#fff' : INK, border: '1px solid ' + (tab === 'nameservers' ? TEAL : '#d8dbe6'), borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}>Nameservers</button>
+        </div>
+
+        {msg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a', fontSize: 14 }}>{msg}</div>}
+
+        {loading ? <p>Loading…</p> : tab === 'dns' ? (
+          <div>
+            {!usingNcDns && (
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: '#92600a' }}>
+                This domain is using custom nameservers, so these records may not apply. Switch to Namecheap default nameservers (Nameservers tab) to manage DNS here.
+              </div>
+            )}
+            <p style={{ color: MUTE, fontSize: 13 }}>Add, edit, or remove DNS records. Common types: A (IP address), CNAME (alias), MX (mail), TXT (verification).</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 2fr 70px 36px', gap: 8, fontSize: 12, fontWeight: 700, color: MUTE, marginBottom: 6 }}>
+              <div>Host</div><div>Type</div><div>Value</div><div>TTL</div><div></div>
+            </div>
+            {hosts.map((h, i) => (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 2fr 70px 36px', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                <input style={inp} value={h.name || ''} onChange={e => updateRecord(i, 'name', e.target.value)} placeholder="@" />
+                <select style={inp} value={h.type} onChange={e => updateRecord(i, 'type', e.target.value)}>
+                  {['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'URL'].map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <input style={inp} value={h.address || ''} onChange={e => updateRecord(i, 'address', e.target.value)} placeholder="value / IP / target" />
+                <input style={inp} value={h.ttl || 1800} onChange={e => updateRecord(i, 'ttl', e.target.value)} />
+                <button onClick={() => removeRecord(i)} style={{ background: '#fef2f2', color: '#b42318', border: 'none', borderRadius: 8, padding: '7px', cursor: 'pointer' }}>×</button>
+              </div>
+            ))}
+            <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+              <button onClick={addRecord} style={{ background: '#fff', color: INK, border: '1px solid #d8dbe6', borderRadius: 8, padding: '8px 16px', cursor: 'pointer' }}>+ Add record</button>
+              <button onClick={saveDns} disabled={saving} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving…' : 'Save DNS records'}</button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <p style={{ color: MUTE, fontSize: 13 }}>Current nameservers:</p>
+            <ul style={{ fontSize: 14 }}>{ns.length ? ns.map((n, i) => <li key={i}><code>{n}</code></li>) : <li>Using Namecheap default</li>}</ul>
+
+            <div style={{ background: '#f6f8f7', borderRadius: 10, padding: 16, marginTop: 16 }}>
+              <h4 style={{ marginTop: 0 }}>Use custom nameservers</h4>
+              {customNs.map((n, i) => (
+                <input key={i} style={{ ...inp, width: '100%', marginBottom: 8 }} value={n} onChange={e => { const c = [...customNs]; c[i] = e.target.value; setCustomNs(c); }} placeholder={`ns${i + 1}.example.com`} />
+              ))}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setCustomNs([...customNs, ''])} style={{ background: '#fff', border: '1px solid #d8dbe6', borderRadius: 8, padding: '7px 14px', cursor: 'pointer' }}>+ Add</button>
+                <button onClick={saveCustomNs} disabled={saving} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 18px', fontWeight: 700, cursor: 'pointer' }}>Set custom nameservers</button>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <button onClick={useDefaultNs} disabled={saving} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '8px 18px', fontWeight: 700, cursor: 'pointer' }}>
+                Reset to Namecheap default nameservers
+              </button>
+              <p style={{ color: MUTE, fontSize: 12, marginTop: 6 }}>If you don't change nameservers, your domain stays on Namecheap's default DNS automatically.</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 const CustomerSubscriptions = () => {
   const [data, setData] = useState(null);
