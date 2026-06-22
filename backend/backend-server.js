@@ -1130,7 +1130,17 @@ app.post('/api/customer/domains/:domain/contacts', authenticateCustomer, async (
     if (!contact || !contact.email || !contact.firstName) return res.status(400).json({ error: 'Contact name and email are required.' });
     const r = await ncSetContacts(domain, contact);
     if (!r.ok) return res.status(502).json({ error: r.error });
-    res.json({ success: true });
+    // Updating the registrant name/email queues Namecheap's verification email automatically.
+    // Send our own notification so the customer knows to check their inbox and click the link.
+    try {
+      const html = emailShell('Verify your domain contact info', `
+        <p>Hi ${contact.firstName || 'there'},</p>
+        <p>You updated the contact details for <strong>${domain}</strong>.</p>
+        <p>ICANN requires you to verify this change. Namecheap has sent a verification email to <strong>${contact.email}</strong> — please open it and click the verification link within 7 days, or the change will be reverted.</p>
+        <p>If you don't see it, check your spam folder, or search for "Verify your contact information".</p>`);
+      await sendEmail(contact.email, `Action required: verify ${domain} contact info`, html);
+    } catch (_) { }
+    res.json({ success: true, message: 'Contact updated. A verification email has been sent — please check the registrant inbox and click the link.' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1201,37 +1211,6 @@ app.post('/api/customer/domains/:domain/nameservers', authenticateCustomer, asyn
   }
 });
 
-// Customer: get contacts for their domain.
-app.get('/api/customer/domains/:domain/contacts', authenticateCustomer, async (req, res) => {
-  try {
-    const domain = req.params.domain.toLowerCase();
-    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
-    const c = await ncGetContacts(domain);
-    if (!c.ok) return res.status(502).json({ error: c.error });
-    res.json(c);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Customer: update contacts for their domain.
-app.post('/api/customer/domains/:domain/contacts', authenticateCustomer, async (req, res) => {
-  try {
-    const domain = req.params.domain.toLowerCase();
-    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
-    const { contact } = req.body;
-    if (!contact || !contact.firstName || !contact.lastName || !contact.email || !contact.address) {
-      return res.status(400).json({ error: 'First name, last name, email, and address are required.' });
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email)) return res.status(400).json({ error: 'Enter a valid email address.' });
-    const r = await ncSetContacts(domain, contact);
-    if (!r.ok) return res.status(502).json({ error: r.error });
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
 // Customer: get verification status for their domain.
 app.get('/api/customer/domains/:domain/verification', authenticateCustomer, async (req, res) => {
   try {
@@ -1249,9 +1228,24 @@ app.post('/api/customer/domains/:domain/resend-verification', authenticateCustom
   try {
     const domain = req.params.domain.toLowerCase();
     if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
+    const me = await Customer.findById(req.customerId);
+    // Try Namecheap's API resend. Some accounts/sandbox don't support it.
     const r = await ncResendVerification(domain);
-    if (!r.ok) return res.status(502).json({ error: r.error });
-    res.json({ success: true, message: 'Verification email resent. Please check the registrant inbox.' });
+    // Look up the registrant email to notify the customer where to look.
+    let regEmail = me?.businessEmail;
+    try { const c = await ncGetContacts(domain); if (c.ok && c.contact?.email) regEmail = c.contact.email; } catch (_) { }
+    // Send our own Resend reminder so the customer knows to check their inbox.
+    try {
+      const html = emailShell('Verify your domain', `
+        <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+        <p>Please verify the registrant email for <strong>${domain}</strong>.</p>
+        <p>Namecheap sends the official verification email to <strong>${regEmail}</strong>. Open it and click the verification link to confirm your contact details. If you can't find it, check your spam folder or search for "Verify your contact information".</p>
+        <p>If the email never arrives, update your contact details from the portal (Domains → Manage → Verification) — saving new details re-triggers the verification email.</p>`);
+      await sendEmail(regEmail, `Verify your domain: ${domain}`, html);
+    } catch (_) { }
+    if (r.ok) return res.json({ success: true, message: 'Verification email re-sent. Please check the registrant inbox and click the link.' });
+    // API resend unsupported — guide the customer to the reliable path.
+    return res.json({ success: true, message: 'We\'ve emailed you verification instructions. Tip: updating your contact details (Verification tab) re-triggers Namecheap\'s verification email automatically.' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1698,7 +1692,18 @@ async function markPaidAndProvision(payment) {
         dOrder.registeredAt = new Date();
         dOrder.registrationResult = JSON.stringify(result).slice(0, 500);
         await dOrder.save();
-        try { await sendPaymentConfirmationEmail(me?.businessEmail, dOrder.domainName, payment.amount); } catch (_) { }
+        // Domain purchase confirmation + ICANN verification reminder
+        try {
+          const isRenew = !!meta.renew;
+          const regEmail = (meta.contact && meta.contact.email) || me?.businessEmail;
+          const html = emailShell(isRenew ? 'Domain renewed' : 'Domain registered', `
+            <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+            <p>Your domain <strong>${dOrder.domainName}</strong> has been ${isRenew ? 'renewed' : 'registered'} successfully${dOrder.period ? ` for ${dOrder.period} year${dOrder.period === 1 ? '' : 's'}` : ''}.</p>
+            ${isRenew ? '' : `<p><strong>Important — verify your email:</strong> ICANN requires you to verify the registrant email (<strong>${regEmail}</strong>) within 15 days. Namecheap has sent a verification email — please open it and click the link, or your domain may be suspended.</p>`}
+            <p>You can manage DNS, nameservers, and contacts anytime from your portal under <strong>Domains → My domains → Manage</strong>.</p>
+            <p><a href="${PORTAL_URL}/#domains" style="color:#0F766E">Open your domains</a></p>`);
+          await sendEmail(regEmail, `${dOrder.domainName} ${isRenew ? 'renewed' : 'registered'} ✓`, html);
+        } catch (_) { }
       }
     } catch (e) {
       console.error('DOMAIN ACTION FAILED for payment', String(payment._id), e.message);
@@ -3524,75 +3529,6 @@ async function ncSetDefaultNameservers(domain) {
   const r = await ncCall('namecheap.domains.dns.setDefault', { SLD: sld, TLD: tld });
   if (!r.ok) return r;
   return { ok: true, success: true };
-}
-
-// ---- CONTACTS / VERIFICATION ----
-// Get the registrant/admin/tech/billing contacts for a domain.
-async function ncGetContacts(domain) {
-  const r = await ncCall('namecheap.domains.getContacts', { DomainName: domain });
-  if (!r.ok) return r;
-  const result = r.data?.DomainContactsResult;
-  const pick = (c) => c ? {
-    firstName: c.FirstName, lastName: c.LastName, organization: c.OrganizationName,
-    address: c.Address1, address2: c.Address2, city: c.City, state: c.StateProvince,
-    zip: c.PostalCode, country: c.Country, phone: c.Phone, email: c.EmailAddress,
-  } : null;
-  return {
-    ok: true,
-    registrant: pick(result?.Registrant),
-    admin: pick(result?.Admin),
-    tech: pick(result?.Tech),
-    auxBilling: pick(result?.AuxBilling),
-  };
-}
-
-// Update the contacts for a domain (applies the same contact to all 4 roles).
-async function ncSetContacts(domain, contact) {
-  const country = ncCountryCode(contact.country);
-  const c = {
-    FirstName: contact.firstName || 'Domain', LastName: contact.lastName || 'Owner',
-    Address1: contact.address || 'N/A', City: contact.city || 'N/A',
-    StateProvince: contact.state || 'N/A', PostalCode: contact.zip || '00000',
-    Country: country, Phone: ncFormatPhone(contact.phone, country), EmailAddress: contact.email,
-  };
-  const roles = ['Registrant', 'Tech', 'Admin', 'AuxBilling'];
-  const params = { DomainName: domain };
-  for (const role of roles) {
-    params[`${role}FirstName`] = c.FirstName; params[`${role}LastName`] = c.LastName;
-    params[`${role}Address1`] = c.Address1; params[`${role}City`] = c.City;
-    params[`${role}StateProvince`] = c.StateProvince; params[`${role}PostalCode`] = c.PostalCode;
-    params[`${role}Country`] = c.Country; params[`${role}Phone`] = c.Phone; params[`${role}EmailAddress`] = c.EmailAddress;
-  }
-  const r = await ncCall('namecheap.domains.setContacts', params);
-  if (!r.ok) return r;
-  return { ok: true, success: true };
-}
-
-// Get the registrant email verification status (ICANN RAA / WHOIS verification).
-async function ncGetVerificationStatus(domain) {
-  const r = await ncCall('namecheap.domains.getRegistrarLock', { DomainName: domain });
-  // Note: Namecheap exposes RAA verification via the email-verification command.
-  const v = await ncCall('namecheap.domains.getList', { SearchTerm: domain });
-  let isExpired = false, emailVerified = null;
-  try {
-    let domains = v.data?.DomainGetListResult?.Domain || [];
-    if (!Array.isArray(domains)) domains = [domains];
-    const d = domains.find((x) => String(x['@_Name']).toLowerCase() === domain.toLowerCase());
-    if (d) {
-      isExpired = d['@_IsExpired'] === true || d['@_IsExpired'] === 'true';
-      // Namecheap returns IsVerified / WhoisGuard etc. on some accounts
-      emailVerified = d['@_IsVerified'] != null ? (d['@_IsVerified'] === true || d['@_IsVerified'] === 'true') : null;
-    }
-  } catch (_) { }
-  return { ok: true, locked: r.ok ? (r.data?.DomainGetRegistrarLockResult?.['@_RegistrarLockStatus'] === true || r.data?.DomainGetRegistrarLockResult?.['@_RegistrarLockStatus'] === 'true') : null, emailVerified, isExpired };
-}
-
-// Resend the registrant verification email (ICANN RAA).
-async function ncResendVerification(domain) {
-  // Namecheap command for resending the RAA verification email
-  const r = await ncCall('namecheap.domains.resendVerificationEmail', { DomainName: domain });
-  if (!r.ok) return r;
-  return { ok: true, sent: true };
 }
 
 // ---- REGISTRANT CONTACT VERIFICATION (ICANN RAA email verification) ----
