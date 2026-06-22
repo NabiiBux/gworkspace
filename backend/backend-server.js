@@ -2984,11 +2984,50 @@ async function ncGetTldPricing(tld, actionName = 'REGISTER') {
   return { ok: false, error: 'Pricing not found for TLD ' + tld };
 }
 
+// Format a phone into Namecheap's required format: +NNN.NNNNNNNNNN (country code . number).
+function ncFormatPhone(phone, country) {
+  let raw = String(phone || '').trim();
+  if (!raw) return '+1.0000000000';
+  // If already in +NNN.NNN format, keep it.
+  if (/^\+\d{1,3}\.\d{6,14}$/.test(raw)) return raw;
+  // Strip everything except digits and a leading +
+  const hasPlus = raw.startsWith('+');
+  let digits = raw.replace(/[^\d]/g, '');
+  // Determine country calling code
+  const codes = { US: '1', CA: '1', GB: '44', UK: '44', PK: '92', IN: '91', AU: '61', DE: '49', FR: '33', AE: '971' };
+  let cc = '1';
+  if (hasPlus) {
+    // Try to split a leading country code (1-3 digits). Default to 1.
+    // Common: 1 (NANP), 92 (PK), 44 (UK), 91 (IN)...
+    for (const len of [3, 2, 1]) {
+      const maybe = digits.slice(0, len);
+      if (Object.values(codes).includes(maybe)) { cc = maybe; digits = digits.slice(len); break; }
+    }
+  } else {
+    cc = codes[(country || 'US').toUpperCase()] || '1';
+    // If the number itself starts with the country code, drop it to avoid duplication
+    if (digits.startsWith(cc) && digits.length > 10) digits = digits.slice(cc.length);
+  }
+  // Namecheap wants at least ~7 digits in the number part
+  if (digits.length < 7) digits = (digits + '0000000').slice(0, 10);
+  return `+${cc}.${digits}`;
+}
+
+// Normalize a 2-letter country code (Namecheap requires ISO-2 like "US").
+function ncCountryCode(country) {
+  const c = String(country || '').trim();
+  if (/^[A-Za-z]{2}$/.test(c)) return c.toUpperCase();
+  const map = { 'united states': 'US', 'usa': 'US', 'pakistan': 'PK', 'united kingdom': 'GB', 'uk': 'GB', 'india': 'IN', 'canada': 'CA', 'australia': 'AU', 'germany': 'DE', 'france': 'FR' };
+  return map[c.toLowerCase()] || 'US';
+}
+
 async function ncRegisterDomain(domainName, years, contact) {
+  const country = ncCountryCode(contact.country);
   const c = {
-    FirstName: contact.firstName, LastName: contact.lastName, Address1: contact.address,
-    City: contact.city, StateProvince: contact.state, PostalCode: contact.zip,
-    Country: contact.country, Phone: contact.phone, EmailAddress: contact.email,
+    FirstName: contact.firstName || 'Domain', LastName: contact.lastName || 'Owner',
+    Address1: contact.address || 'N/A', City: contact.city || 'N/A',
+    StateProvince: contact.state || 'N/A', PostalCode: contact.zip || '00000',
+    Country: country, Phone: ncFormatPhone(contact.phone, country), EmailAddress: contact.email,
   };
   const roles = ['Registrant', 'Tech', 'Admin', 'AuxBilling'];
   const params = { DomainName: domainName, Years: years || 1 };
