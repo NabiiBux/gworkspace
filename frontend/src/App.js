@@ -2063,6 +2063,23 @@ const AdminPaymentsSection = () => {
   const [wsPreview, setWsPreview] = useState(null);
   const [suspendedList, setSuspendedList] = useState([]);
   const [unsuspendSearch, setUnsuspendSearch] = useState('');
+  const [showBulkUnsuspend, setShowBulkUnsuspend] = useState(false);
+  const [bulkUnsuspendDomains, setBulkUnsuspendDomains] = useState('');
+  const [bulkUnsuspendResult, setBulkUnsuspendResult] = useState(null);
+  const [bulkUnsuspendBusy, setBulkUnsuspendBusy] = useState(false);
+
+  const runBulkUnsuspend = async () => {
+    const domains = bulkUnsuspendDomains.split(/[\s,]+/).map(d => d.trim().toLowerCase()).filter(Boolean);
+    if (!domains.length) { setSubBillingMsg('Paste at least one domain.'); return; }
+    if (!window.confirm(`Reactivate ALL suspended subscriptions for ${domains.length} domain(s)?`)) return;
+    setBulkUnsuspendBusy(true); setBulkUnsuspendResult(null); setSubBillingMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/admin/billing/unsuspend-bulk`, { domains });
+      setBulkUnsuspendResult(r.data);
+      loadSuspended();
+    } catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Bulk unsuspend failed.'); }
+    finally { setBulkUnsuspendBusy(false); }
+  };
   const [selectedDomain, setSelectedDomain] = useState(null);
   const [selectedSubs, setSelectedSubs] = useState([]);
 
@@ -2124,7 +2141,7 @@ const AdminPaymentsSection = () => {
   const bulkWhitelist = async () => {
     const domains = bulkDomains.split(/[\s,\n]+/).map(d => d.trim().toLowerCase()).filter(Boolean);
     if (!domains.length) { setSubBillingMsg('Paste at least one domain.'); return; }
-    if (!window.confirm(`Whitelist ${domains.length} domain(s)? They'll be protected from suspension and given a fresh 29 days.`)) return;
+    if (!window.confirm(`Whitelist ${domains.length} domain(s)? They'll be permanently protected from the billing cycle (never auto-suspended) until you remove them.`)) return;
     setSubBillingMsg('Whitelisting…');
     try { const r = await axios.post(`${API_URL}/admin/billing/whitelist-bulk`, { domains }); setSubBillingMsg(`✓ Whitelisted ${r.data.updated} of ${r.data.requested} requested (${r.data.totalWhitelisted} total protected).`); setBulkDomains(''); loadSubBilling(); }
     catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Bulk whitelist failed.'); }
@@ -2164,7 +2181,7 @@ const AdminPaymentsSection = () => {
     catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Recalculate failed.'); }
   };
   const toggleWhitelist = async (id, whitelisted) => {
-    if (whitelisted && !window.confirm('Whitelist this account? It will be treated as renewed (fresh 30 days from today), reactivated if suspended, and never auto-suspended while whitelisted.')) return;
+    if (whitelisted && !window.confirm('Whitelist this account? It will be permanently protected from the billing cycle (never auto-suspended), reactivated if currently suspended, until an admin removes it.')) return;
     try { await axios.post(`${API_URL}/admin/billing/whitelist`, { id, whitelisted }); loadSubBilling(); if (whitelisted) setTab('renewed'); }
     catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Whitelist update failed.'); }
   };
@@ -2249,7 +2266,7 @@ const AdminPaymentsSection = () => {
         <button className={`btn ${tab === 'transactions' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('transactions')}>Transactions</button>
         <button className={`btn ${tab === 'domains' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('domains'); loadDomainOrders(); }}>Domain Orders</button>
         <button className={`btn ${tab === 'subbilling' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('subbilling'); loadSubBilling(); }}>Subscription Billing</button>
-        <button className={`btn ${tab === 'renewed' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('renewed'); loadSubBilling(); }}>Renewed Accounts</button>
+        <button className={`btn ${tab === 'renewed' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('renewed'); loadSubBilling(); }}>Whitelist</button>
         <button className={`btn ${tab === 'suspended' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('suspended'); loadSuspended(); }}>Suspended Accounts</button>
         <button className={`btn ${tab === 'unsuspend' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('unsuspend'); loadSuspended(); }}>Unsuspend</button>
       </div>
@@ -2473,14 +2490,14 @@ const AdminPaymentsSection = () => {
             <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 16, marginBottom: 14 }}>
               <h4 style={{ margin: '0 0 8px' }}>Bulk whitelist paid customers</h4>
               <p style={{ color: '#166534', fontSize: 13, margin: '0 0 10px' }}>
-                Paste the domains of customers who have PAID (one per line, or comma-separated). They'll be protected from suspension and given a fresh 30 days. Do this BEFORE running the check.
+                Paste the domains to whitelist (one per line, or comma-separated). They'll be permanently protected from the billing cycle — never auto-suspended until you remove them.
               </p>
               <textarea value={bulkDomains} onChange={e => setBulkDomains(e.target.value)} placeholder={"customer1.com\ncustomer2.com\ncustomer3.com"} style={{ width: '100%', minHeight: 120, borderRadius: 8, border: '1px solid #bbf7d0', padding: '10px 12px', fontSize: 14, fontFamily: 'monospace', marginBottom: 10 }} />
               <button className="btn btn-primary" onClick={bulkWhitelist}>Whitelist these domains</button>
             </div>
           )}
           <p style={{ color: '#6b7280', fontSize: 14 }}>
-            Billing cycles are anchored to <strong>January 1, 2026</strong>, counted in 30-day periods (warn day 25, suspend day 29). Paid customers' cycles count from their last payment instead. The daily background check runs automatically at midnight. Whitelisted (renewed) customers are skipped.
+            Billing cycles are anchored to <strong>January 1, 2026</strong>, counted in 30-day periods (warn day 25, suspend day 29). Paid customers' cycles count from their last payment instead. The daily background check runs automatically at midnight. Whitelisted accounts are permanently skipped (never suspended).
           </p>
           {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
 
@@ -2528,21 +2545,21 @@ const AdminPaymentsSection = () => {
 
       {tab === 'renewed' && (
         <>
-          <h3 style={{ marginTop: 0 }}>✓ Renewed Accounts (whitelisted)</h3>
-          <p style={{ color: '#6b7280', fontSize: 14 }}>These customers are protected from suspension — treated as paid/renewed. Remove to put them back on the normal billing cycle.</p>
+          <h3 style={{ marginTop: 0 }}>✓ Whitelist</h3>
+          <p style={{ color: '#6b7280', fontSize: 14 }}>Whitelisted accounts are <strong>permanently protected</strong> from the billing cycle — they are never auto-suspended, with no time limit. Only an admin can remove an account from the whitelist.</p>
           {(() => {
             const renewed = subBilling.filter(r => r.whitelisted);
-            return renewed.length === 0 ? <p>No renewed accounts yet. Whitelist an account to add it here.</p> : (
+            return renewed.length === 0 ? <p>No whitelisted accounts yet. Whitelist an account to add it here.</p> : (
               <table className="data-table">
-                <thead><tr><th>Domain</th><th>SKU</th><th>Acct</th><th>Renewed until</th><th></th></tr></thead>
+                <thead><tr><th>Domain</th><th>SKU</th><th>Acct</th><th>Whitelisted on</th><th></th></tr></thead>
                 <tbody>
                   {renewed.map(r => (
                     <tr key={r._id} style={{ background: '#f0fdf4' }}>
                       <td>{r.domain}</td>
                       <td>{r.skuId}</td>
                       <td>{(r.account || 'pk').toUpperCase()}</td>
-                      <td>{r.nextBillingDate ? new Date(r.nextBillingDate).toLocaleDateString() : '—'}</td>
-                      <td><button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => toggleWhitelist(r._id, false)}>Remove</button></td>
+                      <td>{r.whitelistedAt ? new Date(r.whitelistedAt).toLocaleDateString() : '—'}</td>
+                      <td><button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => toggleWhitelist(r._id, false)}>Remove from whitelist</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -2585,7 +2602,53 @@ const AdminPaymentsSection = () => {
           <h3 style={{ marginTop: 0 }}>Unsuspend a paid customer</h3>
           <p style={{ color: '#6b7280', fontSize: 14 }}>Search and select a suspended domain, then reactivate all of their subscriptions or pick specific ones.</p>
           {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
-          <button className="btn btn-secondary" style={{ marginBottom: 12 }} onClick={loadSuspended}>Refresh list</button>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <button className="btn btn-secondary" onClick={loadSuspended}>Refresh list</button>
+            <button className="btn btn-secondary" style={{ color: '#166534', borderColor: '#166534' }} onClick={() => setShowBulkUnsuspend(!showBulkUnsuspend)}>Bulk unsuspend</button>
+          </div>
+
+          {showBulkUnsuspend && (
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+              <h4 style={{ margin: '0 0 8px' }}>Bulk unsuspend by domain</h4>
+              <p style={{ color: '#166534', fontSize: 13, margin: '0 0 10px' }}>
+                Paste domains (one per line or comma-separated). This reactivates ALL suspended subscriptions for each. Any that fail are listed so you can fix and retry.
+              </p>
+              <textarea value={bulkUnsuspendDomains} onChange={e => setBulkUnsuspendDomains(e.target.value)} placeholder={"customer1.com\ncustomer2.com"} style={{ width: '100%', minHeight: 110, borderRadius: 8, border: '1px solid #bbf7d0', padding: '10px 12px', fontSize: 14, fontFamily: 'monospace', marginBottom: 10 }} />
+              <button className="btn btn-primary" onClick={runBulkUnsuspend} disabled={bulkUnsuspendBusy}>{bulkUnsuspendBusy ? 'Reactivating…' : 'Reactivate all'}</button>
+
+              {bulkUnsuspendResult && bulkUnsuspendResult.summary && (
+                <div style={{ marginTop: 14 }}>
+                  {bulkUnsuspendResult.summary.reactivated.length > 0 && (
+                    <div style={{ fontWeight: 600, color: '#166534', marginBottom: 6 }}>
+                      ✓ Fully reactivated {bulkUnsuspendResult.summary.reactivated.length} domain(s): {bulkUnsuspendResult.summary.reactivated.map(d => `${d.domain} (${d.count})`).join(', ')}
+                    </div>
+                  )}
+                  {bulkUnsuspendResult.summary.notFound.length > 0 && (
+                    <div style={{ color: '#6b7280', fontSize: 13, marginBottom: 6 }}>
+                      No suspended subscriptions found for: {bulkUnsuspendResult.summary.notFound.join(', ')}
+                    </div>
+                  )}
+                  {(bulkUnsuspendResult.summary.partial.length > 0 || bulkUnsuspendResult.summary.failed.length > 0) && (
+                    <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: 12, marginTop: 8 }}>
+                      <strong style={{ color: '#b42318' }}>⚠️ These domains had failures — fix and retry:</strong>
+                      <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13, color: '#b42318' }}>
+                        {bulkUnsuspendResult.summary.partial.map((f, i) => (
+                          <li key={'p' + i}><strong>{f.domain}</strong> — {f.reactivated} ok, {f.failures.length} failed ({f.failures.map(x => x.error).join('; ')})</li>
+                        ))}
+                        {bulkUnsuspendResult.summary.failed.map((f, i) => (
+                          <li key={'f' + i}><strong>{f.domain}</strong> — all failed ({f.failures.map(x => x.error).join('; ')})</li>
+                        ))}
+                      </ul>
+                      <button className="btn btn-secondary" style={{ marginTop: 10, fontSize: 12 }}
+                        onClick={() => setBulkUnsuspendDomains([...bulkUnsuspendResult.summary.partial, ...bulkUnsuspendResult.summary.failed].map(f => f.domain).join('\n'))}>
+                        Load failed domains into box to retry
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <input
             value={unsuspendSearch}

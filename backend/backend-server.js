@@ -2403,6 +2403,123 @@ app.post('/api/admin/billing/unsuspend', authenticateCustomer, requireAdmin, asy
   }
 });
 
+// Admin: BULK unsuspend — paste a list of domains, reactivate ALL suspended subs for each.
+// Reports which domains fully succeeded and which had failures (so admin can fix + retry).
+app.post('/api/admin/billing/unsuspend-bulk', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    let { domains } = req.body;
+    if (typeof domains === 'string') domains = domains.split(/[\s,\n]+/);
+    domains = (domains || []).map((d) => String(d).toLowerCase().trim()).filter(Boolean);
+    if (!domains.length) return res.status(400).json({ error: 'Provide a list of domains.' });
+
+    const now = new Date();
+    const next = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const summary = { reactivated: [], partial: [], failed: [], notFound: [] };
+
+    for (const dom of domains) {
+      // Find this domain's suspended subs from Google (both accounts)
+      let items = [];
+      for (const account of ['pk', 'usa']) {
+        let auth;
+        try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
+        const reseller = google.reseller({ version: 'v1', auth });
+        try {
+          const resp = await reseller.subscriptions.list({ customerId: dom });
+          for (const s of (resp.data.subscriptions || [])) {
+            if (s.status === 'SUSPENDED') items.push({ account, skuId: String(s.skuId), subscriptionId: s.subscriptionId });
+          }
+        } catch (_) { }
+      }
+      if (!items.length) { summary.notFound.push(dom); continue; }
+
+      let okCount = 0; const failures = [];
+      for (const it of items) {
+        try {
+          await setSubscriptionState(it.account, dom, it.skuId, 'activate', it.subscriptionId);
+          await SubBilling.updateOne(
+            { domain: dom, skuId: it.skuId },
+            { $set: { billingStatus: 'active', suspendedAt: null, lastPaymentDate: now, nextBillingDate: next, account: it.account, updatedAt: now } },
+            { upsert: true }
+          );
+          okCount++;
+        } catch (e) {
+          const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
+          failures.push({ skuId: it.skuId, error: detail });
+        }
+      }
+      if (failures.length === 0) summary.reactivated.push({ domain: dom, count: okCount });
+      else if (okCount > 0) summary.partial.push({ domain: dom, reactivated: okCount, failures });
+      else summary.failed.push({ domain: dom, failures });
+    }
+    res.json({ success: true, summary });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: BULK unsuspend — paste a list of domains, reactivate ALL their suspended subscriptions.
+// Returns per-domain results so you can see which succeeded and which failed (to fix + retry).
+app.post('/api/admin/billing/unsuspend-bulk', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const domains = (req.body.domains || []).map((d) => String(d).toLowerCase().trim()).filter(Boolean);
+    if (!domains.length) return res.status(400).json({ error: 'Provide a list of domains.' });
+    const now = new Date();
+    const next = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const results = [];   // { domain, reactivated, failed, errors:[] }
+    for (const dom of domains) {
+      const domResult = { domain: dom, reactivated: 0, failed: 0, errors: [], found: 0 };
+      // Find this domain's suspended subs across both accounts
+      const items = [];
+      for (const account of ['pk', 'usa']) {
+        let auth;
+        try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
+        const reseller = google.reseller({ version: 'v1', auth });
+        try {
+          const resp = await reseller.subscriptions.list({ customerId: dom });
+          for (const s of (resp.data.subscriptions || [])) {
+            if (s.status === 'SUSPENDED') items.push({ account, skuId: String(s.skuId), subscriptionId: s.subscriptionId });
+          }
+        } catch (_) { }
+      }
+      domResult.found = items.length;
+      if (!items.length) { domResult.errors.push('No suspended subscriptions found (domain may not exist in your reseller account or is already active).'); }
+      for (const it of items) {
+        try {
+          await setSubscriptionState(it.account, dom, it.skuId, 'activate', it.subscriptionId);
+          await SubBilling.updateOne(
+            { domain: dom, skuId: it.skuId },
+            { $set: { billingStatus: 'active', suspendedAt: null, lastPaymentDate: now, nextBillingDate: next, account: it.account, updatedAt: now } },
+            { upsert: true }
+          );
+          domResult.reactivated++;
+          console.log('BULK UNSUSPEND OK:', dom, it.skuId, it.account);
+        } catch (e) {
+          const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
+          domResult.failed++;
+          domResult.errors.push(`${it.skuId}: ${detail}`);
+          console.error('BULK UNSUSPEND FAILED:', dom, it.skuId, '→', detail);
+        }
+      }
+      results.push(domResult);
+    }
+
+    // Summary: which domains fully succeeded vs had any failure
+    const succeeded = results.filter((r) => r.reactivated > 0 && r.failed === 0).map((r) => r.domain);
+    const failedDomains = results.filter((r) => r.failed > 0 || (r.found === 0)).map((r) => ({ domain: r.domain, reason: r.errors.join('; ') }));
+    res.json({
+      success: true,
+      totalDomains: domains.length,
+      totalReactivated: results.reduce((a, r) => a + r.reactivated, 0),
+      succeededDomains: succeeded,
+      failedDomains,        // <-- the domains you can fix and retry
+      details: results,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Admin: run the workspace-anchored check. ?dryRun=1 to PREVIEW without suspending.
 app.post('/api/admin/billing/run-workspace-anchored', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
@@ -2415,16 +2532,16 @@ app.post('/api/admin/billing/run-workspace-anchored', authenticateCustomer, requ
 });
 // ===== END WORKSPACE-ANCHORED BILLING =====
 
-// Admin: bulk whitelist by a list of domains (protect paying customers before a suspension run)
+// Admin: bulk whitelist by a list of domains. Whitelisted = PERMANENT protection from the
+// billing cycle — never auto-suspended until an admin removes it. No time limit.
 app.post('/api/admin/billing/whitelist-bulk', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const domains = (req.body.domains || []).map((d) => String(d).toLowerCase().trim()).filter(Boolean);
     if (!domains.length) return res.status(400).json({ error: 'Provide a list of domains.' });
     const now = new Date();
-    const next = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     const result = await SubBilling.updateMany(
       { domain: { $in: domains } },
-      { $set: { whitelisted: true, whitelistedAt: now, lastPaymentDate: now, nextBillingDate: next, billingStatus: 'active', warnedAt: null, suspendedAt: null, updatedAt: now } }
+      { $set: { whitelisted: true, whitelistedAt: now, billingStatus: 'active', warnedAt: null, suspendedAt: null, nextBillingDate: null, updatedAt: now } }
     );
     const matched = await SubBilling.countDocuments({ domain: { $in: domains }, whitelisted: true });
     res.json({ success: true, requested: domains.length, updated: result.modifiedCount, totalWhitelisted: matched });
@@ -2482,7 +2599,7 @@ app.get('/api/admin/billing/diagnostic', authenticateCustomer, requireAdmin, asy
   }
 });
 
-// Admin: whitelist (= treat as renewed, fresh 30 days from today) or un-whitelist a subscription
+// Admin: whitelist (PERMANENT protection from billing — never auto-suspended) or un-whitelist.
 app.post('/api/admin/billing/whitelist', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const { id, whitelisted } = req.body;
@@ -2490,17 +2607,16 @@ app.post('/api/admin/billing/whitelist', authenticateCustomer, requireAdmin, asy
     if (!r) return res.status(404).json({ error: 'Subscription not found.' });
     const now = new Date();
     if (whitelisted) {
-      // Whitelisting = renew: fresh 30-day cycle from today, reactivate if it was suspended
+      // Whitelist = permanent protection. Reactivate if it was suspended. No billing date.
       if (r.billingStatus === 'suspended') {
         try { await setSubscriptionState(r.account, r.domain, r.skuId, 'activate', r.subscriptionId); } catch (_) { }
       }
       r.whitelisted = true;
       r.whitelistedAt = now;
-      r.lastPaymentDate = now;
-      r.nextBillingDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
       r.billingStatus = 'active';
       r.warnedAt = null;
       r.suspendedAt = null;
+      r.nextBillingDate = null;     // no billing cycle while whitelisted
     } else {
       r.whitelisted = false;
       r.whitelistedAt = null;
