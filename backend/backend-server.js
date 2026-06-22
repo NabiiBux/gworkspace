@@ -1082,6 +1082,60 @@ async function customerOwnsDomain(customerId, domain) {
   return !!o;
 }
 
+// Customer: get registrant contact verification status (ICANN email verification).
+app.get('/api/customer/domains/:domain/verification', authenticateCustomer, async (req, res) => {
+  try {
+    const domain = req.params.domain.toLowerCase();
+    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
+    const status = await ncGetVerificationStatus(domain);
+    if (!status.ok) return res.status(502).json({ error: status.error });
+    res.json(status);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: resend the registrant verification email.
+app.post('/api/customer/domains/:domain/resend-verification', authenticateCustomer, async (req, res) => {
+  try {
+    const domain = req.params.domain.toLowerCase();
+    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
+    const r = await ncResendVerification(domain);
+    if (!r.ok) return res.status(502).json({ error: r.error });
+    res.json({ success: true, sent: r.sent });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: get registrant contact details.
+app.get('/api/customer/domains/:domain/contacts', authenticateCustomer, async (req, res) => {
+  try {
+    const domain = req.params.domain.toLowerCase();
+    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
+    const r = await ncGetContacts(domain);
+    if (!r.ok) return res.status(502).json({ error: r.error });
+    res.json(r);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: update registrant contact details (then Namecheap re-sends verification).
+app.post('/api/customer/domains/:domain/contacts', authenticateCustomer, async (req, res) => {
+  try {
+    const domain = req.params.domain.toLowerCase();
+    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
+    const { contact } = req.body;
+    if (!contact || !contact.email || !contact.firstName) return res.status(400).json({ error: 'Contact name and email are required.' });
+    const r = await ncSetContacts(domain, contact);
+    if (!r.ok) return res.status(502).json({ error: r.error });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Customer: get DNS host records for one of THEIR domains.
 app.get('/api/customer/domains/:domain/dns', authenticateCustomer, async (req, res) => {
   try {
@@ -1142,6 +1196,62 @@ app.post('/api/customer/domains/:domain/nameservers', authenticateCustomer, asyn
     }
     if (!result.ok) return res.status(502).json({ error: result.error });
     res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: get contacts for their domain.
+app.get('/api/customer/domains/:domain/contacts', authenticateCustomer, async (req, res) => {
+  try {
+    const domain = req.params.domain.toLowerCase();
+    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
+    const c = await ncGetContacts(domain);
+    if (!c.ok) return res.status(502).json({ error: c.error });
+    res.json(c);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: update contacts for their domain.
+app.post('/api/customer/domains/:domain/contacts', authenticateCustomer, async (req, res) => {
+  try {
+    const domain = req.params.domain.toLowerCase();
+    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
+    const { contact } = req.body;
+    if (!contact || !contact.firstName || !contact.lastName || !contact.email || !contact.address) {
+      return res.status(400).json({ error: 'First name, last name, email, and address are required.' });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email)) return res.status(400).json({ error: 'Enter a valid email address.' });
+    const r = await ncSetContacts(domain, contact);
+    if (!r.ok) return res.status(502).json({ error: r.error });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: get verification status for their domain.
+app.get('/api/customer/domains/:domain/verification', authenticateCustomer, async (req, res) => {
+  try {
+    const domain = req.params.domain.toLowerCase();
+    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
+    const v = await ncGetVerificationStatus(domain);
+    res.json(v);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: resend the ICANN verification email for their domain.
+app.post('/api/customer/domains/:domain/resend-verification', authenticateCustomer, async (req, res) => {
+  try {
+    const domain = req.params.domain.toLowerCase();
+    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
+    const r = await ncResendVerification(domain);
+    if (!r.ok) return res.status(502).json({ error: r.error });
+    res.json({ success: true, message: 'Verification email resent. Please check the registrant inbox.' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -3298,6 +3408,139 @@ async function ncSetDefaultNameservers(domain) {
   const r = await ncCall('namecheap.domains.dns.setDefault', { SLD: sld, TLD: tld });
   if (!r.ok) return r;
   return { ok: true, success: true };
+}
+
+// ---- CONTACTS / VERIFICATION ----
+// Get the registrant/admin/tech/billing contacts for a domain.
+async function ncGetContacts(domain) {
+  const r = await ncCall('namecheap.domains.getContacts', { DomainName: domain });
+  if (!r.ok) return r;
+  const result = r.data?.DomainContactsResult;
+  const pick = (c) => c ? {
+    firstName: c.FirstName, lastName: c.LastName, organization: c.OrganizationName,
+    address: c.Address1, address2: c.Address2, city: c.City, state: c.StateProvince,
+    zip: c.PostalCode, country: c.Country, phone: c.Phone, email: c.EmailAddress,
+  } : null;
+  return {
+    ok: true,
+    registrant: pick(result?.Registrant),
+    admin: pick(result?.Admin),
+    tech: pick(result?.Tech),
+    auxBilling: pick(result?.AuxBilling),
+  };
+}
+
+// Update the contacts for a domain (applies the same contact to all 4 roles).
+async function ncSetContacts(domain, contact) {
+  const country = ncCountryCode(contact.country);
+  const c = {
+    FirstName: contact.firstName || 'Domain', LastName: contact.lastName || 'Owner',
+    Address1: contact.address || 'N/A', City: contact.city || 'N/A',
+    StateProvince: contact.state || 'N/A', PostalCode: contact.zip || '00000',
+    Country: country, Phone: ncFormatPhone(contact.phone, country), EmailAddress: contact.email,
+  };
+  const roles = ['Registrant', 'Tech', 'Admin', 'AuxBilling'];
+  const params = { DomainName: domain };
+  for (const role of roles) {
+    params[`${role}FirstName`] = c.FirstName; params[`${role}LastName`] = c.LastName;
+    params[`${role}Address1`] = c.Address1; params[`${role}City`] = c.City;
+    params[`${role}StateProvince`] = c.StateProvince; params[`${role}PostalCode`] = c.PostalCode;
+    params[`${role}Country`] = c.Country; params[`${role}Phone`] = c.Phone; params[`${role}EmailAddress`] = c.EmailAddress;
+  }
+  const r = await ncCall('namecheap.domains.setContacts', params);
+  if (!r.ok) return r;
+  return { ok: true, success: true };
+}
+
+// Get the registrant email verification status (ICANN RAA / WHOIS verification).
+async function ncGetVerificationStatus(domain) {
+  const r = await ncCall('namecheap.domains.getRegistrarLock', { DomainName: domain });
+  // Note: Namecheap exposes RAA verification via the email-verification command.
+  const v = await ncCall('namecheap.domains.getList', { SearchTerm: domain });
+  let isExpired = false, emailVerified = null;
+  try {
+    let domains = v.data?.DomainGetListResult?.Domain || [];
+    if (!Array.isArray(domains)) domains = [domains];
+    const d = domains.find((x) => String(x['@_Name']).toLowerCase() === domain.toLowerCase());
+    if (d) {
+      isExpired = d['@_IsExpired'] === true || d['@_IsExpired'] === 'true';
+      // Namecheap returns IsVerified / WhoisGuard etc. on some accounts
+      emailVerified = d['@_IsVerified'] != null ? (d['@_IsVerified'] === true || d['@_IsVerified'] === 'true') : null;
+    }
+  } catch (_) { }
+  return { ok: true, locked: r.ok ? (r.data?.DomainGetRegistrarLockResult?.['@_RegistrarLockStatus'] === true || r.data?.DomainGetRegistrarLockResult?.['@_RegistrarLockStatus'] === 'true') : null, emailVerified, isExpired };
+}
+
+// Resend the registrant verification email (ICANN RAA).
+async function ncResendVerification(domain) {
+  // Namecheap command for resending the RAA verification email
+  const r = await ncCall('namecheap.domains.resendVerificationEmail', { DomainName: domain });
+  if (!r.ok) return r;
+  return { ok: true, sent: true };
+}
+
+// ---- REGISTRANT CONTACT VERIFICATION (ICANN RAA email verification) ----
+// Get the verification status of a domain's registrant email.
+async function ncGetVerificationStatus(domain) {
+  // Namecheap: namecheap.domains.getRegistrantVerificationStatus (DomainName param)
+  const r = await ncCall('namecheap.domains.getRegistrantVerificationStatus', { DomainName: domain });
+  if (!r.ok) return r;
+  // Response: DomainGetRegistrantVerificationStatusResult with @Status and @Verified-ish fields.
+  const result = r.data?.DomainGetRegistrantVerificationStatusResult || r.data;
+  let list = result?.DomainResult || result;
+  if (Array.isArray(list)) list = list[0];
+  const status = (list?.['@_Status'] || result?.['@_Status'] || '').toString();
+  const verified = /verified|true/i.test(status);
+  return { ok: true, status: status || 'Unknown', verified };
+}
+
+// Resend the registrant verification email.
+async function ncResendVerification(domain) {
+  const r = await ncCall('namecheap.domains.resendRegistrantVerificationEmail', { DomainName: domain });
+  if (!r.ok) return r;
+  const result = r.data?.DomainResendRegistrantVerificationEmailResult || r.data;
+  let list = result?.DomainResult || result;
+  if (Array.isArray(list)) list = list[0];
+  const sent = list?.['@_IsSuccess'] === true || list?.['@_IsSuccess'] === 'true' || /true|success/i.test(JSON.stringify(result || ''));
+  return { ok: true, sent };
+}
+
+// Get a domain's registrant contact details (so the customer can verify/update them).
+async function ncGetContacts(domain) {
+  const r = await ncCall('namecheap.domains.getContacts', { DomainName: domain });
+  if (!r.ok) return r;
+  const c = r.data?.DomainContactsResult?.Registrant || {};
+  return {
+    ok: true,
+    contact: {
+      firstName: c.FirstName, lastName: c.LastName,
+      address: c.Address1, city: c.City, state: c.StateProvince,
+      zip: c.PostalCode, country: c.Country, phone: c.Phone, email: c.EmailAddress,
+    },
+  };
+}
+
+// Update a domain's contacts (all 4 roles set to the same info, like registration).
+async function ncSetContacts(domain, contact) {
+  const country = ncCountryCode(contact.country);
+  const c = {
+    FirstName: contact.firstName || 'Domain', LastName: contact.lastName || 'Owner',
+    Address1: contact.address || 'N/A', City: contact.city || 'N/A',
+    StateProvince: contact.state || 'N/A', PostalCode: contact.zip || '00000',
+    Country: country, Phone: ncFormatPhone(contact.phone, country), EmailAddress: contact.email,
+  };
+  const roles = ['Registrant', 'Tech', 'Admin', 'AuxBilling'];
+  const params = { DomainName: domain };
+  for (const role of roles) {
+    params[`${role}FirstName`] = c.FirstName; params[`${role}LastName`] = c.LastName;
+    params[`${role}Address1`] = c.Address1; params[`${role}City`] = c.City;
+    params[`${role}StateProvince`] = c.StateProvince; params[`${role}PostalCode`] = c.PostalCode;
+    params[`${role}Country`] = c.Country; params[`${role}Phone`] = c.Phone; params[`${role}EmailAddress`] = c.EmailAddress;
+  }
+  const r = await ncCall('namecheap.domains.setContacts', params);
+  if (!r.ok) return r;
+  const result = r.data?.DomainSetContactResult;
+  return { ok: true, success: result?.['@_IsSuccess'] === true || result?.['@_IsSuccess'] === 'true' };
 }
 
 async function ncListDomains(page = 1, pageSize = 50) {
