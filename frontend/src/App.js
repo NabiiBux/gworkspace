@@ -2636,6 +2636,48 @@ const MUTE = '#6b7280';
 const CustomerPortal = () => {
   const { user, logout } = useAuth();
   const [section, setSection] = useState('overview');
+  const [payBanner, setPayBanner] = useState('');
+
+  // GLOBAL payment-return handler: runs no matter which page the customer lands on
+  // after checkout (they return to "/?payment=success&pid=..." which loads Overview).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const payStatus = params.get('payment');
+    const pid = params.get('pid');
+    if (payStatus === 'cancelled') {
+      setPayBanner('Payment was cancelled. You can try again anytime.');
+      // Clean the URL
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
+    if (payStatus === 'success' && pid) {
+      setPayBanner('✓ Payment received — confirming and setting up your order…');
+      let attempt = 0;
+      const poll = async () => {
+        try {
+          const r = await axios.get(`${API_URL}/customer/payment-status/${pid}`);
+          if (r.data.paid) {
+            setPayBanner('✓ Payment confirmed — your order is being set up. Thank you!');
+            window.history.replaceState({}, '', window.location.pathname);
+            return;
+          }
+          if (r.data.cancelled) {
+            setPayBanner('This payment was cancelled. You can order again anytime.');
+            window.history.replaceState({}, '', window.location.pathname);
+            return;
+          }
+          attempt++;
+          if (attempt < 30) { setPayBanner('Confirming your payment… (this can take a moment for crypto)'); setTimeout(poll, 8000); }
+          else { setPayBanner('Your payment is still confirming. Your order will activate automatically once confirmed — check back shortly or contact support.'); window.history.replaceState({}, '', window.location.pathname); }
+        } catch (_) {
+          attempt++;
+          if (attempt < 30) setTimeout(poll, 8000);
+          else { setPayBanner('We couldn\'t confirm the payment automatically. If you paid, your order will activate soon — contact support if needed.'); window.history.replaceState({}, '', window.location.pathname); }
+        }
+      };
+      poll();
+    }
+  }, []);
 
   const navItems = [
     { key: 'overview', label: 'Overview', icon: '🏠' },
@@ -2688,6 +2730,12 @@ const CustomerPortal = () => {
 
         {/* Main content */}
         <main style={{ flex: 1, minWidth: 0 }}>
+          {payBanner && (
+            <div style={{ background: payBanner.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: payBanner.startsWith('✓') ? '#166534' : '#92600a', borderRadius: 12, padding: '14px 18px', marginBottom: 18, fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+              <span>{payBanner}</span>
+              <button onClick={() => setPayBanner('')} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 18, color: 'inherit' }}>×</button>
+            </div>
+          )}
           {section === 'overview' && <CustomerOverview onNavigate={setSection} />}
           {section === 'dashboard' && <CustomerSubscriptions />}
           {section === 'order' && <WorkspaceOrderFlow />}
@@ -2820,18 +2868,8 @@ const CustomerPayments = () => {
   };
   useEffect(() => {
     load();
-    // If returning from checkout, verify the payment status (works for both Stripe and Nicky/crypto)
-    const params = new URLSearchParams(window.location.search);
-    const payStatus = params.get('payment');
-    const pid = params.get('pid');
-    if (payStatus === 'cancelled') {
-      setMsg('Payment was cancelled. You can try again anytime.');
-    } else if (payStatus === 'success' && pid) {
-      setMsg('✓ Payment received — confirming with the network…');
-      verifyPayment(pid, 0);
-    } else if (payStatus === 'success') {
-      setMsg('✓ Payment received — thank you! It may take a moment to confirm.');
-    }
+    // Payment-return verification is handled globally in CustomerPortal now,
+    // so it works regardless of which page the customer lands on after checkout.
   }, []);
 
   // Poll the backend, which checks Nicky's real status API. Marks paid only when Nicky says "Finished".
