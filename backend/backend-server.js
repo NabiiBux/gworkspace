@@ -327,6 +327,8 @@ const PaymentSettingsSchema = new mongoose.Schema({
   stripeMode: { type: String, enum: ['test', 'live'], default: 'test' },
   stripePublishableTest: { type: String, default: '' },
   stripePublishableLive: { type: String, default: '' },
+  // Namecheap mode: 'sandbox' = test (no real charges), 'live' = production
+  namecheapMode: { type: String, enum: ['sandbox', 'live'], default: 'sandbox' },
   // Customer-paid processing fee
   feeEnabled: { type: Boolean, default: false },
   feeFixed: { type: Number, default: 0 },        // USD
@@ -1374,11 +1376,17 @@ async function markPaidAndProvision(payment) {
     try {
       const dOrder = await DomainOrder.findById(payment.orderId);
       if (dOrder && dOrder.status === 'pending') {
-        if (payment.isTest) {
-          console.log('TEST PAYMENT — skipping real domain action for', dOrder.domainName);
+        const ncSandbox = await ncResolveSandbox();
+        // In a TEST payment, only register if Namecheap is in SANDBOX (safe, fake funds).
+        // Never run a real (live) Namecheap registration on a test payment.
+        if (payment.isTest && !ncSandbox) {
+          console.log('TEST PAYMENT + Namecheap LIVE — skipping real domain action for', dOrder.domainName);
           dOrder.status = 'test_paid';
           await dOrder.save();
           return;
+        }
+        if (payment.isTest && ncSandbox) {
+          console.log('TEST PAYMENT + Namecheap SANDBOX — registering in sandbox for', dOrder.domainName);
         }
         const me = await Customer.findById(payment.customerId);
         // Read stored meta (contact for register, or renew flag)
@@ -2750,6 +2758,7 @@ app.get('/api/admin/payment-settings', authenticateCustomer, requireAdmin, async
       nickyEnabled: s.nickyEnabled,
       currency: s.currency,
       stripeMode: s.stripeMode || 'test',
+      namecheapMode: s.namecheapMode || 'sandbox',
       stripePublishableTest: s.stripePublishableTest || '',
       stripePublishableLive: s.stripePublishableLive || '',
       feeEnabled: !!s.feeEnabled,
@@ -2760,6 +2769,7 @@ app.get('/api/admin/payment-settings', authenticateCustomer, requireAdmin, async
       stripeLiveSecretConfigured: !!process.env.STRIPE_SECRET_KEY,
       stripeWebhookConfigured: !!process.env.STRIPE_WEBHOOK_SECRET,
       nickyConfigured: !!process.env.NICKY_API_TOKEN,
+      namecheapConfigured: !!(process.env.NAMECHEAP_API_KEY && process.env.NAMECHEAP_API_USER && process.env.NAMECHEAP_CLIENT_IP),
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -2775,6 +2785,7 @@ app.patch('/api/admin/payment-settings', authenticateCustomer, requireAdmin, asy
     if (b.nickyEnabled !== undefined) s.nickyEnabled = !!b.nickyEnabled;
     if (b.currency) s.currency = b.currency;
     if (b.stripeMode && ['test', 'live'].includes(b.stripeMode)) s.stripeMode = b.stripeMode;
+    if (b.namecheapMode && ['sandbox', 'live'].includes(b.namecheapMode)) { s.namecheapMode = b.namecheapMode; _ncSandboxCache = (b.namecheapMode === 'sandbox'); }
     if (b.stripePublishableTest !== undefined) s.stripePublishableTest = b.stripePublishableTest;
     if (b.stripePublishableLive !== undefined) s.stripePublishableLive = b.stripePublishableLive;
     if (b.feeEnabled !== undefined) s.feeEnabled = !!b.feeEnabled;
@@ -2825,8 +2836,20 @@ app.get('/api/admin/payments', authenticateCustomer, requireAdmin, async (req, r
 //      NAMECHEAP_SANDBOX ('true'/'false'), NAMECHEAP_MARKUP_PERCENT
 const ncParser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', parseAttributeValue: true });
 
+// Cached Namecheap sandbox mode (refreshed from DB). Defaults to env var.
+let _ncSandboxCache = null;
+async function ncResolveSandbox() {
+  try {
+    const s = await PaymentSettings.findOne({ singleton: 'main' });
+    if (s && s.namecheapMode) { _ncSandboxCache = (s.namecheapMode === 'sandbox'); return _ncSandboxCache; }
+  } catch (_) { }
+  // Fall back to env var
+  return String(process.env.NAMECHEAP_SANDBOX || 'true').toLowerCase() === 'true';
+}
+
 function ncConfig() {
-  const sandbox = String(process.env.NAMECHEAP_SANDBOX || 'true').toLowerCase() === 'true';
+  // Use cached DB mode if available, else env var.
+  const sandbox = _ncSandboxCache != null ? _ncSandboxCache : (String(process.env.NAMECHEAP_SANDBOX || 'true').toLowerCase() === 'true');
   return {
     sandbox,
     baseUrl: sandbox ? 'https://api.sandbox.namecheap.com/xml.response' : 'https://api.namecheap.com/xml.response',
@@ -2839,6 +2862,7 @@ function ncConfig() {
 }
 
 async function ncCall(command, params = {}) {
+  await ncResolveSandbox(); // refresh sandbox/live mode from admin setting
   const cfg = ncConfig();
   if (!cfg.apiUser || !cfg.apiKey || !cfg.clientIp) {
     return { ok: false, error: 'Namecheap not configured: set NAMECHEAP_API_USER, NAMECHEAP_API_KEY, NAMECHEAP_CLIENT_IP.' };
@@ -4859,6 +4883,8 @@ app.listen(PORT, () => {
   scheduleDailyBilling();
   // Start the Nicky crypto payment poller
   scheduleNickyPolling();
+  // Load Namecheap sandbox/live mode from settings
+  ncResolveSandbox().then((sb) => console.log(`🌐 Namecheap mode: ${sb ? 'SANDBOX (test)' : 'LIVE'}`)).catch(() => { });
 });
 
 module.exports = app;

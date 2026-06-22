@@ -2210,6 +2210,7 @@ const AdminPaymentsSection = () => {
         stripeEnabled: s.stripeEnabled,
         nickyEnabled: s.nickyEnabled,
         stripeMode: s.stripeMode,
+        namecheapMode: s.namecheapMode,
         stripePublishableTest: s.stripePublishableTest,
         stripePublishableLive: s.stripePublishableLive,
         feeEnabled: s.feeEnabled,
@@ -2282,6 +2283,26 @@ const AdminPaymentsSection = () => {
             </div>
             <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
               🔒 Secret keys are stored securely in Railway environment variables, never in the database. Webhook: {s.stripeWebhookConfigured ? 'configured ✓' : 'set STRIPE_WEBHOOK_SECRET'}
+            </div>
+          </div>
+
+          <div style={{ background: '#fff', borderRadius: 14, padding: 20, marginBottom: 18, border: '1px solid #e5e7eb' }}>
+            <h3 style={{ marginTop: 0 }}>🌐 Namecheap (Domains, SSL, Hosting)</h3>
+            <p style={{ color: '#6b7280', fontSize: 14 }}>
+              Controls domain registration. <strong>Sandbox</strong> = test mode (no real charges, registers on Namecheap's test system). <strong>Live</strong> = real domains, real charges. Currently: <strong style={{ color: s.namecheapMode === 'live' ? '#166534' : '#b45309' }}>{(s.namecheapMode || 'sandbox').toUpperCase()}</strong>
+            </p>
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Namecheap environment</label>
+            <div style={{ display: 'flex', gap: 16, margin: '8px 0 12px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="radio" name="ncmode" checked={s.namecheapMode !== 'live'} onChange={() => set('namecheapMode', 'sandbox')} /> Sandbox (test)
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="radio" name="ncmode" checked={s.namecheapMode === 'live'} onChange={() => set('namecheapMode', 'live')} /> Live (real domains)
+              </label>
+            </div>
+            <div style={chip(s.namecheapConfigured)}>API credentials: {s.namecheapConfigured ? 'configured in Railway ✓' : 'set NAMECHEAP_API_KEY, NAMECHEAP_API_USER, NAMECHEAP_CLIENT_IP in Railway'}</div>
+            <div style={{ marginTop: 8, fontSize: 12, color: '#92600a', background: '#fffbeb', padding: '8px 12px', borderRadius: 8 }}>
+              ⚠️ For sandbox testing, sign up at sandbox.namecheap.com and use that account's API key. The whitelisted IP must be your Railway server's outbound IP.
             </div>
           </div>
 
