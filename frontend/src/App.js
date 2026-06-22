@@ -3131,44 +3131,6 @@ const CustomerDomains = () => {
         {regMsg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: regMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: regMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{regMsg}</div>}
       </div>
 
-      {/* Verification panel */}
-      <div style={card}>
-        <h3 style={{ marginTop: 0 }}>Verify a domain you own</h3>
-        <p style={{ color: MUTE, fontSize: 14 }}>To use Google Workspace on your own domain, verify you own it. Choose TXT or CNAME, add the record at your DNS provider, then click Check.</p>
-        <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-          <input value={vDomain} onChange={e => setVDomain(e.target.value)} placeholder="yourbusiness.com"
-            style={{ flex: 1, minWidth: 200, height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px' }} />
-          <select value={vMethod} onChange={e => setVMethod(e.target.value)} style={{ height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 12px' }}>
-            <option value="txt">TXT record</option>
-            <option value="cname">CNAME record</option>
-          </select>
-          <button onClick={checkVerify} disabled={vLoading}
-            style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '0 22px', fontWeight: 700, cursor: 'pointer' }}>
-            {vLoading ? 'Checking…' : 'Check'}
-          </button>
-        </div>
-        {vMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: vMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: vMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{vMsg}</div>}
-        {vData && !vData.verified && (
-          <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 10, padding: 16 }}>
-            <h4 style={{ marginTop: 0 }}>Add this {vData.method.toUpperCase()} record at your DNS provider:</h4>
-            {vData.method === 'cname' ? (
-              <table style={{ width: '100%', fontSize: 14 }}><tbody>
-                <tr><td style={{ color: MUTE, padding: '4px 0' }}>Type</td><td><strong>CNAME</strong></td></tr>
-                <tr><td style={{ color: MUTE }}>Host / Name</td><td><code>{vData.cnameHost}</code></td></tr>
-                <tr><td style={{ color: MUTE }}>Value / Target</td><td><code>{vData.cnameValue}</code></td></tr>
-              </tbody></table>
-            ) : (
-              <table style={{ width: '100%', fontSize: 14 }}><tbody>
-                <tr><td style={{ color: MUTE, padding: '4px 0' }}>Type</td><td><strong>TXT</strong></td></tr>
-                <tr><td style={{ color: MUTE }}>Host / Name</td><td><code>@ (root)</code></td></tr>
-                <tr><td style={{ color: MUTE }}>Value</td><td><code style={{ wordBreak: 'break-all' }}>{vData.txtRecord}</code></td></tr>
-              </tbody></table>
-            )}
-            <p style={{ color: MUTE, fontSize: 13, marginBottom: 0, marginTop: 10 }}>DNS changes can take a few minutes (sometimes up to an hour). Add the record, wait, then click Check again.</p>
-          </div>
-        )}
-      </div>
-
       <div style={{ ...card }}>
         <h3 style={{ marginTop: 0 }}>My domains</h3>
         {myDomains.length === 0 ? (
@@ -3221,7 +3183,7 @@ const CustomerDomains = () => {
 
 // ==================== DOMAIN DNS MANAGEMENT PANEL ====================
 const DomainManagePanel = ({ domain, onClose }) => {
-  const [tab, setTab] = useState('dns'); // 'dns' | 'nameservers'
+  const [tab, setTab] = useState('dns'); // 'dns' | 'nameservers' | 'verification'
   const [hosts, setHosts] = useState([]);
   const [usingNcDns, setUsingNcDns] = useState(true);
   const [ns, setNs] = useState([]);
@@ -3229,6 +3191,42 @@ const DomainManagePanel = ({ domain, onClose }) => {
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
   const [customNs, setCustomNs] = useState(['', '']);
+  // Verification + contacts
+  const [verif, setVerif] = useState(null);
+  const [contact, setContact] = useState(null);
+  const [vLoading, setVLoading] = useState(false);
+
+  const loadVerification = async () => {
+    setVLoading(true); setMsg('');
+    try {
+      const [vRes, cRes] = await Promise.all([
+        axios.get(`${API_URL}/customer/domains/${domain}/verification`).catch(() => null),
+        axios.get(`${API_URL}/customer/domains/${domain}/contacts`).catch(() => null),
+      ]);
+      if (vRes?.data) setVerif(vRes.data);
+      if (cRes?.data?.contact) setContact(cRes.data.contact);
+    } catch (_) { }
+    finally { setVLoading(false); }
+  };
+
+  const resendVerification = async () => {
+    setSaving(true); setMsg('');
+    try {
+      await axios.post(`${API_URL}/customer/domains/${domain}/resend-verification`);
+      setMsg('✓ Verification email re-sent. Check the registrant inbox and click the link.');
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not resend verification.'); }
+    finally { setSaving(false); }
+  };
+
+  const saveContacts = async () => {
+    setSaving(true); setMsg('');
+    try {
+      await axios.post(`${API_URL}/customer/domains/${domain}/contacts`, { contact });
+      setMsg('✓ Contact details updated. Namecheap may send a new verification email.');
+      loadVerification();
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not update contacts.'); }
+    finally { setSaving(false); }
+  };
 
   const load = async () => {
     setLoading(true); setMsg('');
@@ -3296,6 +3294,7 @@ const DomainManagePanel = ({ domain, onClose }) => {
         <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
           <button onClick={() => setTab('dns')} style={{ background: tab === 'dns' ? TEAL : '#fff', color: tab === 'dns' ? '#fff' : INK, border: '1px solid ' + (tab === 'dns' ? TEAL : '#d8dbe6'), borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}>DNS Records</button>
           <button onClick={() => setTab('nameservers')} style={{ background: tab === 'nameservers' ? TEAL : '#fff', color: tab === 'nameservers' ? '#fff' : INK, border: '1px solid ' + (tab === 'nameservers' ? TEAL : '#d8dbe6'), borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}>Nameservers</button>
+          <button onClick={() => { setTab('verification'); loadVerification(); }} style={{ background: tab === 'verification' ? TEAL : '#fff', color: tab === 'verification' ? '#fff' : INK, border: '1px solid ' + (tab === 'verification' ? TEAL : '#d8dbe6'), borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}>Verification</button>
         </div>
 
         {msg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a', fontSize: 14 }}>{msg}</div>}
@@ -3327,7 +3326,7 @@ const DomainManagePanel = ({ domain, onClose }) => {
               <button onClick={saveDns} disabled={saving} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving…' : 'Save DNS records'}</button>
             </div>
           </div>
-        ) : (
+        ) : tab === 'nameservers' ? (
           <div>
             <p style={{ color: MUTE, fontSize: 13 }}>Current nameservers:</p>
             <ul style={{ fontSize: 14 }}>{ns.length ? ns.map((n, i) => <li key={i}><code>{n}</code></li>) : <li>Using Namecheap default</li>}</ul>
@@ -3349,6 +3348,40 @@ const DomainManagePanel = ({ domain, onClose }) => {
               </button>
               <p style={{ color: MUTE, fontSize: 12, marginTop: 6 }}>If you don't change nameservers, your domain stays on Namecheap's default DNS automatically.</p>
             </div>
+          </div>
+        ) : (
+          <div>
+            <h4 style={{ marginTop: 0 }}>Registrant contact & verification</h4>
+            <p style={{ color: MUTE, fontSize: 13 }}>ICANN requires valid, verified registrant contact details. Keep these accurate to avoid your domain being suspended.</p>
+
+            {verif && (
+              <div style={{ background: verif.emailVerified ? '#dcfce7' : '#fffbeb', border: '1px solid ' + (verif.emailVerified ? '#bbf7d0' : '#fde68a'), borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                <strong style={{ color: verif.emailVerified ? '#166534' : '#92600a' }}>
+                  {verif.emailVerified === true ? '✓ Registrant email verified' : verif.emailVerified === false ? '⚠️ Registrant email NOT verified' : 'Verification status unknown'}
+                </strong>
+                {verif.emailVerified === false && (
+                  <div style={{ marginTop: 8 }}>
+                    <button onClick={resendVerification} disabled={saving} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 16px', fontWeight: 600, cursor: 'pointer' }}>
+                      {saving ? '…' : 'Resend verification email'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {contact ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                {[['firstName', 'First name'], ['lastName', 'Last name'], ['email', 'Email'], ['phone', 'Phone'], ['address', 'Address'], ['city', 'City'], ['state', 'State/Province'], ['zip', 'Postal code'], ['country', 'Country (2-letter)']].map(([k, label]) => (
+                  <div key={k}>
+                    <label style={{ fontSize: 12, color: MUTE }}>{label}</label>
+                    <input style={{ ...inp, width: '100%' }} value={contact[k] || ''} onChange={e => setContact({ ...contact, [k]: e.target.value })} />
+                  </div>
+                ))}
+              </div>
+            ) : <p>Loading contact details…</p>}
+            <button onClick={saveContacts} disabled={saving} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', fontWeight: 700, cursor: 'pointer', marginTop: 14 }}>
+              {saving ? 'Saving…' : 'Save contact details'}
+            </button>
           </div>
         )}
       </div>
