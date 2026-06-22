@@ -2953,6 +2953,27 @@ const CustomerDomains = () => {
   const [regBusy, setRegBusy] = useState(false);
   const [regMsg, setRegMsg] = useState('');
 
+  // My domains
+  const [myDomains, setMyDomains] = useState([]);
+  const [renewBusy, setRenewBusy] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try { const r = await axios.get(`${API_URL}/customer/my-domains`); setMyDomains(r.data.domains || []); }
+      catch (_) { }
+    })();
+  }, []);
+
+  const renewDomain = async (d, method) => {
+    setRenewBusy(d.id); setRegMsg('');
+    try {
+      const res = await axios.post(`${API_URL}/customer/domains/renew`, { domainName: d.domainName, period: 1, method });
+      if (res.data.checkoutUrl) window.location.href = res.data.checkoutUrl;
+      else setRegMsg('Could not start renewal checkout.');
+    } catch (e) { setRegMsg(e?.response?.data?.error || 'Could not start renewal.'); }
+    finally { setRenewBusy(''); }
+  };
+
   const buyDomain = async (method) => {
     if (!result?.available) return;
     setRegBusy(true); setRegMsg('');
@@ -3076,6 +3097,47 @@ const CustomerDomains = () => {
             )}
             <p style={{ color: MUTE, fontSize: 13, marginBottom: 0, marginTop: 10 }}>DNS changes can take a few minutes (sometimes up to an hour). Add the record, wait, then click Check again.</p>
           </div>
+        )}
+      </div>
+
+      <div style={{ ...card }}>
+        <h3 style={{ marginTop: 0 }}>My domains</h3>
+        {myDomains.length === 0 ? (
+          <p style={{ color: MUTE }}>You haven't registered any domains yet. Search above to get one.</p>
+        ) : (
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: MUTE }}>
+              <th style={{ padding: '8px 0' }}>Domain</th><th>Status</th><th>Expires</th><th></th>
+            </tr></thead>
+            <tbody>
+              {myDomains.map(d => (
+                <tr key={d.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '10px 0', fontWeight: 600 }}>{d.domainName}</td>
+                  <td>
+                    <span style={{ color: d.status === 'registered' ? '#166534' : d.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>
+                      {d.status === 'registered' ? '✓ Active' : d.status === 'failed' ? 'Failed' : d.status === 'pending' ? 'Processing' : d.status}
+                    </span>
+                    {d.status === 'failed' && d.error && <div style={{ fontSize: 12, color: '#b42318' }}>{d.error}</div>}
+                  </td>
+                  <td>{d.expiresAt ? new Date(d.expiresAt).toLocaleDateString() : '—'}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    {d.status === 'registered' && (
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        <button onClick={() => renewDomain(d, 'stripe')} disabled={renewBusy === d.id}
+                          style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+                          {renewBusy === d.id ? '…' : 'Renew (card)'}
+                        </button>
+                        <button onClick={() => renewDomain(d, 'nicky')} disabled={renewBusy === d.id}
+                          style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+                          🪙
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
     </div>

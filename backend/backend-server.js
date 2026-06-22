@@ -1045,6 +1045,94 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
   }
 });
 
+// Customer: list MY domains (registered + pending + failed) — these are DomainOrder records.
+app.get('/api/customer/my-domains', authenticateCustomer, async (req, res) => {
+  try {
+    const orders = await DomainOrder.find({ customerId: req.customerId }).sort({ createdAt: -1 });
+    const domains = orders.map((o) => ({
+      id: o._id,
+      domainName: o.domainName,
+      status: o.status,            // pending | registered | failed | test_paid
+      period: o.period,
+      price: o.price,
+      registeredAt: o.registeredAt,
+      createdAt: o.createdAt,
+      // expiry = registeredAt + period years (approx, for display)
+      expiresAt: o.registeredAt ? new Date(new Date(o.registeredAt).setFullYear(new Date(o.registeredAt).getFullYear() + (o.period || 1))) : null,
+      error: o.status === 'failed' ? o.registrationResult : null,
+    }));
+    res.json({ domains });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: start a domain RENEWAL (creates an order + checkout, like registration).
+app.post('/api/customer/domains/renew', authenticateCustomer, async (req, res) => {
+  try {
+    const { domainName, period, method } = req.body;
+    const dom = (domainName || '').toLowerCase().trim();
+    if (!dom) return res.status(400).json({ error: 'Domain required.' });
+    const me = await Customer.findById(req.customerId);
+    const tld = tldOf(dom);
+    const pricing = await ncGetTldPricing(tld, 'RENEW');
+    if (!pricing.ok) return res.status(502).json({ error: 'Could not price renewal: ' + pricing.error });
+    const amount = (await ncCustomerPriceForTld(tld, pricing.cost)) * (Number(period) || 1);
+
+    const orderNumber = `DR-${Date.now()}`;
+    const order = await DomainOrder.create({
+      customerId: me._id, orderNumber, domainName: dom, period: Number(period) || 1, price: amount, status: 'pending',
+    });
+    order.registrationResult = JSON.stringify({ renew: true });
+    await order.save();
+
+    const payment = await Payment.create({
+      customerId: me._id, customerEmail: me.businessEmail, domain: dom,
+      orderId: order._id, orderType: 'domain', amount, currency: 'USD',
+      method: method === 'nicky' ? 'nicky' : 'stripe', status: 'pending',
+    });
+
+    const orderDesc = `Renew ${dom} (${order.period} year${order.period === 1 ? '' : 's'})`;
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
+
+    if (payment.method === 'stripe') {
+      let stripe;
+      try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const settingsDoc = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (settingsDoc?.stripeMode || 'test') !== 'live';
+      await payment.save();
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        line_items: [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(amount * 100) }, quantity: 1 }],
+        success_url: successUrl, cancel_url: cancelUrl,
+        client_reference_id: String(payment._id),
+        metadata: { paymentId: String(payment._id), orderId: String(order._id), orderType: 'domain' },
+      });
+      payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
+      return res.json({ checkoutUrl: session.url, paymentId: payment._id });
+    }
+
+    try {
+      const nicky = await createNickyPayment({
+        amount, currency: 'USD', description: orderDesc, orderNumber,
+        reference: String(payment._id), billDescription: orderDesc,
+        customerEmail: me.businessEmail, customerName: me.firstName ? `${me.firstName} ${me.lastName || ''}`.trim() : me.businessEmail,
+        redirectUrl: successUrl, cancelUrl,
+      });
+      payment.checkoutUrl = nicky.url;
+      payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id);
+      payment.providerShortId = nicky.shortId || null;
+      await payment.save();
+      return res.json({ checkoutUrl: nicky.url, paymentId: payment._id });
+    } catch (e) {
+      return res.status(500).json({ error: 'Crypto checkout not available: ' + e.message });
+    }
+  } catch (e) {
+    res.status(500).json({ error: 'Renewal error: ' + e.message });
+  }
+});
+
 // ==================== ADMIN: CUSTOMERS VIEW ====================
 // List all portal customers with their info (admin only)
 app.get('/api/admin/customers', authenticateCustomer, requireAdmin, async (req, res) => {
@@ -3233,6 +3321,30 @@ app.get('/api/customer/nc/hosting', authenticateCustomer, async (req, res) => {
   try {
     const plans = await HostingPlan.find({ active: true }).sort({ sortOrder: 1 });
     res.json({ plans: plans.map((p) => ({ planId: p.planId, name: p.name, description: p.description, price: p.price, billingCycle: p.billingCycle, features: p.features })) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: diagnose domain orders — see each order's status, payment status, and any error.
+app.get('/api/admin/nc/domain-diagnostic', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const orders = await DomainOrder.find().sort({ createdAt: -1 }).limit(50);
+    const out = [];
+    for (const o of orders) {
+      const payment = await Payment.findOne({ orderId: o._id, orderType: 'domain' }).sort({ createdAt: -1 });
+      out.push({
+        domain: o.domainName,
+        orderStatus: o.status,
+        paymentStatus: payment?.status || 'no-payment',
+        paymentMethod: payment?.method,
+        isTest: payment?.isTest,
+        registeredAt: o.registeredAt,
+        result: o.registrationResult ? String(o.registrationResult).slice(0, 200) : null,
+        createdAt: o.createdAt,
+      });
+    }
+    res.json({ orders: out, namecheapMode: (await PaymentSettings.findOne({ singleton: 'main' }))?.namecheapMode || 'sandbox' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
