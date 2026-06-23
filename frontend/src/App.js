@@ -3089,6 +3089,32 @@ const CustomerDomains = () => {
   const [renewBusy, setRenewBusy] = useState('');
   const [manageDomain, setManageDomain] = useState(null);
 
+  // Transfer in
+  const [xferDomain, setXferDomain] = useState('');
+  const [xferEpp, setXferEpp] = useState('');
+  const [xferBusy, setXferBusy] = useState(false);
+  const [xferMsg, setXferMsg] = useState('');
+  const [transfers, setTransfers] = useState([]);
+
+  const loadTransfers = async () => {
+    try { const r = await axios.get(`${API_URL}/customer/domains/transfers`); setTransfers(r.data.transfers || []); }
+    catch (_) { }
+  };
+  useEffect(() => { loadTransfers(); }, []);
+
+  const startTransfer = async (method) => {
+    const dom = xferDomain.toLowerCase().trim();
+    if (!/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) { setXferMsg('Enter a full domain like example.com'); return; }
+    if (!xferEpp.trim()) { setXferMsg('Enter the EPP / Auth code from your current registrar.'); return; }
+    setXferBusy(true); setXferMsg('');
+    try {
+      const res = await axios.post(`${API_URL}/customer/domains/transfer`, { domainName: dom, eppCode: xferEpp.trim(), method });
+      if (res.data.checkoutUrl) window.location.href = res.data.checkoutUrl;
+      else setXferMsg('Could not start transfer checkout.');
+    } catch (e) { setXferMsg(e?.response?.data?.error || 'Could not start transfer.'); }
+    finally { setXferBusy(false); }
+  };
+
   useEffect(() => {
     (async () => {
       try { const r = await axios.get(`${API_URL}/customer/my-domains`); setMyDomains(r.data.domains || []); }
@@ -3240,6 +3266,48 @@ const CustomerDomains = () => {
       </div>
 
       {manageDomain && <DomainManagePanel domain={manageDomain} onClose={() => setManageDomain(null)} />}
+
+      <div style={{ ...card, marginTop: 18 }}>
+        <h3 style={{ marginTop: 0 }}>Transfer a domain in</h3>
+        <p style={{ color: MUTE, fontSize: 14 }}>Move a domain you own at another registrar into your account here. You'll need to <strong>unlock</strong> the domain at your current registrar and get its <strong>EPP / Auth code</strong>. Transfers include 1 year and usually take 5–7 days.</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+          <input value={xferDomain} onChange={e => setXferDomain(e.target.value)} placeholder="yourdomain.com"
+            style={{ height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px' }} />
+          <input value={xferEpp} onChange={e => setXferEpp(e.target.value)} placeholder="EPP / Auth code"
+            style={{ height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px' }} />
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button onClick={() => startTransfer('stripe')} disabled={xferBusy}
+            style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>
+            {xferBusy ? '…' : '💳 Transfer (pay by card)'}
+          </button>
+          <button onClick={() => startTransfer('nicky')} disabled={xferBusy}
+            style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>
+            {xferBusy ? '…' : '🪙 Transfer (crypto)'}
+          </button>
+        </div>
+        {xferMsg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: xferMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: xferMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{xferMsg}</div>}
+
+        {transfers.length > 0 && (
+          <div style={{ marginTop: 18 }}>
+            <h4 style={{ margin: '0 0 8px' }}>Transfer status</h4>
+            <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+              <thead><tr style={{ textAlign: 'left', color: MUTE }}><th style={{ padding: '6px 0' }}>Domain</th><th>Status</th><th>Started</th></tr></thead>
+              <tbody>
+                {transfers.map(t => (
+                  <tr key={t.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '8px 0', fontWeight: 600 }}>{t.domainName}</td>
+                    <td><span style={{ color: t.status === 'completed' ? '#166534' : t.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>
+                      {t.status === 'completed' ? '✓ Completed' : t.status === 'failed' ? 'Failed' : t.status === 'submitted' ? (t.transferStatus || 'In progress') : 'Processing'}
+                    </span>{t.status === 'failed' && t.note && <div style={{ fontSize: 12, color: '#b42318' }}>{t.note}</div>}</td>
+                    <td>{t.submittedAt ? new Date(t.submittedAt).toLocaleDateString() : new Date(t.createdAt).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -3342,6 +3410,16 @@ const DomainManagePanel = ({ domain, onClose }) => {
     finally { setSaving(false); }
   };
 
+  const requestTransferOut = async () => {
+    if (!window.confirm(`Request transfer-out instructions for ${domain}? We'll email you the steps.`)) return;
+    setSaving(true); setMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/customer/domains/${domain}/transfer-out`);
+      setMsg('✓ ' + (r.data.message || 'Transfer-out instructions emailed.'));
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not request transfer-out.'); }
+    finally { setSaving(false); }
+  };
+
   const inp = { borderRadius: 8, border: '1px solid #d8dbe6', padding: '7px 10px', fontSize: 14 };
   const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1000, overflowY: 'auto' };
   const modal = { background: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 760, boxShadow: '0 10px 40px rgba(0,0,0,0.2)' };
@@ -3410,6 +3488,14 @@ const DomainManagePanel = ({ domain, onClose }) => {
                 Reset to Namecheap default nameservers
               </button>
               <p style={{ color: MUTE, fontSize: 12, marginTop: 6 }}>If you don't change nameservers, your domain stays on Namecheap's default DNS automatically.</p>
+            </div>
+
+            <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #eee' }}>
+              <h4 style={{ margin: '0 0 6px' }}>Transfer this domain away</h4>
+              <p style={{ color: MUTE, fontSize: 12, marginTop: 0 }}>Moving to another registrar? We'll email you the steps and send your EPP/auth code on request.</p>
+              <button onClick={requestTransferOut} disabled={saving} style={{ background: '#fff', color: '#b45309', border: '1px solid #f5c97f', borderRadius: 8, padding: '8px 16px', fontWeight: 600, cursor: 'pointer' }}>
+                Request transfer-out instructions
+              </button>
             </div>
           </div>
         ) : (

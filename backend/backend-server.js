@@ -241,6 +241,23 @@ const DomainOrderSchema = new mongoose.Schema({
 });
 const DomainOrder = mongoose.model('DomainOrder', DomainOrderSchema);
 
+// Tracks a domain transfer-in (import to Namecheap). Pay-first like registration.
+const DomainTransferSchema = new mongoose.Schema({
+  customerId: mongoose.Schema.Types.ObjectId,
+  orderNumber: { type: String, unique: true },
+  domainName: String,
+  eppCode: String,
+  price: Number,
+  status: { type: String, enum: ['pending', 'submitted', 'completed', 'failed', 'test_paid'], default: 'pending' },
+  transferId: String,         // Namecheap TransferID once submitted
+  transferStatus: String,     // WAITINGFOREPP | COMPLETED | CANCELED ...
+  submittedAt: Date,
+  completedAt: Date,
+  resultNote: String,
+  createdAt: { type: Date, default: Date.now },
+});
+const DomainTransfer = mongoose.model('DomainTransfer', DomainTransferSchema);
+
 // Namecheap product pricing overrides (admin-set): per TLD/SSL/hosting.
 // kind: 'tld' | 'ssl' | 'hosting'; key: e.g. 'com', 'PositiveSSL', 'stellar'
 const NcPricingSchema = new mongoose.Schema({
@@ -1317,6 +1334,130 @@ app.post('/api/customer/domains/renew', authenticateCustomer, async (req, res) =
   }
 });
 
+// ---- DOMAIN TRANSFER IN (import to Namecheap) — pay-first like registration ----
+app.post('/api/customer/domains/transfer', authenticateCustomer, async (req, res) => {
+  try {
+    const { domainName, eppCode, method } = req.body;
+    const dom = (domainName || '').toLowerCase().trim();
+    if (!dom) return res.status(400).json({ error: 'Domain required.' });
+    if (!eppCode || !String(eppCode).trim()) return res.status(400).json({ error: 'EPP / Auth code is required to transfer a domain.' });
+    const me = await Customer.findById(req.customerId);
+
+    // Price the transfer (Namecheap charges ~1 year). Use TRANSFER pricing.
+    const tld = tldOf(dom);
+    const pricing = await ncGetTldPricing(tld, 'TRANSFER');
+    if (!pricing.ok) return res.status(502).json({ error: 'Could not price this transfer: ' + pricing.error });
+    const amount = await ncCustomerPriceForTld(tld, pricing.cost);
+
+    const orderNumber = `DT-${Date.now()}`;
+    const transfer = await DomainTransfer.create({
+      customerId: me._id, orderNumber, domainName: dom, eppCode: String(eppCode).trim(), price: amount, status: 'pending',
+    });
+
+    const payment = await Payment.create({
+      customerId: me._id, customerEmail: me.businessEmail, domain: dom,
+      orderId: transfer._id, orderType: 'domain_transfer', amount, currency: 'USD',
+      method: method === 'nicky' ? 'nicky' : 'stripe', status: 'pending',
+    });
+
+    const orderDesc = `Transfer ${dom} to Namecheap (incl. 1 year)`;
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
+
+    if (payment.method === 'stripe') {
+      let stripe;
+      try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const settingsDoc = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (settingsDoc?.stripeMode || 'test') !== 'live';
+      await payment.save();
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        line_items: [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(amount * 100) }, quantity: 1 }],
+        success_url: successUrl, cancel_url: cancelUrl,
+        client_reference_id: String(payment._id),
+        metadata: { paymentId: String(payment._id), orderId: String(transfer._id), orderType: 'domain_transfer' },
+      });
+      payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
+      return res.json({ checkoutUrl: session.url, paymentId: payment._id });
+    }
+
+    try {
+      const nicky = await createNickyPayment({
+        amount, currency: 'USD', description: orderDesc, orderNumber,
+        reference: String(payment._id), billDescription: orderDesc,
+        customerEmail: me.businessEmail, customerName: me.firstName ? `${me.firstName} ${me.lastName || ''}`.trim() : me.businessEmail,
+        redirectUrl: successUrl, cancelUrl,
+      });
+      payment.checkoutUrl = nicky.url;
+      payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id);
+      payment.providerShortId = nicky.shortId || null;
+      await payment.save();
+      return res.json({ checkoutUrl: nicky.url, paymentId: payment._id });
+    } catch (e) {
+      return res.status(500).json({ error: 'Crypto checkout not available: ' + e.message });
+    }
+  } catch (e) {
+    res.status(500).json({ error: 'Transfer error: ' + e.message });
+  }
+});
+
+// Customer: list my transfers (status).
+app.get('/api/customer/domains/transfers', authenticateCustomer, async (req, res) => {
+  try {
+    const transfers = await DomainTransfer.find({ customerId: req.customerId }).sort({ createdAt: -1 });
+    // Refresh status from Namecheap for in-progress ones
+    for (const t of transfers) {
+      if (t.transferId && t.status === 'submitted') {
+        const s = await ncTransferStatus(t.transferId);
+        if (s.ok && s.status) {
+          t.transferStatus = s.status;
+          if (/complete/i.test(s.status)) { t.status = 'completed'; t.completedAt = new Date(); }
+          else if (/cancel/i.test(s.status)) { t.status = 'failed'; t.resultNote = s.status; }
+          await t.save();
+        }
+      }
+    }
+    res.json({
+      transfers: transfers.map((t) => ({
+        id: t._id, domainName: t.domainName, status: t.status, transferStatus: t.transferStatus,
+        price: t.price, createdAt: t.createdAt, submittedAt: t.submittedAt, completedAt: t.completedAt, note: t.resultNote,
+      }))
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: transfer OUT guidance — unlock + how to get EPP for moving to another registrar.
+app.post('/api/customer/domains/:domain/transfer-out', authenticateCustomer, async (req, res) => {
+  try {
+    const domain = req.params.domain.toLowerCase();
+    if (!await customerOwnsDomain(req.customerId, domain)) return res.status(403).json({ error: 'You do not manage this domain.' });
+    const me = await Customer.findById(req.customerId);
+    // Email the customer instructions (EPP must be obtained from the Namecheap dashboard/support).
+    try {
+      const html = emailShell('Transfer your domain out', `
+        <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+        <p>You requested to transfer <strong>${domain}</strong> to another registrar. Here's how:</p>
+        <ol>
+          <li>The domain must be unlocked and at least 60 days since registration/last transfer.</li>
+          <li>You need the <strong>EPP / Auth code</strong> for ${domain}. We'll provide this on request — reply to this email or contact support and we'll send it securely.</li>
+          <li>Give the EPP code to your new registrar and start the transfer there.</li>
+        </ol>
+        <p>We're sorry to see the domain go. If there's anything we can help with, just reply.</p>`);
+      await sendEmail(me?.businessEmail, `Transfer ${domain} to another registrar`, html);
+    } catch (_) { }
+    // Also notify admin so they can issue the EPP code.
+    try {
+      const adminEmail = process.env.ADMIN_NOTIFY_EMAIL || process.env.EMAIL_FROM_ADDRESS;
+      if (adminEmail) await sendEmail(adminEmail, `EPP code request: ${domain}`, emailShell('EPP code request', `<p>Customer ${me?.businessEmail} requested the EPP/auth code to transfer <strong>${domain}</strong> out. Please issue it from the Namecheap dashboard.</p>`));
+    } catch (_) { }
+    res.json({ success: true, message: 'We\'ve emailed you transfer-out instructions. We\'ll send your EPP/auth code on request.' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ==================== ADMIN: CUSTOMERS VIEW ====================
 // List all portal customers with their info (admin only)
 app.get('/api/admin/customers', authenticateCustomer, requireAdmin, async (req, res) => {
@@ -1646,6 +1787,47 @@ async function markPaidAndProvision(payment) {
   await payment.save();
 
   // DOMAIN orders: register or renew via Namecheap on payment
+  // DOMAIN TRANSFER orders: submit the transfer to Namecheap on payment.
+  if (payment.orderType === 'domain_transfer') {
+    try {
+      const tOrder = await DomainTransfer.findById(payment.orderId);
+      if (tOrder && tOrder.status === 'pending') {
+        const ncSandbox = await ncResolveSandbox();
+        if (payment.isTest && !ncSandbox) {
+          console.log('TEST PAYMENT + Namecheap LIVE — skipping real transfer for', tOrder.domainName);
+          tOrder.status = 'test_paid';
+          await tOrder.save();
+          return;
+        }
+        const result = await ncCreateTransfer(tOrder.domainName, tOrder.eppCode, 1);
+        if (!result.ok) throw new Error(result.error);
+        tOrder.transferId = result.transferId;
+        tOrder.status = 'submitted';
+        tOrder.submittedAt = new Date();
+        tOrder.transferStatus = 'Submitted';
+        await tOrder.save();
+        console.log('DOMAIN TRANSFER submitted via Namecheap:', tOrder.domainName, 'transferId:', result.transferId);
+        const me = await Customer.findById(payment.customerId);
+        try {
+          const html = emailShell('Domain transfer started', `
+            <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+            <p>Your transfer of <strong>${tOrder.domainName}</strong> into our system has been submitted.</p>
+            <p>Domain transfers usually take <strong>5–7 days</strong>. You may receive an approval email from the current registrar — approving it speeds things up. We'll email you when it completes.</p>
+            <p>Track status anytime under <strong>Domains → Transfers</strong> in your portal.</p>
+            <p><a href="${PORTAL_URL}/#domains" style="color:#0F766E">Open your domains</a></p>`);
+          await sendEmail(me?.businessEmail, `Transfer started: ${tOrder.domainName}`, html);
+        } catch (_) { }
+      }
+    } catch (e) {
+      console.error('DOMAIN TRANSFER FAILED for payment', String(payment._id), e.message);
+      try {
+        const tOrder = await DomainTransfer.findById(payment.orderId);
+        if (tOrder) { tOrder.status = 'failed'; tOrder.resultNote = e.message; await tOrder.save(); }
+      } catch (_) { }
+    }
+    return;
+  }
+
   if (payment.orderType === 'domain') {
     try {
       const dOrder = await DomainOrder.findById(payment.orderId);
@@ -1728,10 +1910,10 @@ async function markPaidAndProvision(payment) {
           return;
         }
 
-        // Set billing cycle: next bill = now + 29 days
+        // Set billing cycle: next renewal anchored to the purchase day-of-month
         const now = new Date();
         order.lastPaymentDate = now;
-        order.nextBillingDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+        order.nextBillingDate = nextMonthlyRenewal(order.createdAt || now, now);
         order.renewalWarnedAt = null;
 
         // First-time provisioning
@@ -1765,14 +1947,13 @@ async function markPaidAndProvision(payment) {
           const planDoc = await Plan.findOne({ planId: order.plan?.id });
           if (domain && planDoc?.skuId) {
             const nowD = new Date();
-            const next = new Date(nowD.getTime() + 30 * 24 * 60 * 60 * 1000);
             const rec = await SubBilling.findOne({ domain, skuId: planDoc.skuId });
             if (rec) {
               if (rec.billingStatus === 'suspended') {
                 try { await setSubscriptionState(rec.account, domain, planDoc.skuId, 'activate'); } catch (_) { }
               }
               rec.lastPaymentDate = nowD;
-              rec.nextBillingDate = next;
+              rec.nextBillingDate = recalcNextBilling(rec, nowD);
               rec.billingStatus = 'active';
               rec.suspendedAt = null;
               rec.warnedAt = null;
@@ -1780,7 +1961,7 @@ async function markPaidAndProvision(payment) {
             } else {
               await SubBilling.create({
                 account: order.account || 'pk', domain, skuId: planDoc.skuId,
-                purchaseDate: nowD, lastPaymentDate: nowD, nextBillingDate: next, billingStatus: 'active',
+                purchaseDate: nowD, lastPaymentDate: nowD, nextBillingDate: nextMonthlyRenewal(nowD, nowD), billingStatus: 'active',
               });
             }
           }
@@ -1857,6 +2038,42 @@ async function runBillingCheck() {
 
 // ===== EXISTING SUBSCRIPTION 29-DAY BILLING (seeded from Google creation date) =====
 
+// Compute the next monthly renewal date anchored to a subscription's purchase day-of-month.
+// e.g. purchased Jan 27 → next renewal is the 27th of the current or upcoming month (whichever
+// is the first 27th strictly after `from`). Handles short months (e.g. day 31 → last day).
+function nextMonthlyRenewal(purchaseDate, from = new Date()) {
+  const anchorDay = new Date(purchaseDate).getDate(); // 1..31
+  // Start from the anchor day in `from`'s month
+  let year = from.getFullYear();
+  let month = from.getMonth();
+  const clampDay = (y, m, d) => {
+    const lastDay = new Date(y, m + 1, 0).getDate(); // last day of month m
+    return Math.min(d, lastDay);
+  };
+  let candidate = new Date(year, month, clampDay(year, month, anchorDay), 0, 0, 0, 0);
+  // If that date is today or in the past, roll to next month
+  while (candidate.getTime() <= from.getTime()) {
+    month += 1;
+    if (month > 11) { month = 0; year += 1; }
+    candidate = new Date(year, month, clampDay(year, month, anchorDay), 0, 0, 0, 0);
+  }
+  return candidate;
+}
+
+// The suspend date is 1 day before the renewal date.
+function suspendDateFor(renewalDate) {
+  return new Date(new Date(renewalDate).getTime() - 24 * 60 * 60 * 1000);
+}
+
+// Recalculate a SubBilling record's next renewal date when reactivating/unsuspending.
+// Anchored to the original purchase day-of-month, advanced to the next future occurrence.
+// If purchaseDate is missing, anchor to today.
+function recalcNextBilling(rec, from = new Date()) {
+  const anchor = rec.purchaseDate ? new Date(rec.purchaseDate) : from;
+  return nextMonthlyRenewal(anchor, from);
+}
+
+
 // Pull all subscriptions from a Google reseller account and seed/update billing records.
 async function syncSubscriptionsForBilling(account) {
   let auth;
@@ -1890,9 +2107,9 @@ async function syncSubscriptionsForBilling(account) {
       ? new Date(Number(s.creationTime))
       : new Date();
 
-    // Due date = purchase + 30 days (cycle). Overdue accounts (past this) suspend on the check.
-    const PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
-    const nextBillingDate = new Date(purchaseDate.getTime() + PERIOD_MS);
+    // Renewal date = next occurrence of the purchase day-of-month (monthly anchor).
+    // Suspension happens 1 day before this date (handled in the billing check).
+    const nextBillingDate = nextMonthlyRenewal(purchaseDate, new Date());
 
     try {
       // Atomic upsert: insert if new, AND refresh the billing date from purchase date each sync.
@@ -1962,26 +2179,31 @@ async function runSubscriptionBillingCheck() {
 
   for (const r of records) {
     results.checked++;
-    const daysLeft = (new Date(r.nextBillingDate).getTime() - now.getTime()) / (24 * 60 * 60 * 1000);
+    // Renewal date is stored in nextBillingDate (anchored to purchase day-of-month).
+    // Suspension happens 1 day BEFORE the renewal date.
+    const renewal = new Date(r.nextBillingDate);
+    const suspendOn = suspendDateFor(renewal);
+    const daysToSuspend = (suspendOn.getTime() - now.getTime()) / (24 * 60 * 60 * 1000);
 
-    // Warn at day 25 of the 30-day cycle = 5 days before due (4 days before the day-29 suspend)
-    if (daysLeft <= 5 && daysLeft > 1 && r.billingStatus === 'active') {
+    // Warn up to 4 days before the suspend date (still active, not yet warned)
+    if (daysToSuspend <= 4 && daysToSuspend > 0 && r.billingStatus === 'active') {
       r.billingStatus = 'warned';
       r.warnedAt = now;
       await r.save();
       results.warned.push(`${r.domain} (${r.skuId})`);
-      try { await sendRenewalWarningEmail(await emailForDomain(r.domain), r.domain, r.nextBillingDate); } catch (_) { }
+      try { await sendRenewalWarningEmail(await emailForDomain(r.domain), r.domain, renewal); } catch (_) { }
     }
 
-    // Suspend on DAY 29 = 1 day before the 30-day due date (daysLeft <= 1)
-    if (daysLeft <= 1 && r.billingStatus !== 'suspended') {
+    // Suspend once we reach the suspend date (1 day before renewal) and still unpaid.
+    // Once suspended, it STAYS suspended until an admin reactivates (no auto-roll).
+    if (daysToSuspend <= 0 && r.billingStatus !== 'suspended') {
       try {
         await setSubscriptionState(r.account, r.domain, r.skuId, 'suspend', r.subscriptionId);
         r.billingStatus = 'suspended';
         r.suspendedAt = now;
         await r.save();
         results.suspended.push(`${r.domain} (${r.skuId})`);
-        console.log('SUB SUSPENDED (29-day, non-payment):', r.domain, r.skuId);
+        console.log('SUB SUSPENDED (monthly cycle, non-payment):', r.domain, r.skuId, '| renewal was', renewal.toISOString().slice(0, 10));
         try { await sendSuspensionEmail(await emailForDomain(r.domain), r.domain); } catch (_) { }
       } catch (e) {
         const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
@@ -1999,7 +2221,6 @@ app.post('/api/admin/billing/start-from-today', authenticateCustomer, requireAdm
   try {
     const onlyPastDue = req.body?.onlyPastDue !== false; // default: only reset those already past due / suspended
     const now = new Date();
-    const next = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     const filter = onlyPastDue
       ? { $or: [{ nextBillingDate: { $lte: now } }, { billingStatus: 'suspended' }, { billingStatus: 'warned' }] }
       : {};
@@ -2011,7 +2232,8 @@ app.post('/api/admin/billing/start-from-today', authenticateCustomer, requireAdm
         try { await setSubscriptionState(r.account, r.domain, r.skuId, 'activate'); } catch (_) { }
       }
       r.lastPaymentDate = now;
-      r.nextBillingDate = next;
+      // Anchor the next renewal to the subscription's own purchase day-of-month.
+      r.nextBillingDate = recalcNextBilling(r, now);
       r.billingStatus = 'active';
       r.warnedAt = null;
       r.suspendedAt = null;
@@ -2383,19 +2605,20 @@ app.post('/api/admin/billing/unsuspend', authenticateCustomer, requireAdmin, asy
     }
 
     const now = new Date();
-    const next = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     const outcomes = [];
     for (const it of items) {
       try {
         await setSubscriptionState(it.account, dom, it.skuId, 'activate', it.subscriptionId);
-        // Update or create the billing record so it's marked active + renewed
+        // Recompute next renewal from the subscription's own purchase day-of-month.
+        const existing = await SubBilling.findOne({ domain: dom, skuId: it.skuId });
+        const nextDate = existing ? recalcNextBilling(existing, now) : nextMonthlyRenewal(now, now);
         await SubBilling.updateOne(
           { domain: dom, skuId: it.skuId },
-          { $set: { billingStatus: 'active', suspendedAt: null, lastPaymentDate: now, nextBillingDate: next, account: it.account, updatedAt: now } },
+          { $set: { billingStatus: 'active', suspendedAt: null, warnedAt: null, lastPaymentDate: now, nextBillingDate: nextDate, account: it.account, updatedAt: now } },
           { upsert: true }
         );
         outcomes.push({ domain: dom, skuId: it.skuId, result: 'REACTIVATED ✓' });
-        console.log('UNSUSPEND OK:', dom, it.skuId, it.account);
+        console.log('UNSUSPEND OK:', dom, it.skuId, it.account, '| next renewal', nextDate.toISOString().slice(0, 10));
       } catch (e) {
         const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
         outcomes.push({ domain: dom, skuId: it.skuId, result: 'FAILED: ' + detail });
@@ -2441,9 +2664,11 @@ app.post('/api/admin/billing/unsuspend-bulk', authenticateCustomer, requireAdmin
       for (const it of items) {
         try {
           await setSubscriptionState(it.account, dom, it.skuId, 'activate', it.subscriptionId);
+          const existing = await SubBilling.findOne({ domain: dom, skuId: it.skuId });
+          const nextDate = existing ? recalcNextBilling(existing, now) : nextMonthlyRenewal(now, now);
           await SubBilling.updateOne(
             { domain: dom, skuId: it.skuId },
-            { $set: { billingStatus: 'active', suspendedAt: null, lastPaymentDate: now, nextBillingDate: next, account: it.account, updatedAt: now } },
+            { $set: { billingStatus: 'active', suspendedAt: null, warnedAt: null, lastPaymentDate: now, nextBillingDate: nextDate, account: it.account, updatedAt: now } },
             { upsert: true }
           );
           okCount++;
@@ -2492,13 +2717,16 @@ app.post('/api/admin/billing/unsuspend-bulk', authenticateCustomer, requireAdmin
       for (const it of items) {
         try {
           await setSubscriptionState(it.account, dom, it.skuId, 'activate', it.subscriptionId);
+          // Recompute next renewal from the subscription's own purchase day-of-month.
+          const existing = await SubBilling.findOne({ domain: dom, skuId: it.skuId });
+          const nextDate = existing ? recalcNextBilling(existing, now) : nextMonthlyRenewal(now, now);
           await SubBilling.updateOne(
             { domain: dom, skuId: it.skuId },
-            { $set: { billingStatus: 'active', suspendedAt: null, lastPaymentDate: now, nextBillingDate: next, account: it.account, updatedAt: now } },
+            { $set: { billingStatus: 'active', suspendedAt: null, warnedAt: null, lastPaymentDate: now, nextBillingDate: nextDate, account: it.account, updatedAt: now } },
             { upsert: true }
           );
           domResult.reactivated++;
-          console.log('BULK UNSUSPEND OK:', dom, it.skuId, it.account);
+          console.log('BULK UNSUSPEND OK:', dom, it.skuId, it.account, '| next renewal', nextDate.toISOString().slice(0, 10));
         } catch (e) {
           const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
           domResult.failed++;
@@ -2556,25 +2784,25 @@ app.post('/api/admin/billing/whitelist-bulk', authenticateCustomer, requireAdmin
 });
 
 // Admin: recalculate nextBillingDate for ALL existing records from their purchase date.
-// Fixes records whose dates were stored incorrectly (e.g. pushed into the future).
+// Uses the monthly anchor (renewal = same day-of-month as purchase). Fixes records whose
+// dates were stored on the old flat 30-day cycle.
 app.post('/api/admin/billing/recalculate', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
-    const PERIOD_MS = 30 * 24 * 60 * 60 * 1000;   // 30-day cycle
-    const nowMs = Date.now();
+    const now = new Date();
     const all = await SubBilling.find({ whitelisted: { $ne: true } });
     let updated = 0, nowPastDue = 0;
     for (const r of all) {
-      const anchor = r.lastPaymentDate ? new Date(r.lastPaymentDate).getTime()
-        : (r.purchaseDate ? new Date(r.purchaseDate).getTime() : nowMs);
-      const nextMs = anchor + PERIOD_MS;
-      r.nextBillingDate = new Date(nextMs);
-      // "past due" for the check = within 1 day of due or beyond (day 29+)
-      if (nextMs - nowMs <= 24 * 60 * 60 * 1000) nowPastDue++;
-      r.updatedAt = new Date();
+      // Anchor to the original purchase date's day-of-month, advanced to the next future renewal.
+      const nextDate = recalcNextBilling(r, now);
+      r.nextBillingDate = nextDate;
+      // Suspended records stay suspended (admin must reactivate); don't change their status here.
+      const suspendOn = suspendDateFor(nextDate);
+      if (suspendOn.getTime() - now.getTime() <= 0 && r.billingStatus !== 'suspended') nowPastDue++;
+      r.updatedAt = now;
       await r.save();
       updated++;
     }
-    res.json({ success: true, updated, nowPastDue });
+    res.json({ success: true, updated, nowPastDue, note: 'Renewal dates re-anchored to each subscription\'s purchase day-of-month. Suspension occurs 1 day before renewal.' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -3453,6 +3681,56 @@ async function ncRenewDomain(domainName, years) {
   return { ok: true, renewed: !!result, domainId: result?.['@_DomainID'], chargedAmount: result?.['@_ChargedAmount'] };
 }
 
+// ---- DOMAIN TRANSFER (IN) ----
+// Transfer a domain INTO our Namecheap account from another registrar.
+// Requires the EPP/auth code from the current registrar, and the domain to be unlocked there.
+async function ncCreateTransfer(domain, eppCode, years) {
+  const r = await ncCall('namecheap.domains.transfer.create', {
+    DomainName: domain,
+    Years: years || 1,
+    EPPCode: eppCode,
+  });
+  if (!r.ok) return r;
+  const result = r.data?.DomainTransferCreateResult;
+  return {
+    ok: true,
+    transferId: result?.['@_TransferID'],
+    statusId: result?.['@_StatusID'],
+    success: result?.['@_IsSuccess'] === true || result?.['@_IsSuccess'] === 'true',
+    chargedAmount: result?.['@_ChargedAmount'],
+  };
+}
+
+// Get TRANSFER pricing for a TLD (transfer price ≈ register price for most TLDs, includes 1yr).
+async function ncGetTransferPricing(tld) {
+  return ncGetTldPricing(tld, 'TRANSFER');
+}
+
+// ---- TRANSFER OUT (give the customer their EPP code + unlock) ----
+// Get the EPP/auth code so the customer can transfer the domain away.
+async function ncGetEppCode(domain) {
+  // Namecheap returns the EPP code via getInfo (WhoisGuard/Modificationrights section) — use getRegistrarLock + info.
+  const r = await ncCall('namecheap.domains.getInfo', { DomainName: domain });
+  if (!r.ok) return r;
+  // The EPP code isn't always returned by getInfo; Namecheap emails it on request for security.
+  return { ok: true, note: 'requested' };
+}
+
+// Lock or unlock the domain (must be UNLOCKED to transfer out).
+async function ncSetRegistrarLock(domain, lock) {
+  const r = await ncCall('namecheap.domains.setRegistrarLock', { DomainName: domain, LockAction: lock ? 'LOCK' : 'UNLOCK' });
+  if (!r.ok) return r;
+  return { ok: true, locked: lock };
+}
+
+async function ncGetRegistrarLock(domain) {
+  const r = await ncCall('namecheap.domains.getRegistrarLock', { DomainName: domain });
+  if (!r.ok) return r;
+  const result = r.data?.DomainGetRegistrarLockResult;
+  return { ok: true, locked: result?.['@_RegistrarLockStatus'] === true || result?.['@_RegistrarLockStatus'] === 'true' };
+}
+
+
 // ---- DNS MANAGEMENT ----
 function splitDomain(domain) {
   const parts = String(domain).toLowerCase().split('.');
@@ -3529,6 +3807,43 @@ async function ncSetDefaultNameservers(domain) {
   const r = await ncCall('namecheap.domains.dns.setDefault', { SLD: sld, TLD: tld });
   if (!r.ok) return r;
   return { ok: true, success: true };
+}
+
+// ---- DOMAIN TRANSFER (transfer IN / import to Namecheap) ----
+// Transfer a domain INTO the Namecheap account. Requires the EPP/Auth code from the
+// losing registrar. Years=1 means it includes a 1-year renewal (standard).
+async function ncTransferCreate(domain, years, eppCode) {
+  // EPP codes with special chars must be base64-encoded as "base64:<code>"
+  const hasSpecial = /[^A-Za-z0-9]/.test(eppCode);
+  const epp = hasSpecial ? 'base64:' + Buffer.from(eppCode, 'utf8').toString('base64') : eppCode;
+  const r = await ncCall('namecheap.domains.transfer.create', {
+    DomainName: domain, Years: years || 1, EPPCode: epp,
+  });
+  if (!r.ok) return r;
+  const result = r.data?.DomainTransferCreateResult;
+  return {
+    ok: true,
+    transferId: result?.['@_TransferID'],
+    success: result?.['@_Transfer'] === true || result?.['@_Transfer'] === 'true' || !!result?.['@_TransferID'],
+    statusId: result?.['@_StatusID'],
+    chargedAmount: result?.['@_ChargedAmount'],
+  };
+}
+
+// Get the status of a transfer by its TransferID.
+async function ncTransferStatus(transferId) {
+  const r = await ncCall('namecheap.domains.transfer.getStatus', { TransferID: transferId });
+  if (!r.ok) return r;
+  const result = r.data?.DomainTransferGetStatusResult;
+  return { ok: true, status: result?.['@_Status'], statusId: result?.['@_StatusID'] };
+}
+
+// Get the EPP/auth code for a domain we hold (for transfer OUT to another registrar).
+// Note: Namecheap's API does not expose EPP retrieval; this returns guidance instead.
+async function ncGetEppGuidance(domain) {
+  // There is no public API to fetch the EPP code; the customer must request it via the
+  // Namecheap dashboard or support. We unlock + point them there.
+  return { ok: true, viaDashboard: true };
 }
 
 // ---- REGISTRANT CONTACT VERIFICATION (ICANN RAA email verification) ----
@@ -5471,11 +5786,13 @@ app.get('/api/health', (req, res) => {
 async function runDailyBillingTasks() {
   console.log('⏰ DAILY BILLING TASKS running at', new Date().toISOString());
   try {
-    // Sync existing subscriptions from Google, then run the workspace-anchored 30-day check
+    // Sync existing subscriptions from Google (seeds purchase dates + monthly renewal dates),
+    // then run the per-subscription monthly-anchored check (renewal = purchase day-of-month,
+    // suspend 1 day before). Suspended subs stay suspended until an admin reactivates.
     await syncSubscriptionsForBilling('pk');
     await syncSubscriptionsForBilling('usa');
-    const subResults = await runWorkspaceAnchoredBillingCheck(false);
-    console.log('⏰ Workspace-anchored billing:', JSON.stringify({ warned: subResults.warned.length, suspended: subResults.suspended.length, overdue: subResults.overdue.length }));
+    const subResults = await runSubscriptionBillingCheck();
+    console.log('⏰ Monthly-anchored billing:', JSON.stringify({ checked: subResults.checked, warned: subResults.warned.length, suspended: subResults.suspended.length, skippedWhitelisted: subResults.skippedWhitelisted }));
   } catch (e) {
     console.error('Daily subscription billing error:', e.message);
   }
