@@ -213,8 +213,10 @@ const PaymentSchema = new mongoose.Schema({
   customerEmail: String,
   domain: String,
   orderId: mongoose.Schema.Types.ObjectId,
-  orderType: { type: String, enum: ['workspace', 'domain'], default: 'workspace' },
-  amount: Number,
+  orderType: { type: String, enum: ['workspace', 'domain', 'domain_transfer', 'ssl', 'hosting', 'addon'], default: 'workspace' },
+  amount: Number,            // total charged (subtotal + tax)
+  subtotal: Number,          // pre-tax amount
+  tax: Number,               // tax portion
   currency: { type: String, default: 'USD' },
   method: { type: String, enum: ['stripe', 'nicky'], default: 'stripe' },
   status: { type: String, enum: ['pending', 'paid', 'failed', 'cancelled'], default: 'pending' },
@@ -257,6 +259,22 @@ const DomainTransferSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 const DomainTransfer = mongoose.model('DomainTransfer', DomainTransferSchema);
+
+// Tracks an SSL certificate purchase (pay-first, like domains).
+const SslOrderSchema = new mongoose.Schema({
+  customerId: mongoose.Schema.Types.ObjectId,
+  orderNumber: { type: String, unique: true },
+  productType: String,           // e.g. 'PositiveSSL'
+  years: { type: Number, default: 1 },
+  price: Number,
+  forDomain: String,             // the domain this cert is for (optional at purchase)
+  status: { type: String, enum: ['pending', 'purchased', 'active', 'failed', 'test_paid'], default: 'pending' },
+  certificateId: String,         // Namecheap CertificateID once purchased
+  activationNote: String,
+  purchasedAt: Date,
+  createdAt: { type: Date, default: Date.now },
+});
+const SslOrder = mongoose.model('SslOrder', SslOrderSchema);
 
 // Namecheap product pricing overrides (admin-set): per TLD/SSL/hosting.
 // kind: 'tld' | 'ssl' | 'hosting'; key: e.g. 'com', 'PositiveSSL', 'stellar'
@@ -350,6 +368,10 @@ const PaymentSettingsSchema = new mongoose.Schema({
   feeEnabled: { type: Boolean, default: false },
   feeFixed: { type: Number, default: 0 },        // USD
   feePercent: { type: Number, default: 0 },      // % of subtotal
+  // Tax (applied to all checkouts — Stripe AND crypto). Added on top of the subtotal.
+  taxEnabled: { type: Boolean, default: false },
+  taxPercent: { type: Number, default: 0 },      // % tax added to every order
+  taxLabel: { type: String, default: 'Tax' },
   updatedAt: { type: Date, default: Date.now },
 });
 const PaymentSettings = mongoose.model('PaymentSettings', PaymentSettingsSchema);
@@ -1278,7 +1300,9 @@ app.post('/api/customer/domains/renew', authenticateCustomer, async (req, res) =
     const tld = tldOf(dom);
     const pricing = await ncGetTldPricing(tld, 'RENEW');
     if (!pricing.ok) return res.status(502).json({ error: 'Could not price renewal: ' + pricing.error });
-    const amount = (await ncCustomerPriceForTld(tld, pricing.cost)) * (Number(period) || 1);
+    const subtotal = (await ncCustomerPriceForTld(tld, pricing.cost)) * (Number(period) || 1);
+    const taxed = await applyTaxAndFee(subtotal);
+    const amount = taxed.total;
 
     const orderNumber = `DR-${Date.now()}`;
     const order = await DomainOrder.create({
@@ -1289,7 +1313,7 @@ app.post('/api/customer/domains/renew', authenticateCustomer, async (req, res) =
 
     const payment = await Payment.create({
       customerId: me._id, customerEmail: me.businessEmail, domain: dom,
-      orderId: order._id, orderType: 'domain', amount, currency: 'USD',
+      orderId: order._id, orderType: 'domain', amount, subtotal: taxed.subtotal, tax: taxed.tax, currency: 'USD',
       method: method === 'nicky' ? 'nicky' : 'stripe', status: 'pending',
     });
 
@@ -1347,7 +1371,9 @@ app.post('/api/customer/domains/transfer', authenticateCustomer, async (req, res
     const tld = tldOf(dom);
     const pricing = await ncGetTldPricing(tld, 'TRANSFER');
     if (!pricing.ok) return res.status(502).json({ error: 'Could not price this transfer: ' + pricing.error });
-    const amount = await ncCustomerPriceForTld(tld, pricing.cost);
+    const subtotal = await ncCustomerPriceForTld(tld, pricing.cost);
+    const taxed = await applyTaxAndFee(subtotal);
+    const amount = taxed.total;
 
     const orderNumber = `DT-${Date.now()}`;
     const transfer = await DomainTransfer.create({
@@ -1356,7 +1382,7 @@ app.post('/api/customer/domains/transfer', authenticateCustomer, async (req, res
 
     const payment = await Payment.create({
       customerId: me._id, customerEmail: me.businessEmail, domain: dom,
-      orderId: transfer._id, orderType: 'domain_transfer', amount, currency: 'USD',
+      orderId: transfer._id, orderType: 'domain_transfer', amount, subtotal: taxed.subtotal, tax: taxed.tax, currency: 'USD',
       method: method === 'nicky' ? 'nicky' : 'stripe', status: 'pending',
     });
 
@@ -1614,8 +1640,11 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
     const order = await WorkspaceOrder.findOne({ _id: orderId, customerId: req.customerId });
     if (!order) return res.status(404).json({ error: 'Order not found.' });
 
-    const amount = Number(order.monthlyTotal || 0);
-    if (!amount || amount <= 0) return res.status(400).json({ error: 'Order amount is invalid.' });
+    const subtotal = Number(order.monthlyTotal || 0);
+    if (!subtotal || subtotal <= 0) return res.status(400).json({ error: 'Order amount is invalid.' });
+    // Apply tax (+ optional fee) from payment settings so it works for Stripe AND crypto.
+    const taxed = await applyTaxAndFee(subtotal);
+    const amount = taxed.total;
 
     const payment = await Payment.create({
       customerId: me._id,
@@ -1623,6 +1652,8 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
       domain: order.organization?.domain,
       orderId: order._id,
       amount,
+      subtotal: taxed.subtotal,
+      tax: taxed.tax,
       currency: 'USD',
       method: method === 'nicky' ? 'nicky' : 'stripe',
       status: 'pending',
@@ -1648,19 +1679,21 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
         price_data: {
           currency: 'usd',
           product_data: { name: orderDesc },
-          unit_amount: Math.round(amount * 100),
+          unit_amount: Math.round(taxed.subtotal * 100),
         },
         quantity: 1,
       }];
-      // Customer-paid processing fee as a separate line item
-      const fee = await computeProcessingFee(amount);
-      if (fee > 0) {
+      // Processing fee as a separate line item (if enabled)
+      if (taxed.fee > 0) {
         line_items.push({
-          price_data: {
-            currency: 'usd',
-            product_data: { name: 'Processing fee' },
-            unit_amount: Math.round(fee * 100),
-          },
+          price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) },
+          quantity: 1,
+        });
+      }
+      // Tax as a separate line item (if enabled)
+      if (taxed.tax > 0) {
+        line_items.push({
+          price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) },
           quantity: 1,
         });
       }
@@ -1787,6 +1820,42 @@ async function markPaidAndProvision(payment) {
   await payment.save();
 
   // DOMAIN orders: register or renew via Namecheap on payment
+  // SSL orders: purchase the certificate via Namecheap on payment.
+  if (payment.orderType === 'ssl') {
+    try {
+      const sOrder = await SslOrder.findById(payment.orderId);
+      if (sOrder && sOrder.status === 'pending') {
+        const ncSandbox = await ncResolveSandbox();
+        if (payment.isTest && !ncSandbox) {
+          console.log('TEST PAYMENT + Namecheap LIVE — skipping real SSL purchase for', sOrder.orderNumber);
+          sOrder.status = 'test_paid';
+          await sOrder.save();
+          return;
+        }
+        const result = await ncPurchaseSsl(sOrder.productType, sOrder.years);
+        if (!result.ok) throw new Error(result.error);
+        sOrder.status = 'purchased';
+        sOrder.certificateId = result.certificateId;
+        sOrder.purchasedAt = new Date();
+        sOrder.activationNote = 'Certificate purchased. Activate it with a CSR for ' + (sOrder.forDomain || 'your domain') + '.';
+        await sOrder.save();
+        console.log('SSL PURCHASED via Namecheap:', sOrder.productType, 'certId:', result.certificateId);
+        const me = await Customer.findById(payment.customerId);
+        try {
+          const html = emailShell('SSL certificate purchased', `
+            <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+            <p>Your <strong>${sOrder.productType}</strong> SSL certificate has been purchased${sOrder.forDomain ? ` for <strong>${sOrder.forDomain}</strong>` : ''}.</p>
+            <p>To activate it, a CSR (Certificate Signing Request) and domain control validation are required. Our team will reach out, or you can request activation from your portal under <strong>Domains → SSL</strong>.</p>`);
+          await sendEmail(me?.businessEmail, `SSL certificate purchased: ${sOrder.productType}`, html);
+        } catch (_) { }
+      }
+    } catch (e) {
+      console.error('SSL PURCHASE FAILED for payment', String(payment._id), e.message);
+      try { const sOrder = await SslOrder.findById(payment.orderId); if (sOrder) { sOrder.status = 'failed'; sOrder.activationNote = e.message; await sOrder.save(); } } catch (_) { }
+    }
+    return;
+  }
+
   // DOMAIN TRANSFER orders: submit the transfer to Namecheap on payment.
   if (payment.orderType === 'domain_transfer') {
     try {
@@ -3411,6 +3480,9 @@ app.get('/api/admin/payment-settings', authenticateCustomer, requireAdmin, async
       feeEnabled: !!s.feeEnabled,
       feeFixed: s.feeFixed || 0,
       feePercent: s.feePercent || 0,
+      taxEnabled: !!s.taxEnabled,
+      taxPercent: s.taxPercent || 0,
+      taxLabel: s.taxLabel || 'Tax',
       // secrets live in Railway env vars (Option A) — report whether each is configured
       stripeTestSecretConfigured: !!process.env.STRIPE_SECRET_KEY_TEST,
       stripeLiveSecretConfigured: !!process.env.STRIPE_SECRET_KEY,
@@ -3438,6 +3510,9 @@ app.patch('/api/admin/payment-settings', authenticateCustomer, requireAdmin, asy
     if (b.feeEnabled !== undefined) s.feeEnabled = !!b.feeEnabled;
     if (b.feeFixed !== undefined) s.feeFixed = Number(b.feeFixed) || 0;
     if (b.feePercent !== undefined) s.feePercent = Number(b.feePercent) || 0;
+    if (b.taxEnabled !== undefined) s.taxEnabled = !!b.taxEnabled;
+    if (b.taxPercent !== undefined) s.taxPercent = Number(b.taxPercent) || 0;
+    if (b.taxLabel !== undefined) s.taxLabel = b.taxLabel || 'Tax';
     s.updatedAt = new Date();
     await s.save();
     res.json({ success: true });
@@ -3463,6 +3538,20 @@ async function computeProcessingFee(subtotal) {
   if (!s || !s.feeEnabled) return 0;
   const fee = (Number(s.feeFixed) || 0) + (Number(s.feePercent) || 0) / 100 * subtotal;
   return Math.round(fee * 100) / 100;
+}
+
+// Apply tax (and optional processing fee) to a subtotal. Works for BOTH Stripe and crypto,
+// since it adjusts the amount BEFORE the checkout session/payment is created.
+// Returns { subtotal, tax, fee, total, taxPercent, taxLabel }.
+async function applyTaxAndFee(subtotal) {
+  const s = await PaymentSettings.findOne({ singleton: 'main' });
+  const taxPercent = s && s.taxEnabled ? (Number(s.taxPercent) || 0) : 0;
+  const taxLabel = (s && s.taxLabel) || 'Tax';
+  const fee = (s && s.feeEnabled) ? ((Number(s.feeFixed) || 0) + (Number(s.feePercent) || 0) / 100 * subtotal) : 0;
+  const tax = taxPercent / 100 * (subtotal + fee);
+  const round = (n) => Math.round(n * 100) / 100;
+  const total = round(subtotal + fee + tax);
+  return { subtotal: round(subtotal), tax: round(tax), fee: round(fee), total, taxPercent, taxLabel };
 }
 
 // Admin: all payments
@@ -3560,12 +3649,24 @@ async function ncCall(command, params = {}) {
 
 // Apply pricing: fixed override wins; else markup % (override or default) on cost.
 function ncApplyPricing(cost, markupPercentOverride, fixedPriceOverride) {
+  const baseCost = Number(cost);
+  if (isNaN(baseCost)) return 0;
+  // Fixed price override wins.
   if (fixedPriceOverride != null && fixedPriceOverride !== '' && !isNaN(Number(fixedPriceOverride))) {
     return Number(Number(fixedPriceOverride).toFixed(2));
   }
-  const cfg = ncConfig();
-  const pct = markupPercentOverride != null && markupPercentOverride !== '' ? Number(markupPercentOverride) : cfg.markupPercent;
-  return Number((Number(cost) * (1 + pct / 100)).toFixed(2));
+  // Resolve the markup %: per-item override, else the env default.
+  let pct;
+  if (markupPercentOverride != null && markupPercentOverride !== '' && !isNaN(Number(markupPercentOverride))) {
+    pct = Number(markupPercentOverride);
+  } else {
+    // Robustly parse the env default (strip %, spaces, etc.). Default 20 if unparseable.
+    const raw = String(process.env.NAMECHEAP_MARKUP_PERCENT || '').replace(/[^0-9.]/g, '');
+    pct = raw !== '' && !isNaN(Number(raw)) ? Number(raw) : 20;
+  }
+  const result = Number((baseCost * (1 + pct / 100)).toFixed(2));
+  console.log(`NC PRICING: cost=${baseCost} + markup ${pct}% → ${result} (envMarkup=${process.env.NAMECHEAP_MARKUP_PERCENT || 'unset'})`);
+  return result;
 }
 
 async function ncCheckDomains(domainList) {
@@ -3964,7 +4065,10 @@ async function ncPurchaseSsl(type, years) {
 // Compute the customer-facing price for a TLD, applying admin overrides.
 async function ncCustomerPriceForTld(tld, cost) {
   const override = await NcPricing.findOne({ kind: 'tld', key: tld.toLowerCase(), active: true });
-  return ncApplyPricing(cost, override?.markupPercent, override?.fixedPrice);
+  const price = ncApplyPricing(cost, override?.markupPercent, override?.fixedPrice);
+  const envPct = String(process.env.NAMECHEAP_MARKUP_PERCENT || '(unset→20)');
+  console.log(`PRICING ${tld}: cost=${cost} override=${override ? (override.fixedPrice != null ? 'fixed$' + override.fixedPrice : override.markupPercent + '%') : 'none'} envMarkup=${envPct} → customer=$${price}`);
+  return price;
 }
 
 function tldOf(domain) {
@@ -4035,7 +4139,85 @@ app.get('/api/customer/nc/ssl', authenticateCustomer, async (req, res) => {
   }
 });
 
-// ---- Customer: list hosting plans (admin-defined) ----
+// Customer: buy an SSL certificate (pay-first; purchased via Namecheap on payment).
+app.post('/api/customer/nc/ssl/buy', authenticateCustomer, async (req, res) => {
+  try {
+    const { productType, years, forDomain, method } = req.body;
+    if (!productType) return res.status(400).json({ error: 'Choose an SSL product.' });
+    const me = await Customer.findById(req.customerId);
+    // Price it (with admin override)
+    const ssl = await ncGetSslPricing();
+    if (!ssl.ok) return res.status(502).json({ error: ssl.error });
+    const prod = ssl.products.find((p) => p.name === productType);
+    if (!prod) return res.status(400).json({ error: 'That SSL product is not available.' });
+    const override = await NcPricing.findOne({ kind: 'ssl', key: productType, active: true });
+    const sslSubtotal = ncApplyPricing(prod.cost, override?.markupPercent, override?.fixedPrice) * (Number(years) || 1);
+    const sslTaxed = await applyTaxAndFee(sslSubtotal);
+    const amount = sslTaxed.total;
+
+    const orderNumber = `SSL-${Date.now()}`;
+    const order = await SslOrder.create({
+      customerId: me._id, orderNumber, productType, years: Number(years) || 1,
+      price: amount, forDomain: (forDomain || '').toLowerCase().trim(), status: 'pending',
+    });
+
+    const payment = await Payment.create({
+      customerId: me._id, customerEmail: me.businessEmail, domain: forDomain || '',
+      orderId: order._id, orderType: 'ssl', amount, subtotal: sslTaxed.subtotal, tax: sslTaxed.tax, currency: 'USD',
+      method: method === 'nicky' ? 'nicky' : 'stripe', status: 'pending',
+    });
+
+    const orderDesc = `SSL: ${productType} (${order.years} yr)`;
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
+
+    if (payment.method === 'stripe') {
+      let stripe; try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const sdoc = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (sdoc?.stripeMode || 'test') !== 'live';
+      await payment.save();
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        line_items: [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(amount * 100) }, quantity: 1 }],
+        success_url: successUrl, cancel_url: cancelUrl, client_reference_id: String(payment._id),
+        metadata: { paymentId: String(payment._id), orderId: String(order._id), orderType: 'ssl' },
+      });
+      payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
+      return res.json({ checkoutUrl: session.url, paymentId: payment._id });
+    }
+    try {
+      const nicky = await createNickyPayment({
+        amount, currency: 'USD', description: orderDesc, orderNumber,
+        reference: String(payment._id), billDescription: orderDesc,
+        customerEmail: me.businessEmail, customerName: me.firstName ? `${me.firstName} ${me.lastName || ''}`.trim() : me.businessEmail,
+        redirectUrl: successUrl, cancelUrl,
+      });
+      payment.checkoutUrl = nicky.url; payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id);
+      payment.providerShortId = nicky.shortId || null; await payment.save();
+      return res.json({ checkoutUrl: nicky.url, paymentId: payment._id });
+    } catch (e) {
+      return res.status(500).json({ error: 'Crypto checkout not available: ' + e.message });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: list MY SSL orders.
+app.get('/api/customer/nc/ssl/orders', authenticateCustomer, async (req, res) => {
+  try {
+    const orders = await SslOrder.find({ customerId: req.customerId }).sort({ createdAt: -1 });
+    res.json({
+      orders: orders.map((o) => ({
+        id: o._id, orderNumber: o.orderNumber, productType: o.productType, years: o.years,
+        price: o.price, forDomain: o.forDomain, status: o.status, certificateId: o.certificateId,
+        activationNote: o.activationNote, createdAt: o.createdAt,
+      }))
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 app.get('/api/customer/nc/hosting', authenticateCustomer, async (req, res) => {
   try {
     const plans = await HostingPlan.find({ active: true }).sort({ sortOrder: 1 });
@@ -4122,6 +4304,41 @@ app.post('/api/admin/nc/pricing', authenticateCustomer, requireAdmin, async (req
       { upsert: true, new: true }
     );
     res.json({ success: true, pricing: doc });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: list ALL SSL orders (manage/activate).
+app.get('/api/admin/nc/ssl-orders', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const orders = await SslOrder.find().sort({ createdAt: -1 }).limit(500);
+    const rows = [];
+    for (const o of orders) {
+      const cust = await Customer.findById(o.customerId);
+      rows.push({
+        id: o._id, orderNumber: o.orderNumber, productType: o.productType, years: o.years,
+        price: o.price, forDomain: o.forDomain, status: o.status, certificateId: o.certificateId,
+        activationNote: o.activationNote, customer: cust?.businessEmail || cust?.username, createdAt: o.createdAt,
+      });
+    }
+    res.json({ orders: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: update an SSL order's status/note (e.g. mark active after activation).
+app.post('/api/admin/nc/ssl-orders/:id', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { status, activationNote, certificateId } = req.body;
+    const o = await SslOrder.findById(req.params.id);
+    if (!o) return res.status(404).json({ error: 'Order not found.' });
+    if (status) o.status = status;
+    if (activationNote != null) o.activationNote = activationNote;
+    if (certificateId != null) o.certificateId = certificateId;
+    await o.save();
+    res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

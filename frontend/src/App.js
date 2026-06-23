@@ -454,6 +454,14 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              className={`menu-item ${activeSection === 'domains-ssl' ? 'active' : ''}`}
+              onClick={() => setActiveSection('domains-ssl')}
+            >
+              🔒 Domains & SSL
+            </button>
+          </li>
+          <li>
+            <button
               className={`menu-item ${activeSection === 'voice-monitor' ? 'active' : ''}`}
               onClick={() => setActiveSection('voice-monitor')}
             >
@@ -479,6 +487,7 @@ const Dashboard = () => {
         {activeSection === 'tickets' && <AdminTicketsSection />}
         {activeSection === 'payments' && <AdminPaymentsSection />}
         {activeSection === 'emails' && <AdminEmailsSection />}
+        {activeSection === 'domains-ssl' && <AdminDomainsSslSection />}
         {activeSection === 'voice-monitor' && <AdminVoiceMonitorSection />}
       </main>
     </div>
@@ -1653,6 +1662,174 @@ const AdminTicketsSection = () => {
 // ==================== ADMIN: ABUSE / SPAM COMPLAINT MONITOR ====================
 // Legitimate reseller tool: log complaints received about customers, track which
 // customers have a pattern of abuse, and act on confirmed cases to protect the account.
+const AdminDomainsSslSection = () => {
+  const [tab, setTab] = useState('tld');
+  const [balance, setBalance] = useState(null);
+  const [tlds, setTlds] = useState([]);
+  const [sslPricing, setSslPricing] = useState([]);
+  const [sslOrders, setSslOrders] = useState([]);
+  const [domainOrders, setDomainOrders] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [defaultMarkup, setDefaultMarkup] = useState(20);
+
+  const load = async () => {
+    setLoading(true); setMsg('');
+    try {
+      const [b, t, s, so, dd] = await Promise.all([
+        axios.get(`${API_URL}/admin/nc/balance`).catch(() => ({ data: null })),
+        axios.get(`${API_URL}/admin/nc/tld-pricing`).catch(() => ({ data: { tlds: [] } })),
+        axios.get(`${API_URL}/admin/nc/ssl-pricing`).catch(() => ({ data: { products: [] } })),
+        axios.get(`${API_URL}/admin/nc/ssl-orders`).catch(() => ({ data: { orders: [] } })),
+        axios.get(`${API_URL}/admin/nc/domain-diagnostic`).catch(() => ({ data: { orders: [] } })),
+      ]);
+      setBalance(b.data);
+      setTlds(t.data.tlds || []); setDefaultMarkup(t.data.defaultMarkup ?? 20);
+      setSslPricing(s.data.products || []);
+      setSslOrders(so.data.orders || []);
+      setDomainOrders(dd.data.orders || []);
+    } catch (e) { setMsg('Could not load some data. Check Namecheap configuration.'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const savePricing = async (kind, key, markupPercent, fixedPrice, cost) => {
+    setMsg('');
+    try {
+      await axios.post(`${API_URL}/admin/nc/pricing`, { kind, key, markupPercent, fixedPrice, cost });
+      setMsg('✓ Price saved.');
+      load();
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not save price.'); }
+  };
+
+  const card = { background: '#fff', borderRadius: 14, padding: 20, marginBottom: 18, border: '1px solid #e5e7eb' };
+  const tabBtn = (k, label) => (
+    <button onClick={() => setTab(k)} style={{ background: tab === k ? '#0F766E' : '#fff', color: tab === k ? '#fff' : '#111', border: '1px solid ' + (tab === k ? '#0F766E' : '#d8dbe6'), borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}>{label}</button>
+  );
+  const inp = { borderRadius: 8, border: '1px solid #d8dbe6', padding: '6px 8px', fontSize: 14, width: 90 };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <h1 style={{ margin: 0 }}>Domains & SSL</h1>
+        {balance && <div style={{ background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 10, padding: '8px 16px', fontWeight: 600, color: '#0F766E' }}>
+          Namecheap balance: {balance.currency || '$'} {Number(balance.availableBalance ?? balance.balance ?? 0).toFixed(2)}
+        </div>}
+      </div>
+      <p style={{ color: '#6b7280', marginTop: 6 }}>Set your selling prices (markup % or fixed), and manage SSL & domain orders. Default markup: {defaultMarkup}%.</p>
+
+      <div style={{ display: 'flex', gap: 8, margin: '14px 0', flexWrap: 'wrap' }}>
+        {tabBtn('tld', 'TLD pricing')}
+        {tabBtn('ssl', 'SSL pricing')}
+        {tabBtn('sslorders', 'SSL orders')}
+        {tabBtn('domainorders', 'Domain orders')}
+      </div>
+
+      {msg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a' }}>{msg}</div>}
+      {loading && <p>Loading…</p>}
+
+      {tab === 'tld' && (
+        <div style={card}>
+          <h3 style={{ marginTop: 0 }}>Domain TLD pricing</h3>
+          <p style={{ color: '#6b7280', fontSize: 13 }}>Your cost is from Namecheap. Set a markup % or a fixed price (fixed wins). Leave both blank to use the default {defaultMarkup}% markup.</p>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}><th style={{ padding: '6px 0' }}>TLD</th><th>Cost</th><th>Markup %</th><th>Fixed $</th><th>Your price</th><th></th></tr></thead>
+            <tbody>
+              {tlds.map((t, i) => <TldPriceRow key={t.tld} row={t} inp={inp} onSave={savePricing} />)}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {tab === 'ssl' && (
+        <div style={card}>
+          <h3 style={{ marginTop: 0 }}>SSL certificate pricing</h3>
+          <p style={{ color: '#6b7280', fontSize: 13 }}>Same pricing model as domains. These products appear in the customer SSL page only if a price is set (or default markup applies).</p>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}><th style={{ padding: '6px 0' }}>Product</th><th>Cost</th><th>Markup %</th><th>Fixed $</th><th>Your price</th><th></th></tr></thead>
+            <tbody>
+              {sslPricing.map((p) => <SslPriceRow key={p.name} row={p} inp={inp} onSave={savePricing} />)}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {tab === 'sslorders' && (
+        <div style={card}>
+          <h3 style={{ marginTop: 0 }}>SSL orders</h3>
+          {sslOrders.length === 0 ? <p style={{ color: '#6b7280' }}>No SSL orders yet.</p> : (
+            <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+              <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}><th style={{ padding: '6px 0' }}>Order</th><th>Product</th><th>Domain</th><th>Customer</th><th>Status</th></tr></thead>
+              <tbody>
+                {sslOrders.map(o => (
+                  <tr key={o._id || o.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '8px 0' }}>{o.orderNumber}</td>
+                    <td>{o.productType}</td><td>{o.forDomain || '—'}</td><td>{o.customer || '—'}</td>
+                    <td><span style={{ color: (o.status === 'purchased' || o.status === 'active') ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{o.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {tab === 'domainorders' && (
+        <div style={card}>
+          <h3 style={{ marginTop: 0 }}>Domain orders</h3>
+          {domainOrders.length === 0 ? <p style={{ color: '#6b7280' }}>No domain orders yet.</p> : (
+            <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+              <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}><th style={{ padding: '6px 0' }}>Domain</th><th>Order status</th><th>Payment</th><th>Test?</th><th>Note</th></tr></thead>
+              <tbody>
+                {domainOrders.map((o, i) => (
+                  <tr key={i} style={{ borderTop: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '8px 0', fontWeight: 600 }}>{o.domain}</td>
+                    <td><span style={{ color: o.orderStatus === 'registered' ? '#166534' : o.orderStatus === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{o.orderStatus}</span></td>
+                    <td>{o.paymentStatus}</td><td>{o.isTest ? 'Yes' : 'No'}</td>
+                    <td style={{ color: '#6b7280', fontSize: 12, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.result || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Editable pricing row for a TLD
+const TldPriceRow = ({ row, inp, onSave }) => {
+  const [mk, setMk] = useState(row.markupPercent ?? '');
+  const [fx, setFx] = useState(row.fixedPrice ?? '');
+  return (
+    <tr style={{ borderTop: '1px solid #f0f0f0' }}>
+      <td style={{ padding: '8px 0', fontWeight: 600 }}>.{row.tld}</td>
+      <td>{row.cost != null ? `$${Number(row.cost).toFixed(2)}` : (row.error ? '—' : '…')}</td>
+      <td><input style={inp} value={mk} onChange={e => setMk(e.target.value)} placeholder="e.g. 20" /></td>
+      <td><input style={inp} value={fx} onChange={e => setFx(e.target.value)} placeholder="e.g. 14.99" /></td>
+      <td style={{ fontWeight: 600, color: '#0F766E' }}>{row.price != null ? `$${Number(row.price).toFixed(2)}` : '—'}</td>
+      <td><button onClick={() => onSave('tld', row.tld, mk, fx, row.cost)} style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Save</button></td>
+    </tr>
+  );
+};
+
+// Editable pricing row for an SSL product
+const SslPriceRow = ({ row, inp, onSave }) => {
+  const [mk, setMk] = useState(row.markupPercent ?? '');
+  const [fx, setFx] = useState(row.fixedPrice ?? '');
+  return (
+    <tr style={{ borderTop: '1px solid #f0f0f0' }}>
+      <td style={{ padding: '8px 0', fontWeight: 600 }}>{row.name}</td>
+      <td>{row.cost != null ? `$${Number(row.cost).toFixed(2)}` : '…'}</td>
+      <td><input style={inp} value={mk} onChange={e => setMk(e.target.value)} placeholder="e.g. 20" /></td>
+      <td><input style={inp} value={fx} onChange={e => setFx(e.target.value)} placeholder="e.g. 29.99" /></td>
+      <td style={{ fontWeight: 600, color: '#0F766E' }}>{row.price != null ? `$${Number(row.price).toFixed(2)}` : '—'}</td>
+      <td><button onClick={() => onSave('ssl', row.name, mk, fx, row.cost)} style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Save</button></td>
+    </tr>
+  );
+};
+
 const AdminVoiceMonitorSection = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -2244,6 +2421,9 @@ const AdminPaymentsSection = () => {
         feeEnabled: s.feeEnabled,
         feeFixed: s.feeFixed,
         feePercent: s.feePercent,
+        taxEnabled: s.taxEnabled,
+        taxPercent: s.taxPercent,
+        taxLabel: s.taxLabel,
       });
       setMsg('✓ Settings saved.');
       load();
@@ -2351,6 +2531,27 @@ const AdminPaymentsSection = () => {
               <div style={{ flex: 1 }}>
                 <label style={{ fontSize: 13 }}>Percentage of subtotal (%)</label>
                 <input type="number" step="0.1" style={{ ...inp, fontFamily: 'inherit' }} value={s.feePercent} onChange={e => set('feePercent', e.target.value)} />
+              </div>
+            </div>
+          </div>
+
+          {/* TAX */}
+          <div style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>Tax (customer-paid)</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                <input type="checkbox" checked={!!s.taxEnabled} onChange={e => set('taxEnabled', e.target.checked)} /> Enable
+              </label>
+            </div>
+            <p style={{ color: '#6b7280', fontSize: 14 }}>Applied as a separate line item to <strong>every</strong> order (Workspace, domains, SSL) for both card and crypto. This is the portal's own tax — Stripe/Nicky dashboard tax settings do not apply to hosted checkouts.</p>
+            <div style={{ display: 'flex', gap: 16 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 13 }}>Tax rate (%)</label>
+                <input type="number" step="0.1" style={{ ...inp, fontFamily: 'inherit' }} value={s.taxPercent} onChange={e => set('taxPercent', e.target.value)} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 13 }}>Label (e.g. VAT, GST, Sales Tax)</label>
+                <input type="text" style={{ ...inp, fontFamily: 'inherit' }} value={s.taxLabel || 'Tax'} onChange={e => set('taxLabel', e.target.value)} />
               </div>
             </div>
           </div>
@@ -2777,6 +2978,7 @@ const CustomerPortal = () => {
     { key: 'dashboard', label: 'My subscriptions', icon: '📚' },
     { key: 'order', label: 'New subscription', icon: '✨' },
     { key: 'domains', label: 'Domains', icon: '🌐' },
+    { key: 'ssl', label: 'SSL certificates', icon: '🔒' },
     { key: 'voice', label: 'Google Voice', icon: '📞' },
     { key: 'addons', label: 'Add-ons', icon: '🧩' },
     { key: 'payments', label: 'Payments', icon: '💳' },
@@ -2833,6 +3035,7 @@ const CustomerPortal = () => {
           {section === 'dashboard' && <CustomerSubscriptions />}
           {section === 'order' && <WorkspaceOrderFlow />}
           {section === 'domains' && <CustomerDomains />}
+          {section === 'ssl' && <CustomerSsl />}
           {section === 'voice' && <CustomerVoice />}
           {section === 'addons' && <CustomerAddons />}
           {section === 'payments' && <CustomerPayments />}
@@ -3096,6 +3299,38 @@ const CustomerDomains = () => {
   const [xferMsg, setXferMsg] = useState('');
   const [transfers, setTransfers] = useState([]);
 
+  // SSL
+  const [sslProducts, setSslProducts] = useState([]);
+  const [sslOrders, setSslOrders] = useState([]);
+  const [sslPick, setSslPick] = useState('');
+  const [sslYears, setSslYears] = useState(1);
+  const [sslForDomain, setSslForDomain] = useState('');
+  const [sslBusy, setSslBusy] = useState(false);
+  const [sslMsg, setSslMsg] = useState('');
+
+  const loadSsl = async () => {
+    try {
+      const [p, o] = await Promise.all([
+        axios.get(`${API_URL}/customer/nc/ssl`).catch(() => null),
+        axios.get(`${API_URL}/customer/nc/ssl/orders`).catch(() => null),
+      ]);
+      if (p?.data?.products) { setSslProducts(p.data.products); if (!sslPick && p.data.products[0]) setSslPick(p.data.products[0].name); }
+      if (o?.data?.orders) setSslOrders(o.data.orders);
+    } catch (_) { }
+  };
+  useEffect(() => { loadSsl(); }, []);
+
+  const buySsl = async (method) => {
+    if (!sslPick) { setSslMsg('Choose an SSL product.'); return; }
+    setSslBusy(true); setSslMsg('');
+    try {
+      const res = await axios.post(`${API_URL}/customer/nc/ssl/buy`, { productType: sslPick, years: sslYears, forDomain: sslForDomain, method });
+      if (res.data.checkoutUrl) window.location.href = res.data.checkoutUrl;
+      else setSslMsg('Could not start checkout.');
+    } catch (e) { setSslMsg(e?.response?.data?.error || 'Could not start SSL purchase.'); }
+    finally { setSslBusy(false); }
+  };
+
   const loadTransfers = async () => {
     try { const r = await axios.get(`${API_URL}/customer/domains/transfers`); setTransfers(r.data.transfers || []); }
     catch (_) { }
@@ -3308,11 +3543,54 @@ const CustomerDomains = () => {
           </div>
         )}
       </div>
+
+      <div style={{ ...card, marginTop: 18 }}>
+        <h3 style={{ marginTop: 0 }}>SSL certificates</h3>
+        <p style={{ color: MUTE, fontSize: 14 }}>Secure your website with an SSL certificate (HTTPS padlock). After purchase, you'll activate it with a CSR for your domain.</p>
+        {sslProducts.length === 0 ? (
+          <p style={{ color: MUTE }}>No SSL products are available right now. Please check back later.</p>
+        ) : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 90px 1.5fr', gap: 10, marginBottom: 10 }}>
+              <select value={sslPick} onChange={e => setSslPick(e.target.value)} style={{ height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 12px' }}>
+                {sslProducts.map(p => <option key={p.name} value={p.name}>{p.name} — ${Number(p.price).toFixed(2)}/yr</option>)}
+              </select>
+              <select value={sslYears} onChange={e => setSslYears(Number(e.target.value))} style={{ height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 8px' }}>
+                {[1, 2].map(y => <option key={y} value={y}>{y} yr</option>)}
+              </select>
+              <input value={sslForDomain} onChange={e => setSslForDomain(e.target.value)} placeholder="for domain (optional)" style={{ height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px' }} />
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button onClick={() => buySsl('stripe')} disabled={sslBusy} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>{sslBusy ? '…' : '💳 Buy SSL (card)'}</button>
+              <button onClick={() => buySsl('nicky')} disabled={sslBusy} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>{sslBusy ? '…' : '🪙 Buy SSL (crypto)'}</button>
+            </div>
+          </>
+        )}
+        {sslMsg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: sslMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: sslMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{sslMsg}</div>}
+
+        {sslOrders.length > 0 && (
+          <div style={{ marginTop: 18 }}>
+            <h4 style={{ margin: '0 0 8px' }}>Your SSL certificates</h4>
+            <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+              <thead><tr style={{ textAlign: 'left', color: MUTE }}><th style={{ padding: '6px 0' }}>Product</th><th>For</th><th>Status</th></tr></thead>
+              <tbody>
+                {sslOrders.map(o => (
+                  <tr key={o.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '8px 0', fontWeight: 600 }}>{o.productType}</td>
+                    <td>{o.forDomain || '—'}</td>
+                    <td><span style={{ color: o.status === 'purchased' ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>
+                      {o.status === 'purchased' ? '✓ Purchased' : o.status === 'failed' ? 'Failed' : o.status === 'test_paid' ? 'Test' : 'Processing'}
+                    </span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
-
-// ==================== DOMAIN DNS MANAGEMENT PANEL ====================
 const DomainManagePanel = ({ domain, onClose }) => {
   const [tab, setTab] = useState('dns'); // 'dns' | 'nameservers' | 'verification'
   const [hosts, setHosts] = useState([]);
@@ -3587,6 +3865,108 @@ const CustomerSubscriptions = () => {
 };
 
 // Customer: Google Voice info + guidance (number assignment happens in their Admin console)
+// ==================== CUSTOMER: SSL ====================
+const CustomerSsl = () => {
+  const [products, setProducts] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [sel, setSel] = useState('');
+  const [years, setYears] = useState(1);
+  const [forDomain, setForDomain] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [p, o] = await Promise.all([
+        axios.get(`${API_URL}/customer/nc/ssl`).catch(() => ({ data: { products: [] } })),
+        axios.get(`${API_URL}/customer/nc/ssl/orders`).catch(() => ({ data: { orders: [] } })),
+      ]);
+      setProducts(p.data.products || []);
+      if (p.data.products?.length && !sel) setSel(p.data.products[0].name);
+      setOrders(o.data.orders || []);
+    } catch (_) { }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const buy = async (method) => {
+    if (!sel) { setMsg('Choose an SSL product.'); return; }
+    setBusy(true); setMsg('');
+    try {
+      const res = await axios.post(`${API_URL}/customer/nc/ssl/buy`, { productType: sel, years, forDomain: forDomain.trim(), method });
+      if (res.data.checkoutUrl) window.location.href = res.data.checkoutUrl;
+      else setMsg('Could not start checkout.');
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not start purchase.'); }
+    finally { setBusy(false); }
+  };
+
+  const card = { background: '#fff', borderRadius: 16, padding: 24, marginBottom: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
+  if (loading) return <div style={card}>Loading SSL products…</div>;
+
+  return (
+    <div>
+      <h1 style={{ marginTop: 0 }}>SSL certificates</h1>
+      <p style={{ color: MUTE, marginTop: 0 }}>Secure your website with HTTPS. After purchase, we'll help you activate the certificate on your domain.</p>
+
+      <div style={card}>
+        <h3 style={{ marginTop: 0 }}>Buy a certificate</h3>
+        {products.length === 0 ? (
+          <p style={{ color: MUTE }}>SSL products aren't available right now. Please check back later or contact support.</p>
+        ) : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 2fr', gap: 10, marginBottom: 12 }}>
+              <div>
+                <label style={{ fontSize: 12, color: MUTE }}>Product</label>
+                <select value={sel} onChange={e => setSel(e.target.value)} style={{ width: '100%', height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 12px' }}>
+                  {products.map(p => <option key={p.name} value={p.name}>{p.name} — ${Number(p.price).toFixed(2)}/yr</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: MUTE }}>Years</label>
+                <select value={years} onChange={e => setYears(Number(e.target.value))} style={{ width: '100%', height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 12px' }}>
+                  {[1, 2].map(y => <option key={y} value={y}>{y} year{y > 1 ? 's' : ''}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: MUTE }}>For domain (optional)</label>
+                <input value={forDomain} onChange={e => setForDomain(e.target.value)} placeholder="example.com" style={{ width: '100%', height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 12px' }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button onClick={() => buy('stripe')} disabled={busy} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 20px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '💳 Buy by card'}</button>
+              <button onClick={() => buy('nicky')} disabled={busy} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 20px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '🪙 Buy with crypto'}</button>
+            </div>
+            {msg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</div>}
+          </>
+        )}
+      </div>
+
+      <div style={card}>
+        <h3 style={{ marginTop: 0 }}>My SSL orders</h3>
+        {orders.length === 0 ? <p style={{ color: MUTE }}>No SSL orders yet.</p> : (
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: MUTE }}><th style={{ padding: '6px 0' }}>Product</th><th>Domain</th><th>Status</th><th>Note</th></tr></thead>
+            <tbody>
+              {orders.map(o => (
+                <tr key={o.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '8px 0', fontWeight: 600 }}>{o.productType}</td>
+                  <td>{o.forDomain || '—'}</td>
+                  <td><span style={{ color: (o.status === 'active' || o.status === 'purchased') ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>
+                    {o.status === 'purchased' ? 'Purchased' : o.status === 'active' ? '✓ Active' : o.status === 'failed' ? 'Failed' : o.status === 'pending' ? 'Processing' : o.status}
+                  </span></td>
+                  <td style={{ color: MUTE, fontSize: 13 }}>{o.activationNote || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ==================== CUSTOMER: ADD-ONS ====================
 const CustomerAddons = () => {
   const [addons, setAddons] = useState([]);
