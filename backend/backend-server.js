@@ -376,6 +376,17 @@ const PaymentSettingsSchema = new mongoose.Schema({
 });
 const PaymentSettings = mongoose.model('PaymentSettings', PaymentSettingsSchema);
 
+// Branding: logo + favicon (stored as base64 data URLs) + brand name/color.
+const BrandSettingsSchema = new mongoose.Schema({
+  singleton: { type: String, default: 'main', unique: true },
+  brandName: { type: String, default: 'GNB MENTOR LLC' },
+  brandColor: { type: String, default: '#0F766E' },
+  logoDataUrl: { type: String, default: '' },     // data:image/png;base64,...
+  faviconDataUrl: { type: String, default: '' },
+  updatedAt: { type: Date, default: Date.now },
+});
+const BrandSettings = mongoose.model('BrandSettings', BrandSettingsSchema);
+
 // ==================== STAGE 1: EDITABLE PLANS + WORKSPACE ORDERS ====================
 
 // Plan Schema — prices stored in DB so they are editable without code changes
@@ -3692,7 +3703,12 @@ async function ncCheckDomains(domainList) {
   };
 }
 
+// Cache TLD pricing (cost rarely changes) for 1 hour to speed up multi-TLD search.
+const _ncPriceCache = {};
 async function ncGetTldPricing(tld, actionName = 'REGISTER') {
+  const cacheKey = `${tld}:${actionName}`;
+  const cached = _ncPriceCache[cacheKey];
+  if (cached && (Date.now() - cached.at < 60 * 60 * 1000)) return cached.val;
   const r = await ncCall('namecheap.users.getPricing', {
     ProductType: 'DOMAIN', ProductCategory: actionName.toLowerCase(),
     ActionName: actionName, ProductName: tld,
@@ -3719,7 +3735,9 @@ async function ncGetTldPricing(tld, actionName = 'REGISTER') {
             : (price != null && price > 0) ? price
               : (regular || 0);
           console.log(`NC PRICING ${tld} ${actionName}: YourPrice=${yourPrice} Price=${price} Regular=${regular} → cost used=${cost}`);
-          return { ok: true, cost, currency: oneYear['@_Currency'] || 'USD' };
+          const val = { ok: true, cost, currency: oneYear['@_Currency'] || 'USD' };
+          _ncPriceCache[cacheKey] = { at: Date.now(), val };
+          return val;
         }
       }
     }
@@ -4783,20 +4801,42 @@ app.get('/api/admin/domain-balance', authenticateCustomer, requireAdmin, async (
 app.post('/api/public/domains/search', async (req, res) => {
   try {
     const { domainName } = req.body;
-    const dom = (domainName || '').toLowerCase().trim();
-    if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) {
-      return res.status(400).json({ error: 'Please enter a valid domain like example.com' });
+    const raw = (domainName || '').toLowerCase().trim();
+    if (!raw) return res.status(400).json({ error: 'Enter a domain or a name to search.' });
+
+    // Full domain (has a dot): check just that one.
+    if (raw.includes('.')) {
+      if (!/^[a-z0-9-]+\.[a-z.]{2,}$/.test(raw)) return res.status(400).json({ error: 'Enter a valid domain like example.com' });
+      const check = await ncCheckDomains([raw]);
+      if (!check.ok) return res.status(502).json({ error: check.error });
+      const d = check.domains[0];
+      let price = null;
+      if (d.available) {
+        const tld = tldOf(raw);
+        if (d.isPremium && d.premiumPrice) price = ncApplyPricing(d.premiumPrice);
+        else { const pricing = await ncGetTldPricing(tld, 'REGISTER'); if (pricing.ok) price = await ncCustomerPriceForTld(tld, pricing.cost); }
+      }
+      return res.json({ domainName: raw, available: d.available, isPremium: d.isPremium, currency: 'USD', period: 1, price, results: [{ domain: raw, available: d.available, isPremium: d.isPremium, price }] });
     }
-    const check = await ncCheckDomains([dom]);
+
+    // Bare name: check across popular TLDs in parallel.
+    const name = raw.replace(/[^a-z0-9-]/g, '');
+    if (!name) return res.status(400).json({ error: 'Enter a valid name (letters, numbers, hyphens).' });
+    const tlds = ['com', 'net', 'org', 'io', 'co', 'shop', 'store', 'online', 'site', 'xyz'];
+    const domains = tlds.map((t) => `${name}.${t}`);
+    const check = await ncCheckDomains(domains);
     if (!check.ok) return res.status(502).json({ error: check.error });
-    const d = check.domains[0];
-    let price = null;
-    if (d.available) {
-      const tld = tldOf(dom);
-      if (d.isPremium && d.premiumPrice) price = ncApplyPricing(d.premiumPrice);
-      else { const pricing = await ncGetTldPricing(tld, 'REGISTER'); if (pricing.ok) price = await ncCustomerPriceForTld(tld, pricing.cost); }
-    }
-    res.json({ domainName: dom, available: d.available, currency: 'USD', period: 1, price });
+    const results = await Promise.all(check.domains.map(async (d) => {
+      let price = null;
+      if (d.available) {
+        const tld = tldOf(d.domain);
+        if (d.isPremium && d.premiumPrice) price = ncApplyPricing(d.premiumPrice);
+        else { try { const pricing = await ncGetTldPricing(tld, 'REGISTER'); if (pricing.ok) price = await ncCustomerPriceForTld(tld, pricing.cost); } catch (_) { } }
+      }
+      return { domain: d.domain, available: d.available, isPremium: d.isPremium, price };
+    }));
+    results.sort((a, b) => (b.available - a.available) || ((a.price || 999) - (b.price || 999)));
+    res.json({ multi: true, results });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -4832,21 +4872,62 @@ app.post('/api/customer/domains/search', authenticateCustomer, async (req, res) 
     const check = await ncCheckDomains(domains);
     if (!check.ok) return res.status(502).json({ error: check.error });
 
-    const results = [];
-    for (const d of check.domains) {
+    // Price all available TLDs in PARALLEL (not sequentially) to avoid timeouts.
+    const results = await Promise.all(check.domains.map(async (d) => {
       let price = null;
       if (d.available) {
         const tld = tldOf(d.domain);
         if (d.isPremium && d.premiumPrice) price = ncApplyPricing(d.premiumPrice);
-        else { const pricing = await ncGetTldPricing(tld, 'REGISTER'); if (pricing.ok) price = await ncCustomerPriceForTld(tld, pricing.cost); }
+        else {
+          try {
+            const pricing = await ncGetTldPricing(tld, 'REGISTER');
+            if (pricing.ok) price = await ncCustomerPriceForTld(tld, pricing.cost);
+          } catch (_) { }
+        }
       }
-      results.push({ domain: d.domain, available: d.available, isPremium: d.isPremium, price });
-    }
+      return { domain: d.domain, available: d.available, isPremium: d.isPremium, price };
+    }));
     // Sort: available first, then by price
     results.sort((a, b) => (b.available - a.available) || ((a.price || 999) - (b.price || 999)));
     res.json({ multi: true, results });
   } catch (e) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+// ---- BRANDING ----
+// Public: get branding (logo, favicon, name, color) for the portal to render.
+app.get('/api/branding', async (req, res) => {
+  try {
+    const b = await BrandSettings.findOne({ singleton: 'main' });
+    res.json({
+      brandName: b?.brandName || process.env.BRAND_NAME || 'GNB MENTOR LLC',
+      brandColor: b?.brandColor || '#0F766E',
+      logoDataUrl: b?.logoDataUrl || '',
+      faviconDataUrl: b?.faviconDataUrl || '',
+    });
+  } catch (e) {
+    res.json({ brandName: 'GNB MENTOR LLC', brandColor: '#0F766E', logoDataUrl: '', faviconDataUrl: '' });
+  }
+});
+
+// Admin: update branding. Accepts base64 data URLs for logo/favicon.
+app.post('/api/admin/branding', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { brandName, brandColor, logoDataUrl, faviconDataUrl } = req.body;
+    // Guardrails: limit image size to keep the DB lean (~500KB base64).
+    const tooBig = (s) => typeof s === 'string' && s.length > 700000;
+    if (tooBig(logoDataUrl)) return res.status(400).json({ error: 'Logo is too large. Please use an image under 500KB.' });
+    if (tooBig(faviconDataUrl)) return res.status(400).json({ error: 'Favicon is too large. Please use a small icon (under 100KB).' });
+    const update = { updatedAt: new Date() };
+    if (brandName !== undefined) update.brandName = brandName;
+    if (brandColor !== undefined) update.brandColor = brandColor;
+    if (logoDataUrl !== undefined) update.logoDataUrl = logoDataUrl;
+    if (faviconDataUrl !== undefined) update.faviconDataUrl = faviconDataUrl;
+    const b = await BrandSettings.findOneAndUpdate({ singleton: 'main' }, update, { upsert: true, new: true });
+    res.json({ success: true, branding: { brandName: b.brandName, brandColor: b.brandColor, logoDataUrl: b.logoDataUrl, faviconDataUrl: b.faviconDataUrl } });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

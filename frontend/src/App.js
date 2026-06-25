@@ -40,6 +40,31 @@ const COUNTRIES = [
 // Auth Context
 const AuthContext = createContext();
 
+// Branding Context — loads logo/favicon/name/color from the backend and applies the favicon.
+const BrandingContext = createContext({ brandName: 'GNB MENTOR LLC', brandColor: '#0F766E', logoDataUrl: '', faviconDataUrl: '' });
+const useBranding = () => useContext(BrandingContext);
+
+const BrandingProvider = ({ children }) => {
+  const [branding, setBranding] = useState({ brandName: 'GNB MENTOR LLC', brandColor: '#0F766E', logoDataUrl: '', faviconDataUrl: '' });
+  const refresh = async () => {
+    try {
+      const r = await axios.get(`${API_URL}/branding`);
+      if (r.data) setBranding(r.data);
+    } catch (_) { }
+  };
+  useEffect(() => { refresh(); }, []);
+  // Apply favicon + page title whenever branding changes.
+  useEffect(() => {
+    if (branding.faviconDataUrl) {
+      let link = document.querySelector("link[rel~='icon']");
+      if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+      link.href = branding.faviconDataUrl;
+    }
+    if (branding.brandName) document.title = branding.brandName;
+  }, [branding.faviconDataUrl, branding.brandName]);
+  return <BrandingContext.Provider value={{ ...branding, refresh }}>{children}</BrandingContext.Provider>;
+};
+
 const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -468,6 +493,14 @@ const Dashboard = () => {
               🛡️ Abuse Monitor
             </button>
           </li>
+          <li>
+            <button
+              className={`menu-item ${activeSection === 'branding' ? 'active' : ''}`}
+              onClick={() => setActiveSection('branding')}
+            >
+              🎨 Branding
+            </button>
+          </li>
         </ul>
 
         <button onClick={logout} className="btn btn-logout">
@@ -489,6 +522,7 @@ const Dashboard = () => {
         {activeSection === 'emails' && <AdminEmailsSection />}
         {activeSection === 'domains-ssl' && <AdminDomainsSslSection />}
         {activeSection === 'voice-monitor' && <AdminVoiceMonitorSection />}
+        {activeSection === 'branding' && <AdminBrandingSection />}
       </main>
     </div>
   );
@@ -2910,6 +2944,7 @@ const MUTE = '#6b7280';
 
 const CustomerPortal = () => {
   const { user, logout } = useAuth();
+  const brand = useBranding();
   // Restore the section from the URL hash so a refresh keeps you on the same page.
   const initialSection = (typeof window !== 'undefined' && window.location.hash)
     ? window.location.hash.replace('#', '') : 'overview';
@@ -2993,8 +3028,12 @@ const CustomerPortal = () => {
       {/* Top bar */}
       <header style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '14px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 8, background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>A</div>
-          <strong style={{ fontSize: 18, color: TEAL }}>GNB MENTOR LLC</strong>
+          {brand.logoDataUrl
+            ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 38, maxWidth: 180 }} />
+            : <>
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>{(brand.brandName || 'G')[0]}</div>
+              <strong style={{ fontSize: 18, color: TEAL }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
+            </>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <span style={{ color: MUTE }}>Welcome, <strong style={{ color: INK }}>{name}</strong></span>
@@ -3003,9 +3042,9 @@ const CustomerPortal = () => {
         </div>
       </header>
 
-      <div style={{ display: 'flex', gap: 24, padding: 24, maxWidth: 1200, margin: '0 auto', alignItems: 'flex-start' }}>
+      <div className="cp-layout" style={{ display: 'flex', gap: 24, padding: 24, maxWidth: 1200, margin: '0 auto', alignItems: 'flex-start' }}>
         {/* Sidebar card */}
-        <aside style={{ width: 240, background: '#fff', borderRadius: 16, padding: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', flexShrink: 0 }}>
+        <aside className="cp-sidebar" style={{ width: 240, background: '#fff', borderRadius: 16, padding: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', flexShrink: 0 }}>
           <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700, padding: '6px 12px' }}>ACCOUNT</div>
           {navItems.map((it) => {
             const active = section === it.key;
@@ -3783,13 +3822,15 @@ const DomainManagePanel = ({ domain, onClose }) => {
 
             <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid #eee' }}>
               <h4 style={{ margin: '0 0 4px' }}>📧 Email setup (MX records)</h4>
-              <p style={{ color: MUTE, fontSize: 13, marginTop: 0 }}>Add the right mail records in one click, then Save.</p>
+              <p style={{ color: MUTE, fontSize: 13, marginTop: 0 }}>Add mail records in one click, then Save.</p>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button onClick={addGoogleEmail} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Google Workspace email</button>
-                <button onClick={addGoogleEmailLegacy} style={{ background: '#fff', color: INK, border: '1px solid #d8dbe6', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 13 }}>Google (5-record set)</button>
+                <button onClick={addGoogleEmail} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Set up Google Workspace email</button>
                 <button onClick={addCustomMx} style={{ background: '#fff', color: INK, border: '1px solid #d8dbe6', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 13 }}>+ Custom mail server</button>
               </div>
-              <p style={{ color: MUTE, fontSize: 12, marginTop: 8 }}>Tip: "Google Workspace email" works for new Google accounts. If your account is older and mail doesn't arrive, use the 5-record set instead.</p>
+              <p style={{ color: MUTE, fontSize: 12, marginTop: 8 }}>
+                This adds Google's single MX record (works for current Workspace accounts). Older accounts that need the legacy 5-record set can{' '}
+                <button onClick={addGoogleEmailLegacy} style={{ background: 'none', border: 'none', color: TEAL, cursor: 'pointer', padding: 0, fontSize: 12, textDecoration: 'underline' }}>use the 5-record set instead</button>.
+              </p>
             </div>
           </div>
         ) : tab === 'nameservers' ? (
@@ -4258,6 +4299,7 @@ const CustomerSettings = () => {
 
 // ==================== PUBLIC LANDING PAGE ====================
 const LandingPage = () => {
+  const brand = useBranding();
   const [plans, setPlans] = useState([]);
   const [dq, setDq] = useState('');
   const [dResult, setDResult] = useState(null);
@@ -4275,7 +4317,8 @@ const LandingPage = () => {
   const searchDomain = async () => {
     setDError(''); setDResult(null);
     const dom = dq.toLowerCase().trim();
-    if (!/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) { setDError('Enter a full domain like yourbusiness.com'); return; }
+    if (!dom) { setDError('Enter a name or domain to search.'); return; }
+    if (dom.includes('.') && !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) { setDError('Enter a valid domain like yourbusiness.com, or just a name.'); return; }
     setDLoading(true);
     try {
       const res = await axios.post(`${API_URL}/public/domains/search`, { domainName: dom });
@@ -4289,8 +4332,12 @@ const LandingPage = () => {
       {/* Nav */}
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 40px', maxWidth: 1200, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 10, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>A</div>
-          <strong style={{ fontSize: 22, color: T }}>GNB MENTOR LLC</strong>
+          {brand.logoDataUrl
+            ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 44, maxWidth: 200 }} />
+            : <>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>{(brand.brandName || 'G')[0]}</div>
+              <strong style={{ fontSize: 22, color: T }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
+            </>}
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
           <button onClick={() => go('/login')} style={{ background: 'transparent', border: 'none', color: INKL, fontSize: 16, cursor: 'pointer', padding: '10px 16px' }}>↪ Login</button>
@@ -4310,7 +4357,7 @@ const LandingPage = () => {
             </span>
             <strong style={{ fontSize: 14 }}>Business email & apps in one place</strong>
           </div>
-          <h1 style={{ fontSize: 56, lineHeight: 1.05, margin: '0 0 20px', fontWeight: 800 }}>
+          <h1 className="hero-title" style={{ fontSize: 56, lineHeight: 1.05, margin: '0 0 20px', fontWeight: 800 }}>
             Get <span style={{ color: T }}>professional email</span> for your team
           </h1>
           <p style={{ fontSize: 18, color: MUTEL, lineHeight: 1.6, margin: '0 0 28px', maxWidth: 520 }}>
@@ -4351,13 +4398,13 @@ const LandingPage = () => {
           <p style={{ fontSize: 18, color: MUTEL, lineHeight: 1.6, margin: '0 0 28px' }}>
             Create a custom email address connected to your domain to build instant trust and look credible from the get go.
           </p>
-          <p style={{ fontWeight: 600, margin: '0 0 14px' }}>Start by finding the right domain for your business email</p>
+          <p style={{ fontWeight: 600, margin: '0 0 14px' }}>Start by finding the right domain — type a name or a full domain</p>
           <div style={{ display: 'flex', gap: 10, maxWidth: 560, margin: '0 auto' }}>
             <input
               value={dq}
               onChange={e => setDq(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') searchDomain(); }}
-              placeholder="yourbusiness.com"
+              placeholder="mybusiness  or  mybusiness.com"
               style={{ flex: 1, height: 52, borderRadius: 12, border: '1px solid #d8dbe6', padding: '0 16px', fontSize: 16 }}
             />
             <button onClick={searchDomain} disabled={dLoading}
@@ -4366,23 +4413,26 @@ const LandingPage = () => {
             </button>
           </div>
           {dError && <div style={{ color: '#b42318', marginTop: 12 }}>{dError}</div>}
-          {dResult && (
-            <div style={{ marginTop: 20, background: '#f0f7f5', borderRadius: 14, padding: 20, maxWidth: 560, margin: '20px auto 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-              <div style={{ textAlign: 'left' }}>
-                <div style={{ fontSize: 18, fontWeight: 700 }}>{dResult.domainName}</div>
-                <div style={{ color: dResult.available ? '#166534' : '#b45309', fontWeight: 600 }}>
-                  {dResult.available ? '✓ Available' : '✗ Taken'}
+          {dResult && dResult.results && (
+            <div style={{ marginTop: 20, maxWidth: 560, margin: '20px auto 0' }}>
+              {dResult.results.map((r, i) => (
+                <div key={i} style={{ background: r.available ? '#f0f7f5' : '#fafafa', borderRadius: 12, padding: '14px 18px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, opacity: r.available ? 1 : 0.65 }}>
+                  <div style={{ textAlign: 'left' }}>
+                    <span style={{ fontSize: 16, fontWeight: 700 }}>{r.domain}</span>
+                    {r.isPremium && <span style={{ marginLeft: 8, fontSize: 11, background: '#fde68a', color: '#92600a', padding: '2px 8px', borderRadius: 999 }}>Premium</span>}
+                    <div style={{ color: r.available ? '#166534' : '#b45309', fontWeight: 600, fontSize: 13 }}>{r.available ? '✓ Available' : '✗ Taken'}</div>
+                  </div>
+                  {r.available && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <strong style={{ fontSize: 18, color: T }}>{r.price != null ? `$${Number(r.price).toFixed(2)}/yr` : ''}</strong>
+                      <button onClick={() => go('/register')}
+                        style={{ background: T, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>
+                        Get started
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </div>
-              {dResult.available && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <strong style={{ fontSize: 20, color: T }}>${Number(dResult.price).toFixed(2)}/yr</strong>
-                  <button onClick={() => go('/register')}
-                    style={{ background: T, color: '#fff', border: 'none', borderRadius: 10, padding: '12px 22px', fontWeight: 700, cursor: 'pointer' }}>
-                    Get started
-                  </button>
-                </div>
-              )}
+              ))}
             </div>
           )}
         </div>
@@ -5089,10 +5139,123 @@ const wofStyles = `
 
 
 // ==================== ROOT RENDER ====================
+// ==================== ADMIN: BRANDING (logo + favicon) ====================
+const AdminBrandingSection = () => {
+  const { refresh } = useBranding();
+  const [brandName, setBrandName] = useState('');
+  const [brandColor, setBrandColor] = useState('#0F766E');
+  const [logo, setLogo] = useState('');
+  const [favicon, setFavicon] = useState('');
+  const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await axios.get(`${API_URL}/branding`);
+        if (r.data) { setBrandName(r.data.brandName || ''); setBrandColor(r.data.brandColor || '#0F766E'); setLogo(r.data.logoDataUrl || ''); setFavicon(r.data.faviconDataUrl || ''); }
+      } catch (_) { }
+    })();
+  }, []);
+
+  const fileToDataUrl = (file, maxKB, cb) => {
+    if (!file) return;
+    if (file.size > maxKB * 1024) { setMsg(`That file is too large. Please use an image under ${maxKB}KB.`); return; }
+    const reader = new FileReader();
+    reader.onload = () => cb(reader.result);
+    reader.readAsDataURL(file);
+  };
+
+  const save = async () => {
+    setSaving(true); setMsg('');
+    try {
+      await axios.post(`${API_URL}/admin/branding`, { brandName, brandColor, logoDataUrl: logo, faviconDataUrl: favicon });
+      setMsg('✓ Branding saved. Refresh the page to see the new favicon.');
+      if (refresh) refresh();
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not save branding.'); }
+    finally { setSaving(false); }
+  };
+
+  const box = { background: '#fff', borderRadius: 14, padding: 24, border: '1px solid #e5e7eb', maxWidth: 680 };
+  const label = { fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 };
+
+  return (
+    <div>
+      <h2 style={{ marginTop: 0 }}>🎨 Branding</h2>
+      <p style={{ color: '#6b7280' }}>Upload your logo and favicon, set your brand name and color. These appear across the portal.</p>
+
+      {msg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, maxWidth: 680, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a' }}>{msg}</div>}
+
+      <div style={box}>
+        <div style={{ marginBottom: 18 }}>
+          <label style={label}>Brand name</label>
+          <input value={brandName} onChange={e => setBrandName(e.target.value)} placeholder="GNB MENTOR LLC"
+            style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }} />
+        </div>
+
+        <div style={{ marginBottom: 18 }}>
+          <label style={label}>Brand color</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input type="color" value={brandColor} onChange={e => setBrandColor(e.target.value)} style={{ width: 48, height: 42, border: '1px solid #d8dbe6', borderRadius: 8, cursor: 'pointer' }} />
+            <input value={brandColor} onChange={e => setBrandColor(e.target.value)} style={{ flex: 1, height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }} />
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 18 }}>
+          <label style={label}>Logo (PNG/JPG/SVG, under 500KB)</label>
+          {logo && <div style={{ marginBottom: 8 }}><img src={logo} alt="logo" style={{ maxHeight: 60, maxWidth: 240, background: '#f8fafc', padding: 6, borderRadius: 8 }} /></div>}
+          <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" onChange={e => fileToDataUrl(e.target.files[0], 500, setLogo)} />
+          {logo && <button onClick={() => setLogo('')} style={{ marginLeft: 10, background: '#fef2f2', color: '#b42318', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>Remove</button>}
+        </div>
+
+        <div style={{ marginBottom: 18 }}>
+          <label style={label}>Favicon (PNG/ICO, small, under 100KB)</label>
+          {favicon && <div style={{ marginBottom: 8 }}><img src={favicon} alt="favicon" style={{ width: 32, height: 32, background: '#f8fafc', padding: 4, borderRadius: 6 }} /></div>}
+          <input type="file" accept="image/png,image/x-icon,image/vnd.microsoft.icon,image/svg+xml" onChange={e => fileToDataUrl(e.target.files[0], 100, setFavicon)} />
+          {favicon && <button onClick={() => setFavicon('')} style={{ marginLeft: 10, background: '#fef2f2', color: '#b42318', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>Remove</button>}
+        </div>
+
+        <button onClick={save} disabled={saving} style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontWeight: 700, cursor: 'pointer' }}>
+          {saving ? 'Saving…' : 'Save branding'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Global responsive styles — injected once. Makes the portal adapt to phones/tablets.
+const ResponsiveStyles = () => (
+  <style>{`
+    @media (max-width: 860px) {
+      .cp-layout { flex-direction: column !important; padding: 14px !important; gap: 14px !important; }
+      .cp-sidebar { width: 100% !important; display: flex !important; flex-wrap: wrap !important; gap: 6px !important; }
+      .cp-sidebar > button { flex: 1 1 auto !important; min-width: 120px !important; }
+      .dashboard { flex-direction: column !important; }
+      .sidebar { width: 100% !important; height: auto !important; position: static !important; }
+      .sidebar-menu { display: flex !important; flex-wrap: wrap !important; gap: 6px !important; }
+      .sidebar-menu > li { flex: 1 1 auto !important; }
+      .dashboard-content { padding: 16px !important; }
+      table { display: block !important; overflow-x: auto !important; }
+    }
+    @media (max-width: 600px) {
+      h1 { font-size: 30px !important; }
+      h2 { font-size: 24px !important; }
+      .hero-title { font-size: 34px !important; }
+    }
+    img { max-width: 100%; height: auto; }
+    input, select, textarea { max-width: 100%; box-sizing: border-box; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+    * { -webkit-tap-highlight-color: transparent; }
+  `}</style>
+);
+
 export default function Root() {
   return (
-    <AuthProvider>
-      <App />
-    </AuthProvider>
+    <BrandingProvider>
+      <ResponsiveStyles />
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    </BrandingProvider>
   );
 }
