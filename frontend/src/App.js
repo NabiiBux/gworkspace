@@ -116,9 +116,12 @@ const useAuth = () => useContext(AuthContext);
 // ==================== LOGIN PAGE ====================
 const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
   const { login } = useAuth();
+  const brand = useBranding();
   const [activeTab, setActiveTab] = useState(startTab);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [showPwReg, setShowPwReg] = useState(false);
 
   // Login Form
   const [loginForm, setLoginForm] = useState({
@@ -188,11 +191,14 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
   };
 
   return (
-    <div className="auth-container">
-      <div className="auth-card">
-        <div className="auth-header">
-          <h1>🚀 Google Workspace Portal</h1>
-          <p>Reseller Management Platform</p>
+    <div className="auth-container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: 'linear-gradient(135deg,#0F766E 0%,#0b5750 45%,#0a3f3a 100%)' }}>
+      <div className="auth-card" style={{ background: '#fff', borderRadius: 20, padding: '32px', width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
+        <div className="auth-header" style={{ textAlign: 'center', marginBottom: 8 }}>
+          {brand.logoDataUrl
+            ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 54, maxWidth: 200, marginBottom: 8 }} />
+            : <div style={{ width: 54, height: 54, borderRadius: 14, background: '#0F766E', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 24, marginBottom: 8 }}>{(brand.brandName || 'G')[0]}</div>}
+          <h1 style={{ fontSize: 22, margin: '6px 0 2px', color: '#111827' }}>{adminMode ? 'Admin sign in' : (brand.brandName || 'GNB MENTOR LLC')}</h1>
+          <p style={{ color: '#6b7280', margin: 0, fontSize: 14 }}>{adminMode ? 'Administrator access' : 'Sign in or create your account'}</p>
         </div>
 
         <div className="auth-tabs">
@@ -223,7 +229,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
         {activeTab === 'login' && (
           <form onSubmit={handleLogin} className="auth-form">
             <div className="form-group">
-              <label>Business Email</label>
+              <label>Email</label>
               <input
                 type="email"
                 placeholder="your@company.com"
@@ -237,15 +243,22 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
 
             <div className="form-group">
               <label>Password</label>
-              <input
-                type="password"
-                placeholder="••••••••"
-                value={loginForm.password}
-                onChange={(e) =>
-                  setLoginForm({ ...loginForm, password: e.target.value })
-                }
-                required
-              />
+              <div style={{ position: 'relative' }}>
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  value={loginForm.password}
+                  onChange={(e) =>
+                    setLoginForm({ ...loginForm, password: e.target.value })
+                  }
+                  required
+                  style={{ paddingRight: 64 }}
+                />
+                <button type="button" onClick={() => setShowPw(v => !v)}
+                  style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#0F766E', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                  {showPw ? 'Hide' : 'Show'}
+                </button>
+              </div>
             </div>
 
             <button type="submit" className="btn btn-primary" disabled={loading}>
@@ -324,8 +337,15 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
               </div>
               <div className="form-group">
                 <label>Password</label>
-                <input type="password" value={registerForm.password} required
-                  onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })} />
+                <div style={{ position: 'relative' }}>
+                  <input type={showPwReg ? 'text' : 'password'} value={registerForm.password} required
+                    onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })}
+                    style={{ paddingRight: 64 }} />
+                  <button type="button" onClick={() => setShowPwReg(v => !v)}
+                    style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#0F766E', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                    {showPwReg ? 'Hide' : 'Show'}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -546,39 +566,38 @@ const OverviewSection = ({ stats }) => {
 
       {liveErr && <div style={{ background: '#fff7ed', color: '#9a3412', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{liveErr}</div>}
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <h3>Customers (Google)</h3>
-          <p className="stat-value">{live ? live.totalCustomers : '…'}</p>
-        </div>
-
-        <div className="stat-card">
-          <h3>Active Subscriptions</h3>
-          <p className="stat-value">{live ? live.activeSubscriptions : '…'}</p>
-        </div>
-
-        <div className="stat-card">
-          <h3>Total Seats</h3>
-          <p className="stat-value">{live ? live.totalSeats : '…'}</p>
-        </div>
-
-        <div className="stat-card">
-          <h3>All Subscriptions</h3>
-          <p className="stat-value">{live ? live.totalSubscriptions : '…'}</p>
-        </div>
-
-        <div className="stat-card">
-          <h3>Suspended</h3>
-          <p className="stat-value">{live ? live.suspendedSubscriptions : '…'}</p>
-        </div>
-
-        <div className="stat-card">
-          <h3>Reseller Code</h3>
-          <p className="stat-value code">{stats.customerInfo.resellerCode}</p>
-        </div>
+      {/* Combined summary */}
+      <div className="stats-grid" style={{ marginBottom: 20 }}>
+        <div className="stat-card"><h3>Total Customers</h3><p className="stat-value">{live ? (live.combined?.totalCustomers ?? live.totalCustomers) : '…'}</p></div>
+        <div className="stat-card"><h3>Active Subscriptions</h3><p className="stat-value">{live ? (live.combined?.activeSubscriptions ?? live.activeSubscriptions) : '…'}</p></div>
+        <div className="stat-card"><h3>Total Seats</h3><p className="stat-value">{live ? (live.combined?.totalSeats ?? live.totalSeats) : '…'}</p></div>
+        <div className="stat-card"><h3>Suspended</h3><p className="stat-value">{live ? (live.combined?.suspendedSubscriptions ?? live.suspendedSubscriptions) : '…'}</p></div>
       </div>
 
-      <div className="recent-orders">
+      {/* Per-account breakdown: USA vs Pakistan */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }} className="grid-2">
+        {[
+          { key: 'pk', label: '🇵🇰 Pakistan reseller', sub: 'gnbmentor.com · Workspace', color: '#0F766E', data: live?.pk },
+          { key: 'usa', label: '🇺🇸 USA reseller', sub: 'artisandrywallaz.com · Voice', color: '#1d4ed8', data: live?.usa },
+        ].map(acc => (
+          <div key={acc.key} style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #e5e7eb', borderTop: `4px solid ${acc.color}` }}>
+            <div style={{ fontWeight: 700, fontSize: 16 }}>{acc.label}</div>
+            <div style={{ color: '#6b7280', fontSize: 13, marginBottom: 14 }}>{acc.sub}</div>
+            {!live ? <p style={{ color: '#9ca3af' }}>Loading…</p> : acc.data?.error ? (
+              <div style={{ color: '#b45309', fontSize: 13 }}>⚠️ {acc.data.error}</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div><div style={{ fontSize: 24, fontWeight: 800, color: acc.color }}>{acc.data?.totalCustomers ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Customers</div></div>
+                <div><div style={{ fontSize: 24, fontWeight: 800, color: acc.color }}>{acc.data?.activeSubscriptions ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Active subs</div></div>
+                <div><div style={{ fontSize: 24, fontWeight: 800, color: acc.color }}>{acc.data?.totalSeats ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Seats</div></div>
+                <div><div style={{ fontSize: 24, fontWeight: 800, color: (acc.data?.suspendedSubscriptions ? '#b42318' : acc.color) }}>{acc.data?.suspendedSubscriptions ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Suspended</div></div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="recent-orders" style={{ marginTop: 24 }}>
         <h3>Recent Orders</h3>
         <table className="data-table">
           <thead>
@@ -690,6 +709,18 @@ const ProductsSection = () => {
   const [form, setForm] = useState({ planId: '', category: 'workspace', name: '', monthlyPrice: 0, skuId: '', features: '', active: true, sortOrder: 0 });
   const [msg, setMsg] = useState('');
 
+  // Order routing + plan availability
+  const [os, setOs] = useState(null);
+  const [osMsg, setOsMsg] = useState('');
+  const loadOs = async () => { try { const r = await axios.get(`${API_URL}/admin/order-settings`); setOs(r.data); } catch (_) { } };
+  useEffect(() => { loadOs(); }, []);
+  const saveOs = async (patch) => {
+    const next = { ...os, ...patch };
+    setOs(next); setOsMsg('');
+    try { await axios.post(`${API_URL}/admin/order-settings`, next); setOsMsg('✓ Saved.'); setTimeout(() => setOsMsg(''), 1500); }
+    catch (e) { setOsMsg(e?.response?.data?.error || 'Could not save.'); }
+  };
+
   const load = async () => {
     try { const res = await axios.get(`${API_URL}/admin/plans`); setPlans(res.data); }
     catch (_) { try { const r = await axios.get(`${API_URL}/products`); setPlans([...(r.data.workspace || []), ...(r.data.voice || []), ...(r.data.addon || [])]); } catch (__) { setPlans([]); } }
@@ -743,6 +774,42 @@ const ProductsSection = () => {
       <h2>📦 Products & Pricing</h2>
       <p style={{ color: '#5b6075' }}>Set the prices customers see. Changes apply immediately to the customer portal and landing page.</p>
       {msg && <div style={{ background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 14 }}>{msg}</div>}
+
+      {/* Order routing + payment plans */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: 20, marginBottom: 20 }}>
+        <h3 style={{ marginTop: 0 }}>⚙️ Order routing & payment plans</h3>
+        {osMsg && <div style={{ color: osMsg.startsWith('✓') ? '#166534' : '#b42318', fontSize: 13, marginBottom: 8 }}>{osMsg}</div>}
+        {!os ? <p style={{ color: '#9ca3af' }}>Loading…</p> : (
+          <>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Which reseller account takes new Workspace orders?</div>
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 16 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!os.pkOrdersEnabled} onChange={e => saveOs({ pkOrdersEnabled: e.target.checked })} />
+                🇵🇰 Pakistan reseller (gnbmentor.com)
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!os.usaOrdersEnabled} onChange={e => saveOs({ usaOrdersEnabled: e.target.checked })} />
+                🇺🇸 USA reseller (artisandrywallaz.com)
+              </label>
+            </div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
+              New orders go to USA if it's the only one on; otherwise to Pakistan. Turn an account off to stop it taking orders.
+            </div>
+
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Payment plans customers can choose</div>
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!os.flexibleEnabled} onChange={e => saveOs({ flexibleEnabled: e.target.checked })} />
+                Flexible (monthly, pay-as-you-go)
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!os.annualEnabled} onChange={e => saveOs({ annualEnabled: e.target.checked })} />
+                Annual (12-month commitment, monthly pay)
+              </label>
+            </div>
+          </>
+        )}
+      </div>
 
       <button className="btn btn-primary" onClick={startNew} style={{ marginBottom: 16 }}>+ Add product</button>
 
@@ -4466,8 +4533,12 @@ const LandingPage = () => {
         <div style={{ maxWidth: 1200, margin: '0 auto', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 40, flexWrap: 'wrap' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 9, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>A</div>
-              <strong style={{ color: '#fff', fontSize: 18 }}>GNB MENTOR LLC</strong>
+              {brand.logoDataUrl
+                ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 40, maxWidth: 180, background: '#fff', padding: 6, borderRadius: 8 }} />
+                : <>
+                  <div style={{ width: 36, height: 36, borderRadius: 9, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>{(brand.brandName || 'G')[0]}</div>
+                  <strong style={{ color: '#fff', fontSize: 18 }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
+                </>}
             </div>
             <p style={{ maxWidth: 320, lineHeight: 1.6, color: '#9fb4ae' }}>
               Google Workspace for your domain — simple ordering, secure payment, and support while you get set up.
@@ -4559,6 +4630,8 @@ function WorkspaceOrderFlow() {
   const [plansError, setPlansError] = useState('');
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [seats, setSeats] = useState(1);
+  const [planType, setPlanType] = useState('flexible');
+  const [orderOpts, setOrderOpts] = useState({ flexibleEnabled: true, annualEnabled: false });
   const [form, setForm] = useState({
     organizationName: '', domain: '', desiredAdminUsername: '', tempPassword: '',
     country: 'United States', streetAddress: '', streetAddress2: '', city: '', state: '', zip: '',
@@ -4591,6 +4664,15 @@ function WorkspaceOrderFlow() {
       } catch (e) {
         setPlansError('Could not load plans. Please try again shortly.');
       }
+      // Which payment plans does the admin allow?
+      try {
+        const opt = await axios.get(`${API_URL}/order-options`);
+        if (opt.data) {
+          setOrderOpts(opt.data);
+          // Default to flexible if allowed, else annual.
+          if (!opt.data.flexibleEnabled && opt.data.annualEnabled) setPlanType('annual');
+        }
+      } catch (_) { }
       // Load any saved draft so the customer can resume an interrupted order.
       try {
         const dr = await axios.get(`${API_URL}/workspace-orders/draft`);
@@ -4599,6 +4681,7 @@ function WorkspaceOrderFlow() {
           if (d.form) setForm((prev) => ({ ...prev, ...d.form }));
           if (d.selectedPlanId) setSelectedPlanId(d.selectedPlanId);
           if (d.seats) setSeats(d.seats);
+          if (d.planType) setPlanType(d.planType);
           if (d.step) setStep(d.step);
           setDraftLoaded(true);
         }
@@ -4613,7 +4696,7 @@ function WorkspaceOrderFlow() {
     if (!plans) return;
     const t = setTimeout(() => {
       axios.post(`${API_URL}/workspace-orders/draft`, {
-        draftData: { form, selectedPlanId, seats, step },
+        draftData: { form, selectedPlanId, seats, step, planType },
         draftStep: step,
       }).catch(() => { });
     }, 1200);
@@ -4747,6 +4830,7 @@ function WorkspaceOrderFlow() {
       const token = localStorage.getItem('token');
       const payload = {
         type: 'workspace',
+        planType,
         plan: { id: selectedPlan.id, name: selectedPlan.name, monthlyPrice: selectedPlan.monthlyPrice },
         seats: Number(seats), monthlyTotal,
         organization: {
@@ -4890,6 +4974,32 @@ function WorkspaceOrderFlow() {
               <button type="button" onClick={() => setSeats(seats + 1)}>+</button>
             </div>
           </div>
+
+          {(orderOpts.flexibleEnabled && orderOpts.annualEnabled) && (
+            <div style={{ margin: '4px 0 8px' }}>
+              <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>Payment plan</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }} className="grid-2">
+                {[
+                  { v: 'flexible', t: 'Flexible', d: 'Monthly, pay-as-you-go. Cancel or change seats anytime.' },
+                  { v: 'annual', t: 'Annual', d: '12-month commitment, paid monthly. Often lower per-seat price.' },
+                ].map(opt => (
+                  <button key={opt.v} type="button" onClick={() => setPlanType(opt.v)}
+                    style={{
+                      textAlign: 'left', padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
+                      border: planType === opt.v ? '2px solid #0F766E' : '1px solid #d8dbe6',
+                      background: planType === opt.v ? '#f0f7f5' : '#fff'
+                    }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>{opt.t}{planType === opt.v && ' ✓'}</div>
+                    <div style={{ fontSize: 12, color: '#6b7280' }}>{opt.d}</div>
+                  </button>
+                ))}
+              </div>
+              <p style={{ fontSize: 12, color: '#6b7280', marginTop: 8 }}>
+                {planType === 'annual' ? 'Annual: you commit for 12 months; seats can be added but not reduced until renewal.' : 'Flexible: full flexibility, adjust or cancel anytime.'}
+              </p>
+            </div>
+          )}
+
           <div className="wof-summary">
             <span>{selectedPlan ? selectedPlan.name : '—'} × {seats}</span>
             <strong>${monthlyTotal.toFixed(2)}/mo</strong>

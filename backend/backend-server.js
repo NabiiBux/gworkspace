@@ -387,6 +387,19 @@ const BrandSettingsSchema = new mongoose.Schema({
 });
 const BrandSettings = mongoose.model('BrandSettings', BrandSettingsSchema);
 
+// Order routing + plan availability (admin-controlled).
+const OrderSettingsSchema = new mongoose.Schema({
+  singleton: { type: String, default: 'main', unique: true },
+  // Which reseller account fulfills new Workspace orders.
+  pkOrdersEnabled: { type: Boolean, default: true },    // 🇵🇰 Pakistan reseller takes orders
+  usaOrdersEnabled: { type: Boolean, default: false },  // 🇺🇸 USA reseller takes orders
+  // Payment plans the customer may choose.
+  flexibleEnabled: { type: Boolean, default: true },    // monthly / pay-as-you-go
+  annualEnabled: { type: Boolean, default: false },     // annual commitment (monthly pay)
+  updatedAt: { type: Date, default: Date.now },
+});
+const OrderSettings = mongoose.model('OrderSettings', OrderSettingsSchema);
+
 // ==================== STAGE 1: EDITABLE PLANS + WORKSPACE ORDERS ====================
 
 // Plan Schema — prices stored in DB so they are editable without code changes
@@ -411,6 +424,8 @@ const WorkspaceOrderSchema = new mongoose.Schema(
     customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
     orderNumber: { type: String, unique: true },
     type: { type: String, default: 'workspace' },
+    planType: { type: String, enum: ['flexible', 'annual'], default: 'flexible' }, // payment plan
+    account: { type: String, default: '' },  // which reseller account fulfilled it ('pk'/'usa')
     plan: { id: String, name: String, monthlyPrice: Number },
     seats: Number,
     monthlyTotal: Number,
@@ -4932,6 +4947,44 @@ app.post('/api/admin/branding', authenticateCustomer, requireAdmin, async (req, 
   }
 });
 
+// ---- ORDER SETTINGS (which account takes orders + which plans are offered) ----
+app.get('/api/admin/order-settings', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    let s = await OrderSettings.findOne({ singleton: 'main' });
+    if (!s) s = await OrderSettings.create({ singleton: 'main' });
+    res.json({ pkOrdersEnabled: s.pkOrdersEnabled, usaOrdersEnabled: s.usaOrdersEnabled, flexibleEnabled: s.flexibleEnabled, annualEnabled: s.annualEnabled });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/order-settings', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const b = req.body;
+    const s = await OrderSettings.findOneAndUpdate(
+      { singleton: 'main' },
+      {
+        $set: {
+          ...(b.pkOrdersEnabled !== undefined ? { pkOrdersEnabled: !!b.pkOrdersEnabled } : {}),
+          ...(b.usaOrdersEnabled !== undefined ? { usaOrdersEnabled: !!b.usaOrdersEnabled } : {}),
+          ...(b.flexibleEnabled !== undefined ? { flexibleEnabled: !!b.flexibleEnabled } : {}),
+          ...(b.annualEnabled !== undefined ? { annualEnabled: !!b.annualEnabled } : {}),
+          updatedAt: new Date(),
+        }
+      },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true, settings: { pkOrdersEnabled: s.pkOrdersEnabled, usaOrdersEnabled: s.usaOrdersEnabled, flexibleEnabled: s.flexibleEnabled, annualEnabled: s.annualEnabled } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Public: which plans the customer may choose (used by the order flow).
+app.get('/api/order-options', async (req, res) => {
+  try {
+    let s = await OrderSettings.findOne({ singleton: 'main' });
+    if (!s) s = await OrderSettings.create({ singleton: 'main' });
+    res.json({ flexibleEnabled: s.flexibleEnabled, annualEnabled: s.annualEnabled });
+  } catch (e) { res.json({ flexibleEnabled: true, annualEnabled: false }); }
+});
+
 app.get('/api/products', async (req, res) => {
   try {
     const plans = await Plan.find({ active: true }).sort({ category: 1, sortOrder: 1 });
@@ -4995,6 +5048,7 @@ app.post('/api/workspace-orders', authenticateCustomer, async (req, res) => {
       customerId: req.customerId,
       orderNumber,
       type: 'workspace',
+      planType: body.planType === 'annual' ? 'annual' : 'flexible',
       plan: body.plan,
       seats: body.seats,
       monthlyTotal: body.monthlyTotal,
@@ -5394,8 +5448,20 @@ async function provisionWorkspaceOrder(order) {
   const planDoc = await Plan.findOne({ planId: order.plan?.id });
   if (!planDoc || !planDoc.skuId) throw new Error('Plan is missing a Google SKU.');
 
-  const auth = await getResellerAuth();
+  // Decide which reseller account fulfills this order (admin-controlled).
+  // Priority: the order's own account if set; else the admin's enabled account (USA if on, else PK).
+  let account = order.account;
+  if (!account) {
+    const os = await OrderSettings.findOne({ singleton: 'main' });
+    if (os && os.usaOrdersEnabled && !os.pkOrdersEnabled) account = 'usa';
+    else if (os && os.pkOrdersEnabled) account = 'pk';
+    else if (os && os.usaOrdersEnabled) account = 'usa';
+    else account = 'pk'; // safe default
+  }
+  const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
   const reseller = google.reseller({ version: 'v1', auth });
+  // Remember which account handled it (for billing + display)
+  try { order.account = account; await order.save(); } catch (_) { }
   const org = order.organization || {};
   const contact = order.contact || {};
   const domain = (org.domain || '').toLowerCase();
@@ -6102,25 +6168,51 @@ app.get('/api/admin/google/subscriptions', authenticateCustomer, async (req, res
 // Live dashboard stats from Google
 app.get('/api/admin/google/dashboard', authenticateCustomer, async (req, res) => {
   try {
-    const auth = await getResellerAuth();
-    const reseller = google.reseller({ version: 'v1', auth });
-    let subs = [];
-    let pageToken;
-    do {
-      const resp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
-      subs = subs.concat(resp.data.subscriptions || []);
-      pageToken = resp.data.nextPageToken;
-    } while (pageToken);
+    const accountStats = async (account) => {
+      let auth;
+      try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
+      catch (e) { return { error: e.message }; }
+      const reseller = google.reseller({ version: 'v1', auth });
+      let subs = [];
+      let pageToken;
+      try {
+        do {
+          const resp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
+          subs = subs.concat(resp.data.subscriptions || []);
+          pageToken = resp.data.nextPageToken;
+        } while (pageToken);
+      } catch (e) {
+        return { error: e?.errors?.[0]?.message || e.message };
+      }
+      const uniqueDomains = new Set(subs.map((s) => s.customerDomain || s.customerId));
+      const totalSeats = subs.reduce((sum, s) => sum + (s.seats?.numberOfSeats || 0), 0);
+      return {
+        totalCustomers: uniqueDomains.size,
+        totalSubscriptions: subs.length,
+        activeSubscriptions: subs.filter((s) => s.status === 'ACTIVE').length,
+        suspendedSubscriptions: subs.filter((s) => s.status === 'SUSPENDED').length,
+        totalSeats,
+      };
+    };
 
-    const uniqueDomains = new Set(subs.map((s) => s.customerDomain || s.customerId));
-    const totalSeats = subs.reduce((sum, s) => sum + (s.seats?.numberOfSeats || 0), 0);
-
+    const [pk, usa] = await Promise.all([accountStats('pk'), accountStats('usa')]);
+    // Combined totals (for the top summary)
+    const sum = (a, b, k) => (a && !a.error ? a[k] : 0) + (b && !b.error ? b[k] : 0);
     res.json({
-      totalCustomers: uniqueDomains.size,
-      totalSubscriptions: subs.length,
-      activeSubscriptions: subs.filter((s) => s.status === 'ACTIVE').length,
-      suspendedSubscriptions: subs.filter((s) => s.status === 'SUSPENDED').length,
-      totalSeats,
+      pk, usa,
+      combined: {
+        totalCustomers: sum(pk, usa, 'totalCustomers'),
+        totalSubscriptions: sum(pk, usa, 'totalSubscriptions'),
+        activeSubscriptions: sum(pk, usa, 'activeSubscriptions'),
+        suspendedSubscriptions: sum(pk, usa, 'suspendedSubscriptions'),
+        totalSeats: sum(pk, usa, 'totalSeats'),
+      },
+      // Back-compat top-level (used by older UI)
+      totalCustomers: sum(pk, usa, 'totalCustomers'),
+      totalSubscriptions: sum(pk, usa, 'totalSubscriptions'),
+      activeSubscriptions: sum(pk, usa, 'activeSubscriptions'),
+      suspendedSubscriptions: sum(pk, usa, 'suspendedSubscriptions'),
+      totalSeats: sum(pk, usa, 'totalSeats'),
     });
   } catch (e) {
     const msg = e?.errors?.[0]?.message || e?.message || 'Could not fetch dashboard data from Google';
