@@ -3367,12 +3367,16 @@ const CustomerDomains = () => {
     finally { setRenewBusy(''); }
   };
 
-  const buyDomain = async (method) => {
-    if (!result?.available) return;
-    setRegBusy(true); setRegMsg('');
+  const [buyingDomain, setBuyingDomain] = useState('');
+  const buyDomain = async (method, domainObj) => {
+    const d = domainObj || result;
+    if (!d?.available && !d?.domain) return;
+    const domainName = d.domain || d.domainName;
+    const price = d.price;
+    setBuyingDomain(domainName); setRegBusy(true); setRegMsg('');
     try {
       const res = await axios.post(`${API_URL}/customer/domains/register`, {
-        domainName: result.domainName, period: 1, price: result.price, method,
+        domainName, period: 1, price, method,
       });
       if (res.data.checkoutUrl) {
         window.location.href = res.data.checkoutUrl; // pay first; domain registers on payment
@@ -3380,7 +3384,7 @@ const CustomerDomains = () => {
         setRegMsg('Could not start checkout.');
       }
     } catch (e) { setRegMsg(e?.response?.data?.error || 'Could not start checkout.'); }
-    finally { setRegBusy(false); }
+    finally { setRegBusy(false); setBuyingDomain(''); }
   };
 
   const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
@@ -3388,7 +3392,9 @@ const CustomerDomains = () => {
   const search = async () => {
     setError(''); setResult(null);
     const dom = query.toLowerCase().trim();
-    if (!/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) { setError('Enter a full domain like example.com'); return; }
+    if (!dom) { setError('Enter a domain or a name to search.'); return; }
+    // Allow either a full domain (example.com) or a bare name (example) for multi-TLD search.
+    if (dom.includes('.') && !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) { setError('Enter a valid domain like example.com, or just a name.'); return; }
     setLoading(true);
     try {
       const res = await axios.post(`${API_URL}/customer/domains/search`, { domainName: dom });
@@ -3422,7 +3428,7 @@ const CustomerDomains = () => {
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') search(); }}
-            placeholder="yourbusiness.com"
+            placeholder="Type a name (e.g. mybusiness) or a full domain"
             style={{ flex: 1, height: 46, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px', fontSize: 16 }}
           />
           <button onClick={search} disabled={loading}
@@ -3431,25 +3437,31 @@ const CustomerDomains = () => {
           </button>
         </div>
         {error && <div style={{ color: '#b42318', marginTop: 10, fontSize: 14 }}>{error}</div>}
-        {result && (
-          <div style={{ marginTop: 16, background: '#f0f7f5', borderRadius: 12, padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>{result.domainName}</div>
-              <div style={{ color: result.available ? '#166534' : '#b45309', fontWeight: 600 }}>{result.available ? '✓ Available' : '✗ Not available'}</div>
-            </div>
-            {result.available && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <strong style={{ fontSize: 20, color: TEAL }}>${Number(result.price).toFixed(2)}/yr</strong>
-                <button onClick={() => buyDomain('stripe')} disabled={regBusy}
-                  style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>
-                  {regBusy ? '…' : '💳 Buy by card'}
-                </button>
-                <button onClick={() => buyDomain('nicky')} disabled={regBusy}
-                  style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>
-                  {regBusy ? '…' : '🪙 Buy with crypto'}
-                </button>
+
+        {result && result.results && (
+          <div style={{ marginTop: 16 }}>
+            {result.results.map((r, i) => (
+              <div key={i} style={{ background: r.available ? '#f0f7f5' : '#fafafa', borderRadius: 12, padding: '12px 16px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, opacity: r.available ? 1 : 0.7 }}>
+                <div>
+                  <span style={{ fontSize: 16, fontWeight: 700 }}>{r.domain}</span>
+                  {r.isPremium && <span style={{ marginLeft: 8, fontSize: 11, background: '#fde68a', color: '#92600a', padding: '2px 8px', borderRadius: 999 }}>Premium</span>}
+                  <div style={{ color: r.available ? '#166534' : '#b45309', fontWeight: 600, fontSize: 13 }}>{r.available ? '✓ Available' : '✗ Taken'}</div>
+                </div>
+                {r.available && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <strong style={{ fontSize: 18, color: TEAL }}>{r.price != null ? `$${Number(r.price).toFixed(2)}/yr` : ''}</strong>
+                    <button onClick={() => buyDomain('stripe', r)} disabled={regBusy}
+                      style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
+                      {regBusy && buyingDomain === r.domain ? '…' : '💳 Buy'}
+                    </button>
+                    <button onClick={() => buyDomain('nicky', r)} disabled={regBusy}
+                      style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '8px 12px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
+                      🪙
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
+            ))}
           </div>
         )}
         {regMsg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: regMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: regMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{regMsg}</div>}
@@ -3652,6 +3664,30 @@ const DomainManagePanel = ({ domain, onClose }) => {
   useEffect(() => { load(); }, [domain]);
 
   const addRecord = () => setHosts([...hosts, { name: '@', type: 'A', address: '', ttl: 1800, mxPref: 10 }]);
+
+  // Email presets — add the right MX records in one click.
+  const addGoogleEmail = () => {
+    // Modern Google Workspace uses a single MX host. (Older setups used 5 hosts.)
+    const withoutMx = hosts.filter(h => h.type !== 'MX');
+    const googleMx = [{ name: '@', type: 'MX', address: 'smtp.google.com', mxPref: 1, ttl: 3600 }];
+    setHosts([...withoutMx, ...googleMx]);
+    setMsg('Google Workspace MX record added. Click "Save DNS records" to apply.');
+  };
+  const addGoogleEmailLegacy = () => {
+    const withoutMx = hosts.filter(h => h.type !== 'MX');
+    const legacy = [
+      { name: '@', type: 'MX', address: 'aspmx.l.google.com', mxPref: 1, ttl: 3600 },
+      { name: '@', type: 'MX', address: 'alt1.aspmx.l.google.com', mxPref: 5, ttl: 3600 },
+      { name: '@', type: 'MX', address: 'alt2.aspmx.l.google.com', mxPref: 5, ttl: 3600 },
+      { name: '@', type: 'MX', address: 'alt3.aspmx.l.google.com', mxPref: 10, ttl: 3600 },
+      { name: '@', type: 'MX', address: 'alt4.aspmx.l.google.com', mxPref: 10, ttl: 3600 },
+    ];
+    setHosts([...withoutMx, ...legacy]);
+    setMsg('Google Workspace (5-record) MX set added. Click "Save DNS records" to apply.');
+  };
+  const addCustomMx = () => {
+    setHosts([...hosts, { name: '@', type: 'MX', address: 'mail.yourprovider.com', mxPref: 10, ttl: 3600 }]);
+  };
   const updateRecord = (i, field, val) => { const h = [...hosts]; h[i] = { ...h[i], [field]: val }; setHosts(h); };
   const removeRecord = (i) => setHosts(hosts.filter((_, idx) => idx !== i));
 
@@ -3740,9 +3776,20 @@ const DomainManagePanel = ({ domain, onClose }) => {
                 <button onClick={() => removeRecord(i)} style={{ background: '#fef2f2', color: '#b42318', border: 'none', borderRadius: 8, padding: '7px', cursor: 'pointer' }}>×</button>
               </div>
             ))}
-            <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+            <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
               <button onClick={addRecord} style={{ background: '#fff', color: INK, border: '1px solid #d8dbe6', borderRadius: 8, padding: '8px 16px', cursor: 'pointer' }}>+ Add record</button>
               <button onClick={saveDns} disabled={saving} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving…' : 'Save DNS records'}</button>
+            </div>
+
+            <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid #eee' }}>
+              <h4 style={{ margin: '0 0 4px' }}>📧 Email setup (MX records)</h4>
+              <p style={{ color: MUTE, fontSize: 13, marginTop: 0 }}>Add the right mail records in one click, then Save.</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={addGoogleEmail} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Google Workspace email</button>
+                <button onClick={addGoogleEmailLegacy} style={{ background: '#fff', color: INK, border: '1px solid #d8dbe6', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 13 }}>Google (5-record set)</button>
+                <button onClick={addCustomMx} style={{ background: '#fff', color: INK, border: '1px solid #d8dbe6', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 13 }}>+ Custom mail server</button>
+              </div>
+              <p style={{ color: MUTE, fontSize: 12, marginTop: 8 }}>Tip: "Google Workspace email" works for new Google accounts. If your account is older and mail doesn't arrive, use the 5-record set instead.</p>
             </div>
           </div>
         ) : tab === 'nameservers' ? (

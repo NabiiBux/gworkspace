@@ -3586,6 +3586,12 @@ async function ncResolveSandbox() {
 function ncConfig() {
   // Use cached DB mode if available, else env var.
   const sandbox = _ncSandboxCache != null ? _ncSandboxCache : (String(process.env.NAMECHEAP_SANDBOX || 'true').toLowerCase() === 'true');
+  // Parse default markup robustly: ignore empty/blank/invalid env values, fall back to 20.
+  let markup = 20;
+  const rawMarkup = process.env.NAMECHEAP_MARKUP_PERCENT;
+  if (rawMarkup != null && String(rawMarkup).trim() !== '' && !isNaN(Number(rawMarkup))) {
+    markup = Number(rawMarkup);
+  }
   return {
     sandbox,
     baseUrl: sandbox ? 'https://api.sandbox.namecheap.com/xml.response' : 'https://api.namecheap.com/xml.response',
@@ -3593,7 +3599,7 @@ function ncConfig() {
     apiKey: process.env.NAMECHEAP_API_KEY || '',
     userName: process.env.NAMECHEAP_USERNAME || process.env.NAMECHEAP_API_USER || '',
     clientIp: process.env.NAMECHEAP_CLIENT_IP || '',
-    markupPercent: Number(process.env.NAMECHEAP_MARKUP_PERCENT || 20),
+    markupPercent: markup,
   };
 }
 
@@ -3704,7 +3710,16 @@ async function ncGetTldPricing(tld, actionName = 'REGISTER') {
           let prices = p.Price;
           prices = Array.isArray(prices) ? prices : [prices];
           const oneYear = prices.find((pr) => Number(pr['@_Duration']) === 1) || prices[0];
-          return { ok: true, cost: Number(oneYear['@_Price']), currency: oneYear['@_Currency'] || 'USD' };
+          // Namecheap returns several price fields. YourPrice = your reseller cost (what we mark up).
+          // Price = the standard price. Prefer YourPrice, then Price, then RegularPrice.
+          const yourPrice = oneYear['@_YourPrice'] != null ? Number(oneYear['@_YourPrice']) : null;
+          const price = oneYear['@_Price'] != null ? Number(oneYear['@_Price']) : null;
+          const regular = oneYear['@_RegularPrice'] != null ? Number(oneYear['@_RegularPrice']) : null;
+          const cost = (yourPrice != null && yourPrice > 0) ? yourPrice
+            : (price != null && price > 0) ? price
+              : (regular || 0);
+          console.log(`NC PRICING ${tld} ${actionName}: YourPrice=${yourPrice} Price=${price} Regular=${regular} → cost used=${cost}`);
+          return { ok: true, cost, currency: oneYear['@_Currency'] || 'USD' };
         }
       }
     }
@@ -3865,18 +3880,38 @@ async function ncGetDnsHosts(domain) {
 async function ncSetDnsHosts(domain, hosts) {
   const { sld, tld } = splitDomain(domain);
   const params = { SLD: sld, TLD: tld };
+  let hasMx = false;
   hosts.forEach((h, i) => {
     const n = i + 1;
-    params[`HostName${n}`] = h.name || '@';
-    params[`RecordType${n}`] = h.type;
-    params[`Address${n}`] = h.address;
-    if (h.type === 'MX') params[`MXPref${n}`] = h.mxPref || 10;
-    params[`TTL${n}`] = h.ttl || 1800;
+    // Host name: '@' for root. Trim and default.
+    let host = String(h.name || '@').trim() || '@';
+    // Record type
+    const type = String(h.type || 'A').trim().toUpperCase();
+    // Address/value: trim. For CNAME/MX/NS, Namecheap wants a trailing dot tolerated; leave as-is.
+    let address = String(h.address || '').trim();
+    params[`HostName${n}`] = host;
+    params[`RecordType${n}`] = type;
+    params[`Address${n}`] = address;
+    // TTL: Namecheap minimum is 60; default 1800.
+    let ttl = Number(h.ttl) || 1800;
+    if (ttl < 60) ttl = 60;
+    params[`TTL${n}`] = ttl;
+    // MX records need a priority and the domain's EmailType must be MX.
+    if (type === 'MX') { params[`MXPref${n}`] = Number(h.mxPref) || 10; hasMx = true; }
   });
+  // Tell Namecheap how to route email: MX if any MX records, else default (no email handling).
+  params.EmailType = hasMx ? 'MX' : 'FWD';
   const r = await ncCall('namecheap.domains.dns.setHosts', params);
   if (!r.ok) return r;
   const result = r.data?.DomainDNSSetHostsResult;
-  return { ok: true, success: result?.['@_IsSuccess'] === true || result?.['@_IsSuccess'] === 'true' };
+  const success = result?.['@_IsSuccess'] === true || result?.['@_IsSuccess'] === 'true';
+  if (!success) {
+    // Surface any warnings Namecheap returned
+    let warn = '';
+    try { const w = result?.Warnings?.Warning; if (w) warn = Array.isArray(w) ? w.map(x => x['#text'] || x).join('; ') : (w['#text'] || w); } catch (_) { }
+    return { ok: false, error: warn || 'Namecheap did not confirm the DNS update. Check the record values.' };
+  }
+  return { ok: true, success: true };
 }
 
 // Get nameservers for a domain.
@@ -4771,26 +4806,45 @@ app.post('/api/public/domains/search', async (req, res) => {
 app.post('/api/customer/domains/search', authenticateCustomer, async (req, res) => {
   try {
     const { domainName } = req.body;
-    const dom = (domainName || '').toLowerCase().trim();
-    if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) {
-      return res.status(400).json({ error: 'Please enter a valid domain like example.com' });
-    }
-    // Namecheap availability + pricing
-    const check = await ncCheckDomains([dom]);
-    if (!check.ok) return res.status(502).json({ error: check.error });
-    const d = check.domains[0];
-    let price = null;
-    if (d.available) {
-      const tld = tldOf(dom);
-      if (d.isPremium && d.premiumPrice) {
-        price = ncApplyPricing(d.premiumPrice);
-      } else {
-        const pricing = await ncGetTldPricing(tld, 'REGISTER');
-        if (pricing.ok) price = await ncCustomerPriceForTld(tld, pricing.cost);
+    const raw = (domainName || '').toLowerCase().trim();
+    if (!raw) return res.status(400).json({ error: 'Enter a domain or a name to search.' });
+
+    // If the user typed a full domain (has a dot), check just that one.
+    if (raw.includes('.')) {
+      if (!/^[a-z0-9-]+\.[a-z.]{2,}$/.test(raw)) return res.status(400).json({ error: 'Enter a valid domain like example.com' });
+      const check = await ncCheckDomains([raw]);
+      if (!check.ok) return res.status(502).json({ error: check.error });
+      const d = check.domains[0];
+      let price = null;
+      if (d.available) {
+        const tld = tldOf(raw);
+        if (d.isPremium && d.premiumPrice) price = ncApplyPricing(d.premiumPrice);
+        else { const pricing = await ncGetTldPricing(tld, 'REGISTER'); if (pricing.ok) price = await ncCustomerPriceForTld(tld, pricing.cost); }
       }
+      return res.json({ domainName: raw, available: d.available, isPremium: d.isPremium, price, results: [{ domain: raw, available: d.available, isPremium: d.isPremium, price }] });
     }
-    // Return the same shape the existing UI expects
-    res.json({ domainName: dom, available: d.available, isPremium: d.isPremium, price });
+
+    // Bare name (no dot): check across popular TLDs and return all options with prices.
+    const name = raw.replace(/[^a-z0-9-]/g, '');
+    if (!name) return res.status(400).json({ error: 'Enter a valid name (letters, numbers, hyphens).' });
+    const tlds = ['com', 'net', 'org', 'io', 'co', 'shop', 'store', 'online', 'site', 'xyz'];
+    const domains = tlds.map((t) => `${name}.${t}`);
+    const check = await ncCheckDomains(domains);
+    if (!check.ok) return res.status(502).json({ error: check.error });
+
+    const results = [];
+    for (const d of check.domains) {
+      let price = null;
+      if (d.available) {
+        const tld = tldOf(d.domain);
+        if (d.isPremium && d.premiumPrice) price = ncApplyPricing(d.premiumPrice);
+        else { const pricing = await ncGetTldPricing(tld, 'REGISTER'); if (pricing.ok) price = await ncCustomerPriceForTld(tld, pricing.cost); }
+      }
+      results.push({ domain: d.domain, available: d.available, isPremium: d.isPremium, price });
+    }
+    // Sort: available first, then by price
+    results.sort((a, b) => (b.available - a.available) || ((a.price || 999) - (b.price || 999)));
+    res.json({ multi: true, results });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
