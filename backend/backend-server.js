@@ -3562,6 +3562,7 @@ async function applyTaxAndFee(subtotal) {
   const tax = taxPercent / 100 * (subtotal + fee);
   const round = (n) => Math.round(n * 100) / 100;
   const total = round(subtotal + fee + tax);
+  console.log(`TAX/FEE: subtotal=${subtotal} taxEnabled=${s?.taxEnabled} taxPercent=${taxPercent}% tax=${round(tax)} fee=${round(fee)} → total=${total}`);
   return { subtotal: round(subtotal), tax: round(tax), fee: round(fee), total, taxPercent, taxLabel };
 }
 

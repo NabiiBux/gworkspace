@@ -423,14 +423,6 @@ const Dashboard = () => {
           </li>
           <li>
             <button
-              className={`menu-item ${activeSection === 'orders' ? 'active' : ''}`}
-              onClick={() => setActiveSection('orders')}
-            >
-              🛒 Orders
-            </button>
-          </li>
-          <li>
-            <button
               className={`menu-item ${activeSection === 'subs-pk' ? 'active' : ''}`}
               onClick={() => setActiveSection('subs-pk')}
             >
@@ -513,7 +505,6 @@ const Dashboard = () => {
         {activeSection === 'order-workspace' && <WorkspaceOrderFlow />}
         {activeSection === 'products' && <ProductsSection />}
         {activeSection === 'addon-pricing' && <AdminAddonPricing />}
-        {activeSection === 'orders' && <OrdersSection />}
         {activeSection === 'subs-pk' && <SubscriptionsSection account="PK" />}
         {activeSection === 'subs-usa' && <SubscriptionsSection account="USA" />}
         {activeSection === 'customers' && <AdminCustomersSection />}
@@ -4330,7 +4321,7 @@ const LandingPage = () => {
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg,#ffffff 0%,#f0f7f5 60%,#eef4fb 100%)', fontFamily: 'Inter, system-ui, sans-serif', color: INKL }}>
       {/* Nav */}
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 40px', maxWidth: 1200, margin: '0 auto' }}>
+      <header className="landing-nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 40px', maxWidth: 1200, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {brand.logoDataUrl
             ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 44, maxWidth: 200 }} />
@@ -4346,7 +4337,7 @@ const LandingPage = () => {
       </header>
 
       {/* Hero */}
-      <section style={{ display: 'flex', gap: 40, padding: '40px 40px 60px', maxWidth: 1200, margin: '0 auto', flexWrap: 'wrap', alignItems: 'center' }}>
+      <section className="landing-hero" style={{ display: 'flex', gap: 40, padding: '40px 40px 60px', maxWidth: 1200, margin: '0 auto', flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ flex: 1, minWidth: 320 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: '#fff', borderRadius: 999, padding: '8px 18px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
             <span style={{ display: 'flex', gap: 4 }}>
@@ -4375,7 +4366,7 @@ const LandingPage = () => {
         </div>
 
         {/* What you get card */}
-        <div style={{ flex: '0 0 440px', background: '#fff', borderRadius: 24, padding: 32, boxShadow: '0 10px 40px rgba(0,0,0,0.08)' }}>
+        <div className="landing-card" style={{ flex: '0 0 440px', background: '#fff', borderRadius: 24, padding: 32, boxShadow: '0 10px 40px rgba(0,0,0,0.08)' }}>
           <h3 style={{ margin: '0 0 4px', fontSize: 22 }}>What you get</h3>
           <p style={{ color: MUTEL, margin: '0 0 24px' }}>Popular apps for work — explained in plain English.</p>
           {[
@@ -4392,14 +4383,14 @@ const LandingPage = () => {
       </section>
 
       {/* Business email + domain search */}
-      <section style={{ background: '#fff', padding: '64px 40px' }}>
+      <section className="landing-band" style={{ background: '#fff', padding: '64px 40px' }}>
         <div style={{ maxWidth: 820, margin: '0 auto', textAlign: 'center' }}>
           <h2 style={{ fontSize: 38, margin: '0 0 14px', fontWeight: 800 }}>Get a professional business email</h2>
           <p style={{ fontSize: 18, color: MUTEL, lineHeight: 1.6, margin: '0 0 28px' }}>
             Create a custom email address connected to your domain to build instant trust and look credible from the get go.
           </p>
           <p style={{ fontWeight: 600, margin: '0 0 14px' }}>Start by finding the right domain — type a name or a full domain</p>
-          <div style={{ display: 'flex', gap: 10, maxWidth: 560, margin: '0 auto' }}>
+          <div className="domain-search-row" style={{ display: 'flex', gap: 10, maxWidth: 560, margin: '0 auto' }}>
             <input
               value={dq}
               onChange={e => setDq(e.target.value)}
@@ -4461,7 +4452,7 @@ const LandingPage = () => {
       </section>
 
       {/* CTA band */}
-      <section style={{ background: T, color: '#fff', padding: '64px 40px', textAlign: 'center' }}>
+      <section className="landing-band" style={{ background: T, color: '#fff', padding: '64px 40px', textAlign: 'center' }}>
         <h2 style={{ fontSize: 44, margin: '0 0 12px', fontWeight: 800 }}>Ready when you are</h2>
         <p style={{ fontSize: 18, opacity: 0.95, margin: '0 0 32px' }}>Sign up to save your orders, or browse plans first — whatever is easier for you.</p>
         <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
@@ -5226,26 +5217,47 @@ const AdminBrandingSection = () => {
 // Global responsive styles — injected once. Makes the portal adapt to phones/tablets.
 const ResponsiveStyles = () => (
   <style>{`
+    /* ===== Tablet & below ===== */
     @media (max-width: 860px) {
+      /* Customer portal: sidebar becomes a wrapping button row on top */
       .cp-layout { flex-direction: column !important; padding: 14px !important; gap: 14px !important; }
       .cp-sidebar { width: 100% !important; display: flex !important; flex-wrap: wrap !important; gap: 6px !important; }
       .cp-sidebar > button { flex: 1 1 auto !important; min-width: 120px !important; }
+      /* Admin dashboard: sidebar to top bar */
       .dashboard { flex-direction: column !important; }
       .sidebar { width: 100% !important; height: auto !important; position: static !important; }
       .sidebar-menu { display: flex !important; flex-wrap: wrap !important; gap: 6px !important; }
       .sidebar-menu > li { flex: 1 1 auto !important; }
       .dashboard-content { padding: 16px !important; }
-      table { display: block !important; overflow-x: auto !important; }
+      table { display: block !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+      /* Landing: reduce big paddings, let the card go full width below the text */
+      .landing-nav { padding: 14px 20px !important; flex-wrap: wrap !important; gap: 10px !important; }
+      .landing-hero { padding: 24px 20px 40px !important; gap: 24px !important; }
+      .landing-card { flex: 1 1 100% !important; }
+      .landing-band { padding: 44px 20px !important; }
     }
+    /* ===== Phones ===== */
     @media (max-width: 600px) {
       h1 { font-size: 30px !important; }
       h2 { font-size: 24px !important; }
-      .hero-title { font-size: 34px !important; }
+      .hero-title { font-size: 32px !important; line-height: 1.1 !important; }
+      .landing-nav { padding: 12px 16px !important; }
+      .landing-hero { padding: 20px 16px 32px !important; }
+      .landing-band { padding: 36px 16px !important; }
+      .landing-card { padding: 22px !important; border-radius: 18px !important; }
+      /* Search box + button stack on very small screens */
+      .domain-search-row { flex-direction: column !important; }
+      .domain-search-row > * { width: 100% !important; }
     }
+    /* ===== Universal niceties ===== */
     img { max-width: 100%; height: auto; }
-    input, select, textarea { max-width: 100%; box-sizing: border-box; }
+    input, select, textarea, button { max-width: 100%; box-sizing: border-box; }
     html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+    body { overflow-x: hidden; }
     * { -webkit-tap-highlight-color: transparent; }
+    button { cursor: pointer; }
+    /* Subtle button hover lift for a more modern feel */
+    button:hover { filter: brightness(0.97); }
   `}</style>
 );
 
