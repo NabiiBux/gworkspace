@@ -217,6 +217,7 @@ const PaymentSchema = new mongoose.Schema({
   amount: Number,            // total charged (subtotal + tax)
   subtotal: Number,          // pre-tax amount
   tax: Number,               // tax portion
+  fee: Number,               // processing fee portion
   currency: { type: String, default: 'USD' },
   method: { type: String, enum: ['stripe', 'nicky'], default: 'stripe' },
   status: { type: String, enum: ['pending', 'paid', 'failed', 'cancelled'], default: 'pending' },
@@ -1353,9 +1354,12 @@ app.post('/api/customer/domains/renew', authenticateCustomer, async (req, res) =
       const settingsDoc = await PaymentSettings.findOne({ singleton: 'main' });
       payment.isTest = (settingsDoc?.stripeMode || 'test') !== 'live';
       await payment.save();
+      const rline = [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(taxed.subtotal * 100) }, quantity: 1 }];
+      if (taxed.fee > 0) rline.push({ price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) }, quantity: 1 });
+      if (taxed.tax > 0) rline.push({ price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) }, quantity: 1 });
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
-        line_items: [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(amount * 100) }, quantity: 1 }],
+        line_items: rline,
         success_url: successUrl, cancel_url: cancelUrl,
         client_reference_id: String(payment._id),
         metadata: { paymentId: String(payment._id), orderId: String(order._id), orderType: 'domain' },
@@ -1364,6 +1368,7 @@ app.post('/api/customer/domains/renew', authenticateCustomer, async (req, res) =
       return res.json({ checkoutUrl: session.url, paymentId: payment._id });
     }
 
+    // Nicky crypto
     try {
       const nicky = await createNickyPayment({
         amount, currency: 'USD', description: orderDesc, orderNumber,
@@ -4722,8 +4727,11 @@ app.post('/api/customer/domains/register', authenticateCustomer, async (req, res
     const me = await Customer.findById(req.customerId);
     if (!me) return res.status(404).json({ error: 'Account not found.' });
 
-    const amount = Number(price || 0);
-    if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid domain price.' });
+    const subtotal = Number(price || 0);
+    if (!subtotal || subtotal <= 0) return res.status(400).json({ error: 'Invalid domain price.' });
+    // Apply tax + processing fee on top of the domain price.
+    const taxed = await applyTaxAndFee(subtotal);
+    const amount = taxed.total;
 
     const orderNumber = `DM-${Date.now()}`;
     const order = await DomainOrder.create({
@@ -4732,7 +4740,7 @@ app.post('/api/customer/domains/register', authenticateCustomer, async (req, res
 
     const payment = await Payment.create({
       customerId: me._id, customerEmail: me.businessEmail, domain: dom,
-      orderId: order._id, orderType: 'domain', amount, currency: 'USD',
+      orderId: order._id, orderType: 'domain', amount, subtotal: taxed.subtotal, tax: taxed.tax, fee: taxed.fee, currency: 'USD',
       method: method === 'nicky' ? 'nicky' : 'stripe', status: 'pending',
     });
 
@@ -4746,9 +4754,13 @@ app.post('/api/customer/domains/register', authenticateCustomer, async (req, res
       const settingsDoc = await PaymentSettings.findOne({ singleton: 'main' });
       payment.isTest = (settingsDoc?.stripeMode || 'test') !== 'live';
       await payment.save();
+      // Build line items: domain price + separate tax/fee lines so the customer sees the breakdown.
+      const line_items = [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(taxed.subtotal * 100) }, quantity: 1 }];
+      if (taxed.fee > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) }, quantity: 1 });
+      if (taxed.tax > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) }, quantity: 1 });
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
-        line_items: [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(amount * 100) }, quantity: 1 }],
+        line_items,
         success_url: successUrl, cancel_url: cancelUrl,
         client_reference_id: String(payment._id),
         metadata: { paymentId: String(payment._id), orderId: String(order._id), orderType: 'domain' },
