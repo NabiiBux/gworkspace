@@ -261,6 +261,21 @@ const DomainTransferSchema = new mongoose.Schema({
 });
 const DomainTransfer = mongoose.model('DomainTransfer', DomainTransferSchema);
 
+// Tracks a Google Workspace subscription transfer (import from another reseller via transfer token).
+const WorkspaceTransferSchema = new mongoose.Schema({
+  customerId: mongoose.Schema.Types.ObjectId,
+  orderNumber: { type: String, unique: true },
+  domain: String,
+  transferToken: String,           // Google customerAuthToken from admin.google.com/TransferToken
+  account: { type: String, default: 'pk' },   // which reseller account receives it: 'pk' or 'usa'
+  status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
+  subscriptionsClaimed: { type: Number, default: 0 },
+  resultNote: String,
+  completedAt: Date,
+  createdAt: { type: Date, default: Date.now },
+});
+const WorkspaceTransfer = mongoose.model('WorkspaceTransfer', WorkspaceTransferSchema);
+
 // Tracks an SSL certificate purchase (pay-first, like domains).
 const SslOrderSchema = new mongoose.Schema({
   customerId: mongoose.Schema.Types.ObjectId,
@@ -305,6 +320,21 @@ const HostingPlanSchema = new mongoose.Schema({
   sortOrder: { type: Number, default: 0 },
 });
 const HostingPlan = mongoose.model('HostingPlan', HostingPlanSchema);
+
+// Customer hosting purchases (pay-first).
+const HostingOrderSchema = new mongoose.Schema({
+  customerId: mongoose.Schema.Types.ObjectId,
+  orderNumber: { type: String, unique: true },
+  planId: String,
+  planName: String,
+  forDomain: String,
+  price: Number,
+  billingCycle: String,
+  status: { type: String, enum: ['pending', 'active', 'failed', 'test_paid'], default: 'pending' },
+  activatedAt: Date,
+  createdAt: { type: Date, default: Date.now },
+});
+const HostingOrder = mongoose.model('HostingOrder', HostingOrderSchema);
 
 // Tracks a 29-day billing cycle for EACH Google subscription (incl. pre-existing ones).
 // Seeded from the Google subscription creation date.
@@ -1883,6 +1913,31 @@ async function markPaidAndProvision(payment) {
     } catch (e) {
       console.error('SSL PURCHASE FAILED for payment', String(payment._id), e.message);
       try { const sOrder = await SslOrder.findById(payment.orderId); if (sOrder) { sOrder.status = 'failed'; sOrder.activationNote = e.message; await sOrder.save(); } } catch (_) { }
+    }
+    return;
+  }
+
+  // HOSTING orders: mark active on payment (hosting is provisioned by your team / cPanel).
+  if (payment.orderType === 'hosting') {
+    try {
+      const hOrder = await HostingOrder.findById(payment.orderId);
+      if (hOrder && hOrder.status === 'pending') {
+        hOrder.status = payment.isTest ? 'test_paid' : 'active';
+        hOrder.activatedAt = new Date();
+        await hOrder.save();
+        console.log('HOSTING order active:', hOrder.planName, hOrder.forDomain);
+        const me = await Customer.findById(payment.customerId);
+        try {
+          const html = emailShell('Hosting order confirmed', `
+            <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+            <p>Your hosting plan <strong>${hOrder.planName}</strong>${hOrder.forDomain ? ` for <strong>${hOrder.forDomain}</strong>` : ''} is confirmed.</p>
+            <p>Our team will set up your hosting account and email you the login details shortly.</p>`);
+          await sendEmail(me?.businessEmail, `Hosting confirmed: ${hOrder.planName}`, html);
+        } catch (_) { }
+      }
+    } catch (e) {
+      console.error('HOSTING order failed for payment', String(payment._id), e.message);
+      try { const hOrder = await HostingOrder.findById(payment.orderId); if (hOrder) { hOrder.status = 'failed'; await hOrder.save(); } } catch (_) { }
     }
     return;
   }
@@ -4323,6 +4378,79 @@ app.get('/api/customer/nc/hosting', authenticateCustomer, async (req, res) => {
   }
 });
 
+// Customer: buy a hosting plan (pay-first).
+app.post('/api/customer/nc/hosting/buy', authenticateCustomer, async (req, res) => {
+  try {
+    const { planId, forDomain, method } = req.body;
+    const plan = await HostingPlan.findOne({ planId, active: true });
+    if (!plan) return res.status(404).json({ error: 'Hosting plan not found.' });
+    const me = await Customer.findById(req.customerId);
+    const subtotal = Number(plan.price || 0);
+    if (subtotal <= 0) return res.status(400).json({ error: 'This plan is not available for purchase.' });
+    const taxed = await applyTaxAndFee(subtotal);
+    const amount = taxed.total;
+
+    const orderNumber = `HO-${Date.now()}`;
+    const order = await HostingOrder.create({
+      customerId: me._id, orderNumber, planId: plan.planId, planName: plan.name,
+      forDomain: (forDomain || '').toLowerCase().trim(), price: amount, billingCycle: plan.billingCycle, status: 'pending',
+    });
+    const payment = await Payment.create({
+      customerId: me._id, customerEmail: me.businessEmail, domain: order.forDomain,
+      orderId: order._id, orderType: 'hosting', amount, subtotal: taxed.subtotal, tax: taxed.tax, fee: taxed.fee, currency: 'USD',
+      method: method === 'nicky' ? 'nicky' : 'stripe', status: 'pending',
+    });
+
+    const orderDesc = `Hosting: ${plan.name}${order.forDomain ? ' for ' + order.forDomain : ''}`;
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
+
+    if (payment.method === 'stripe') {
+      let stripe;
+      try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const sd = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (sd?.stripeMode || 'test') !== 'live';
+      await payment.save();
+      const line_items = [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(taxed.subtotal * 100) }, quantity: 1 }];
+      if (taxed.fee > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) }, quantity: 1 });
+      if (taxed.tax > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) }, quantity: 1 });
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment', line_items, success_url: successUrl, cancel_url: cancelUrl,
+        client_reference_id: String(payment._id),
+        metadata: { paymentId: String(payment._id), orderId: String(order._id), orderType: 'hosting' },
+      });
+      payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
+      return res.json({ checkoutUrl: session.url, paymentId: payment._id });
+    }
+
+    try {
+      const nicky = await createNickyPayment({
+        amount, currency: 'USD', description: orderDesc, orderNumber,
+        reference: String(payment._id), billDescription: orderDesc,
+        customerEmail: me.businessEmail, customerName: me.firstName ? `${me.firstName} ${me.lastName || ''}`.trim() : me.businessEmail,
+        redirectUrl: successUrl, cancelUrl,
+      });
+      payment.checkoutUrl = nicky.url; payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id); payment.providerShortId = nicky.shortId || null;
+      await payment.save();
+      return res.json({ checkoutUrl: nicky.url, paymentId: payment._id });
+    } catch (e) {
+      return res.status(500).json({ error: 'Crypto checkout not available: ' + e.message });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: list their hosting orders.
+app.get('/api/customer/nc/hosting/orders', authenticateCustomer, async (req, res) => {
+  try {
+    const orders = await HostingOrder.find({ customerId: req.customerId }).sort({ createdAt: -1 });
+    res.json({ orders: orders.map((o) => ({ id: o._id, planName: o.planName, forDomain: o.forDomain, status: o.status, billingCycle: o.billingCycle, createdAt: o.createdAt })) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Admin: diagnose domain orders — see each order's status, payment status, and any error.
 app.get('/api/admin/nc/domain-diagnostic', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
@@ -5019,6 +5147,74 @@ app.get('/api/order-options', async (req, res) => {
   } catch (e) { res.json({ flexibleEnabled: true, annualEnabled: false }); }
 });
 
+// ---- GOOGLE WORKSPACE TRANSFER (import subscription from another reseller) ----
+// Customer submits their domain + transfer token; we claim it into the admin-selected account.
+app.post('/api/customer/workspace/transfer', authenticateCustomer, async (req, res) => {
+  try {
+    const { domain, transferToken } = req.body;
+    const dom = (domain || '').toLowerCase().trim();
+    if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) return res.status(400).json({ error: 'Enter a valid domain like example.com' });
+    if (!transferToken || !String(transferToken).trim()) return res.status(400).json({ error: 'Enter your Google transfer token.' });
+    const me = await Customer.findById(req.customerId);
+
+    // Decide which reseller account receives it (admin-controlled, same logic as orders).
+    const os = await OrderSettings.findOne({ singleton: 'main' });
+    let account = 'pk';
+    if (os && os.usaOrdersEnabled && !os.pkOrdersEnabled) account = 'usa';
+    else if (os && os.pkOrdersEnabled) account = 'pk';
+    else if (os && os.usaOrdersEnabled) account = 'usa';
+
+    const orderNumber = `WT-${Date.now()}`;
+    const xfer = await WorkspaceTransfer.create({
+      customerId: me._id, orderNumber, domain: dom, transferToken: String(transferToken).trim(), account, status: 'pending',
+    });
+
+    // Transfers are free to initiate (no charge) — execute immediately.
+    try {
+      const result = await transferWorkspaceCustomer(dom, xfer.transferToken, account);
+      xfer.status = 'completed';
+      xfer.subscriptionsClaimed = result.claimed;
+      xfer.completedAt = new Date();
+      xfer.resultNote = result.alreadyOurs ? 'Domain already under our reseller; claimed subscriptions.' : `Transferred. ${result.claimed} subscription(s) claimed.`;
+      await xfer.save();
+
+      // Link the domain to the customer + seed billing for the claimed subs.
+      if (me && !me.domain) { me.domain = dom; me.account = account; await me.save(); }
+      try { await syncSubscriptionsForBilling(account); } catch (_) { }
+
+      // Notify the customer.
+      try {
+        const html = emailShell('Workspace transfer complete', `
+          <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+          <p>Your Google Workspace for <strong>${dom}</strong> has been transferred to us successfully.</p>
+          <p>${result.claimed} subscription(s) are now managed under our reseller account. Your users, data, and settings are unchanged — only billing and management moved to us.</p>
+          <p>You can view everything under <strong>Subscriptions</strong> in your portal.</p>`);
+        await sendEmail(me?.businessEmail, `Workspace transfer complete: ${dom}`, html);
+      } catch (_) { }
+
+      return res.json({ success: true, claimed: result.claimed, account, message: `Transfer complete. ${result.claimed} subscription(s) are now managed by us.` });
+    } catch (e) {
+      xfer.status = 'failed';
+      xfer.resultNote = e.message;
+      await xfer.save();
+      return res.status(502).json({ error: e.message });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: list their workspace transfers.
+app.get('/api/customer/workspace/transfers', authenticateCustomer, async (req, res) => {
+  try {
+    const rows = await WorkspaceTransfer.find({ customerId: req.customerId }).sort({ createdAt: -1 });
+    res.json({ transfers: rows.map((t) => ({ id: t._id, domain: t.domain, status: t.status, claimed: t.subscriptionsClaimed, account: t.account, note: t.resultNote, createdAt: t.createdAt })) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- GOOGLE WORKSPACE TRANSFER end ----
 app.get('/api/products', async (req, res) => {
   try {
     const plans = await Plan.find({ active: true }).sort({ category: 1, sortOrder: 1 });
@@ -5474,6 +5670,48 @@ app.post('/api/admin/backfill-skus', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// Transfer a Google Workspace customer + subscriptions INTO our reseller account
+// using the customer's transfer token (customerAuthToken from admin.google.com/TransferToken).
+async function transferWorkspaceCustomer(domain, transferToken, account) {
+  const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+  const reseller = google.reseller({ version: 'v1', auth });
+  const dom = String(domain).toLowerCase().trim();
+
+  let alreadyOurs = false;
+  try { await reseller.customers.get({ customerId: dom }); alreadyOurs = true; }
+  catch (_) { /* not ours yet — expected for a transfer */ }
+
+  if (!alreadyOurs) {
+    try {
+      await reseller.customers.insert({ customerAuthToken: transferToken, requestBody: { customerDomain: dom } });
+    } catch (e) {
+      const msg = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
+      throw new Error('Could not claim domain with that transfer token: ' + msg);
+    }
+  }
+
+  let claimed = 0;
+  try {
+    const resp = await reseller.subscriptions.list({ customerAuthToken: transferToken, customerId: dom });
+    const subs = resp.data.subscriptions || [];
+    for (const s of subs) {
+      try {
+        await reseller.subscriptions.insert({
+          customerId: dom, customerAuthToken: transferToken,
+          requestBody: { customerId: dom, skuId: s.skuId, plan: s.plan, seats: s.seats, purchaseOrderId: s.purchaseOrderId },
+        });
+        claimed++;
+      } catch (e) {
+        console.error('WS TRANSFER sub claim failed', dom, s.skuId, '→', e?.errors?.[0]?.message || e.message);
+      }
+    }
+  } catch (e) {
+    console.error('WS TRANSFER list failed for', dom, '→', e?.errors?.[0]?.message || e.message);
+  }
+
+  return { ok: true, claimed, alreadyOurs };
+}
 
 // Provision a workspace order into Google: create customer + create subscription
 // Reusable provisioning: creates Google customer + admin user + Workspace subscription.
