@@ -3581,6 +3581,28 @@ async function applyTaxAndFee(subtotal) {
   return { subtotal: round(subtotal), tax: round(tax), fee: round(fee), total, taxPercent, taxLabel };
 }
 
+// Admin: diagnose tax/fee — shows current settings + a sample calculation on $100.
+app.get('/api/admin/tax-diagnostic', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const s = await PaymentSettings.findOne({ singleton: 'main' });
+    const sample = await applyTaxAndFee(100);
+    res.json({
+      settings: {
+        taxEnabled: !!s?.taxEnabled,
+        taxPercent: s?.taxPercent ?? 0,
+        taxLabel: s?.taxLabel || 'Tax',
+        feeEnabled: !!s?.feeEnabled,
+        feePercent: s?.feePercent ?? 0,
+        feeFixed: s?.feeFixed ?? 0,
+      },
+      sampleOn100: sample,
+      note: sample.tax > 0 ? 'Tax IS being applied.' : 'Tax is NOT applied — either disabled or 0%.',
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Admin: all payments
 app.get('/api/admin/payments', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
@@ -6291,6 +6313,10 @@ function scheduleNickyPolling() {
 // ==================== SERVER START ====================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
+  console.log('======================================================');
+  console.log('🚀 BUILD MARKER: tax-logging + order-routing + annual + branding');
+  console.log('🚀 If you can see this line, the NEW backend is deployed.');
+  console.log('======================================================');
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`📧 Email service: ${process.env.EMAIL_USER}`);
   console.log(`🔐 JWT Secret configured: ${process.env.JWT_SECRET ? 'Yes' : 'No'}`);

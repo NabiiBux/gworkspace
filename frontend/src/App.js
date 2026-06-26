@@ -53,6 +53,13 @@ const BrandingProvider = ({ children }) => {
     } catch (_) { }
   };
   useEffect(() => { refresh(); }, []);
+  // Guarantee the viewport meta tag exists so responsive CSS works on mobile,
+  // even if public/index.html is missing it.
+  useEffect(() => {
+    let vp = document.querySelector("meta[name='viewport']");
+    if (!vp) { vp = document.createElement('meta'); vp.name = 'viewport'; document.head.appendChild(vp); }
+    vp.setAttribute('content', 'width=device-width, initial-scale=1, viewport-fit=cover');
+  }, []);
   // Apply favicon + page title whenever branding changes.
   useEffect(() => {
     if (branding.faviconDataUrl) {
