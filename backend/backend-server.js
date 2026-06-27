@@ -465,6 +465,7 @@ const WorkspaceOrderSchema = new mongoose.Schema(
     type: { type: String, default: 'workspace' },
     planType: { type: String, enum: ['flexible', 'annual'], default: 'flexible' }, // payment plan
     account: { type: String, default: '' },  // which reseller account fulfilled it ('pk'/'usa')
+    provisionNote: String,  // any non-fatal provisioning note (e.g. admin user not auto-created)
     plan: { id: String, name: String, monthlyPrice: Number },
     seats: Number,
     monthlyTotal: Number,
@@ -5730,6 +5731,75 @@ async function getResellerAuth() {
   return oauth2;
 }
 
+// Admin: diagnose a failed workspace order — shows account, status, and lets you retry provisioning.
+app.get('/api/admin/workspace-order-diagnostic', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { orderNumber, domain } = req.query;
+    const q = {};
+    if (orderNumber) q.orderNumber = orderNumber;
+    if (domain) q['organization.domain'] = String(domain).toLowerCase();
+    const orders = await WorkspaceOrder.find(q).sort({ createdAt: -1 }).limit(10);
+    const out = [];
+    for (const o of orders) {
+      // Check if the customer actually exists in the relevant Google account.
+      let existsInGoogle = null, googleErr = null;
+      const acct = o.account || 'pk';
+      try {
+        const auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth();
+        const reseller = google.reseller({ version: 'v1', auth });
+        const dom = (o.organization?.domain || '').toLowerCase();
+        const c = await reseller.customers.get({ customerId: dom });
+        existsInGoogle = !!c.data.customerDomain;
+      } catch (e) { existsInGoogle = false; googleErr = e?.errors?.[0]?.message || e.message; }
+      out.push({
+        orderNumber: o.orderNumber, domain: o.organization?.domain, account: acct,
+        status: o.status, googleProvisioned: o.googleProvisioned, planType: o.planType,
+        provisionNote: o.provisionNote || null, existsInGoogle, googleErr,
+      });
+    }
+    res.json({ orders: out });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin: force re-provision a workspace order (e.g. after fixing USA auth/scopes).
+app.post('/api/admin/workspace-order-reprovision', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { orderNumber } = req.body;
+    const order = await WorkspaceOrder.findOne({ orderNumber });
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+    order.googleProvisioned = false; // allow re-attempt
+    await order.save();
+    const result = await provisionWorkspaceOrder(order);
+    res.json({ success: true, result });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// Admin: check the USA account connection + scopes.
+app.get('/api/admin/usa-account-check', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const conn = await GoogleConnection.findOne({ account: 'usa' });
+    if (!conn || !conn.refreshToken) return res.json({ connected: false, note: 'USA account is not connected (no refresh token).' });
+    let canListCustomers = false, resellerErr = null;
+    try {
+      const auth = await getUsaAuth();
+      const reseller = google.reseller({ version: 'v1', auth });
+      await reseller.subscriptions.list({ maxResults: 1 });
+      canListCustomers = true;
+    } catch (e) { resellerErr = e?.errors?.[0]?.message || e.message; }
+    res.json({
+      connected: true,
+      scopes: conn.scopes || conn.scope || 'unknown',
+      canUseResellerApi: canListCustomers,
+      resellerErr,
+      note: canListCustomers
+        ? 'USA account can use the Reseller API (can create customers + subscriptions).'
+        : 'USA account CANNOT use the Reseller API — it likely lacks the apps.order scope. Reconnect it granting reseller permissions.',
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // One-time: backfill Google SKU IDs onto existing workspace plans
 app.post('/api/admin/backfill-skus', async (req, res) => {
   try {
@@ -5833,6 +5903,7 @@ async function provisionWorkspaceOrder(order) {
   const org = order.organization || {};
   const contact = order.contact || {};
   const domain = (org.domain || '').toLowerCase();
+  console.log(`PROVISION START: order=${order.orderNumber} domain=${domain} account=${account} planType=${order.planType || 'flexible'}`);
 
   // Plan type: FLEXIBLE (monthly) or ANNUAL_MONTHLY_PAY (annual commitment, paid monthly)
   const planType = order.planType === 'annual' ? 'ANNUAL_MONTHLY_PAY' : 'FLEXIBLE';
@@ -5860,12 +5931,20 @@ async function provisionWorkspaceOrder(order) {
         },
       },
     });
+    console.log(`PROVISION [${account}] step 1 OK: customer created for ${domain}`);
   } catch (custErr) {
     const msg = custErr?.errors?.[0]?.message || custErr?.message || '';
-    if (!/already exists|entity already|duplicate/i.test(msg)) throw new Error('Customer creation failed: ' + msg);
+    if (!/already exists|entity already|duplicate/i.test(msg)) {
+      console.error(`PROVISION [${account}] step 1 FAILED (customer):`, msg);
+      throw new Error(`Customer creation failed on the ${account.toUpperCase()} account: ${msg}`);
+    }
+    console.log(`PROVISION [${account}] step 1: customer already exists for ${domain} (continuing)`);
   }
 
-  // 2) Create admin user
+  // 2) Create admin user — NON-FATAL.
+  // The USA account uses OAuth which may not have domain-wide delegation to create users
+  // inside the customer's domain. Google can auto-create the admin when the subscription is made,
+  // so we attempt this but DO NOT fail the whole order if it doesn't work.
   try {
     const rawUser = (org.desiredAdminUsername || 'admin').toString().trim();
     const localPart = rawUser.includes('@') ? rawUser.split('@')[0] : rawUser;
@@ -5883,9 +5962,16 @@ async function provisionWorkspaceOrder(order) {
       },
     });
     await directory.users.makeAdmin({ userKey: adminEmail, requestBody: { status: true } });
+    console.log(`PROVISION [${account}] step 2 OK: admin user ${adminEmail} created`);
   } catch (userErr) {
     const msg = userErr?.errors?.[0]?.message || userErr?.message || '';
-    if (!/already exists|entity already|duplicate|409/i.test(msg)) throw new Error('Admin user creation failed: ' + msg);
+    if (/already exists|entity already|duplicate|409/i.test(msg)) {
+      console.log(`PROVISION [${account}] step 2: admin user already exists (continuing)`);
+    } else {
+      // Non-fatal: log it, but continue to create the subscription so the customer gets their plan.
+      console.error(`PROVISION [${account}] step 2 SKIPPED (admin user could not be created — likely OAuth lacks domain delegation):`, msg);
+      order.provisionNote = `Admin user not auto-created on ${account.toUpperCase()}: ${msg}. Subscription still created.`;
+    }
   }
 
   // 3) Create subscription
@@ -5900,14 +5986,17 @@ async function provisionWorkspaceOrder(order) {
         purchaseOrderId: order.orderNumber,
       },
     });
+    console.log(`PROVISION [${account}] step 3 OK: subscription created (${planDoc.skuId}, ${planType})`);
   } catch (subErr) {
     const msg = subErr?.errors?.[0]?.message || subErr?.message || '';
-    throw new Error('Subscription creation failed: ' + msg);
+    console.error(`PROVISION [${account}] step 3 FAILED (subscription):`, msg);
+    throw new Error(`Subscription creation failed on the ${account.toUpperCase()} account: ${msg}`);
   }
 
   order.status = 'provisioned';
   order.googleProvisioned = true;
   await order.save();
+  console.log(`PROVISION COMPLETE: order=${order.orderNumber} account=${account}`);
   return { success: true, message: 'Provisioned in Google.' };
 }
 
