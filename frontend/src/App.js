@@ -40,37 +40,53 @@ const COUNTRIES = [
 // Reusable Google Maps Places address autocomplete.
 // Renders an input; on selection, calls onPick({ street, city, state, zip }).
 const ALLOWED_COUNTRIES_DEFAULT = ['us'];
-const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT, placeholder = 'Start typing an address…' }) => {
+const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) => {
   const containerRef = useRef(null);
   const mountedRef = useRef(false);
-  const [ready, setReady] = useState(false);
+  const [mapsReady, setMapsReady] = useState(false);
 
-  // Load the Maps JS API (Places) once.
+  // Load the Google Maps JavaScript API (with Places) once — same as the customer form.
   useEffect(() => {
     if (!MAPS_KEY) return;
-    if (window.google && window.google.maps && window.google.maps.places) { setReady(true); return; }
+    if (window.google && window.google.maps && window.google.maps.places) {
+      setMapsReady(true);
+      return;
+    }
     const existing = document.getElementById('gmaps-places-script');
-    if (existing) { existing.addEventListener('load', () => setReady(true)); return; }
+    if (existing) {
+      existing.addEventListener('load', () => setMapsReady(true));
+      return;
+    }
     const script = document.createElement('script');
     script.id = 'gmaps-places-script';
     script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&loading=async&v=weekly`;
-    script.async = true; script.defer = true;
-    script.onload = () => setReady(true);
+    script.async = true;
+    script.defer = true;
+    script.onload = () => setMapsReady(true);
     document.body.appendChild(script);
   }, []);
 
+  // Mount the PlaceAutocompleteElement when maps is ready — identical to the customer form.
   useEffect(() => {
-    if (!ready || !containerRef.current || mountedRef.current) return;
+    if (!mapsReady || !containerRef.current) return;
+    if (mountedRef.current) return; // already mounted
     let cancelled = false;
+
     (async () => {
       try {
         const { PlaceAutocompleteElement } = await window.google.maps.importLibrary('places');
         if (cancelled) return;
-        const el = new PlaceAutocompleteElement({ componentRestrictions: { country: countries } });
+
+        const el = new PlaceAutocompleteElement({
+          componentRestrictions: { country: countries },
+        });
         el.style.width = '100%';
-        containerRef.current.innerHTML = '';
-        containerRef.current.appendChild(el);
         mountedRef.current = true;
+
+        const container = containerRef.current;
+        container.innerHTML = '';
+        container.appendChild(el);
+
         el.addEventListener('gmp-select', async (event) => {
           try {
             const place = event.placePrediction.toPlace();
@@ -82,16 +98,22 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT, pl
             const city = get('locality')?.longText || get('sublocality')?.longText || get('postal_town')?.longText || '';
             const stateShort = get('administrative_area_level_1')?.shortText || '';
             const zip = get('postal_code')?.longText || '';
-            onPick({ street: `${streetNumber} ${route}`.trim(), city, state: stateShort, zip });
-          } catch (err) { console.error('Place select error:', err); }
+            const street = `${streetNumber} ${route}`.trim();
+            onPick({ street, city, state: stateShort, zip });
+          } catch (err) {
+            console.error('Place select error:', err);
+          }
         });
-      } catch (err) { console.error('Autocomplete init error:', err); }
+      } catch (err) {
+        console.error('Autocomplete init error:', err);
+      }
     })();
+
     return () => { cancelled = true; };
-  }, [ready]);
+  }, [mapsReady]);
 
   if (!MAPS_KEY) return null;
-  return <div ref={containerRef} style={{ width: '100%' }} data-placeholder={placeholder} />;
+  return <div ref={containerRef} style={{ width: '100%' }} />;
 };
 
 // Auth Context
