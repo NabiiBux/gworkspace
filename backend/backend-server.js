@@ -5755,10 +5755,35 @@ app.get('/api/google/status', authenticateCustomer, async (req, res) => {
   }
 });
 
-// Auth client for the USA reseller (OAuth refresh token) — used for Voice
+// Service-account auth for the USA reseller (domain-wide delegation) — mirrors PK.
+// Uses GOOGLE_SERVICE_ACCOUNT_JSON_USA + RESELLER_ADMIN_EMAIL_USA. This is the method
+// that can create users in customer domains (which OAuth cannot).
+function getUsaServiceAccountAuth() {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON_USA) return null;
+  let creds;
+  try {
+    creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON_USA);
+  } catch (e) {
+    console.error('GOOGLE_SERVICE_ACCOUNT_JSON_USA is not valid JSON:', e.message);
+    return null;
+  }
+  const subject = process.env.RESELLER_ADMIN_EMAIL_USA || 'admin@artisandrywallaz.com';
+  return new google.auth.JWT({
+    email: creds.client_email,
+    key: creds.private_key,
+    scopes: PROVISION_SCOPES,
+    subject, // impersonate the USA reseller admin
+  });
+}
+
+// Auth client for the USA reseller.
+// Prefers the USA service account (needed for user creation + full provisioning);
+// falls back to the OAuth refresh token (Voice-only, can't create users).
 async function getUsaAuth() {
+  const sa = getUsaServiceAccountAuth();
+  if (sa) return sa;
   const conn = await GoogleConnection.findOne({ account: 'usa' });
-  if (!conn || !conn.refreshToken) throw new Error('USA reseller not connected. Connect it to sell Voice.');
+  if (!conn || !conn.refreshToken) throw new Error('USA reseller not connected. Add GOOGLE_SERVICE_ACCOUNT_JSON_USA (recommended) or connect via OAuth.');
   const oauth2 = makeUsaOAuthClient();
   oauth2.setCredentials({ refresh_token: conn.refreshToken });
   return oauth2;
@@ -5880,23 +5905,27 @@ app.post('/api/admin/workspace-order-reprovision', authenticateCustomer, require
 // Admin: check the USA account connection + scopes.
 app.get('/api/admin/usa-account-check', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
-    const conn = await GoogleConnection.findOne({ account: 'usa' });
-    if (!conn || !conn.refreshToken) return res.json({ connected: false, note: 'USA account is not connected (no refresh token).' });
-    let canListCustomers = false, resellerErr = null;
+    const usingSA = !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON_USA;
+    let canUseResellerApi = false, resellerErr = null, canCreateUsers = usingSA;
     try {
       const auth = await getUsaAuth();
       const reseller = google.reseller({ version: 'v1', auth });
       await reseller.subscriptions.list({ maxResults: 1 });
-      canListCustomers = true;
+      canUseResellerApi = true;
     } catch (e) { resellerErr = e?.errors?.[0]?.message || e.message; }
+
     res.json({
-      connected: true,
-      scopes: conn.scopes || conn.scope || 'unknown',
-      canUseResellerApi: canListCustomers,
+      method: usingSA ? 'service-account (domain-wide delegation)' : 'oauth (Voice-only)',
+      serviceAccountConfigured: usingSA,
+      resellerAdminEmail: process.env.RESELLER_ADMIN_EMAIL_USA || (usingSA ? 'admin@artisandrywallaz.com (default)' : null),
+      canUseResellerApi,
+      canCreateAdminUsers: canCreateUsers,
       resellerErr,
-      note: canListCustomers
-        ? 'USA account can use the Reseller API (can create customers + subscriptions).'
-        : 'USA account CANNOT use the Reseller API — it likely lacks the apps.order scope. Reconnect it granting reseller permissions.',
+      note: usingSA
+        ? (canUseResellerApi
+          ? 'USA service account works — can create customers, subscriptions, AND admin users (full provisioning like PK).'
+          : 'USA service account is set but the Reseller API call failed. Check domain-wide delegation is granted for the service account in the USA Google Admin, and that RESELLER_ADMIN_EMAIL_USA is a real super-admin.')
+        : 'USA is OAuth-only (Voice). It CANNOT create admin users. Add GOOGLE_SERVICE_ACCOUNT_JSON_USA + RESELLER_ADMIN_EMAIL_USA for full Workspace provisioning like PK.',
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

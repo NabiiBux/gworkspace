@@ -37,6 +37,63 @@ const COUNTRIES = [
   "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom", "United States", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela", "Vietnam", "Yemen", "Zambia", "Zimbabwe"
 ];
 
+// Reusable Google Maps Places address autocomplete.
+// Renders an input; on selection, calls onPick({ street, city, state, zip }).
+const ALLOWED_COUNTRIES_DEFAULT = ['us'];
+const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT, placeholder = 'Start typing an address…' }) => {
+  const containerRef = useRef(null);
+  const mountedRef = useRef(false);
+  const [ready, setReady] = useState(false);
+
+  // Load the Maps JS API (Places) once.
+  useEffect(() => {
+    if (!MAPS_KEY) return;
+    if (window.google && window.google.maps && window.google.maps.places) { setReady(true); return; }
+    const existing = document.getElementById('gmaps-places-script');
+    if (existing) { existing.addEventListener('load', () => setReady(true)); return; }
+    const script = document.createElement('script');
+    script.id = 'gmaps-places-script';
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&loading=async&v=weekly`;
+    script.async = true; script.defer = true;
+    script.onload = () => setReady(true);
+    document.body.appendChild(script);
+  }, []);
+
+  useEffect(() => {
+    if (!ready || !containerRef.current || mountedRef.current) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { PlaceAutocompleteElement } = await window.google.maps.importLibrary('places');
+        if (cancelled) return;
+        const el = new PlaceAutocompleteElement({ componentRestrictions: { country: countries } });
+        el.style.width = '100%';
+        containerRef.current.innerHTML = '';
+        containerRef.current.appendChild(el);
+        mountedRef.current = true;
+        el.addEventListener('gmp-select', async (event) => {
+          try {
+            const place = event.placePrediction.toPlace();
+            await place.fetchFields({ fields: ['addressComponents', 'formattedAddress'] });
+            const comps = place.addressComponents || [];
+            const get = (type) => comps.find((c) => (c.types || []).includes(type));
+            const streetNumber = get('street_number')?.longText || '';
+            const route = get('route')?.longText || '';
+            const city = get('locality')?.longText || get('sublocality')?.longText || get('postal_town')?.longText || '';
+            const stateShort = get('administrative_area_level_1')?.shortText || '';
+            const zip = get('postal_code')?.longText || '';
+            onPick({ street: `${streetNumber} ${route}`.trim(), city, state: stateShort, zip });
+          } catch (err) { console.error('Place select error:', err); }
+        });
+      } catch (err) { console.error('Autocomplete init error:', err); }
+    })();
+    return () => { cancelled = true; };
+  }, [ready]);
+
+  if (!MAPS_KEY) return null;
+  return <div ref={containerRef} style={{ width: '100%' }} data-placeholder={placeholder} />;
+};
+
 // Auth Context
 const AuthContext = createContext();
 
@@ -5788,6 +5845,10 @@ const AdminOrderWorkspace = () => {
           <div><label style={lab}>Phone</label><input style={inp} value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
           <div><label style={lab}>Admin username</label><input style={inp} value={form.desiredAdminUsername} onChange={e => set('desiredAdminUsername', e.target.value)} placeholder="admin" /></div>
           <div><label style={lab}>Temp password (optional)</label><input style={inp} value={form.tempPassword} onChange={e => set('tempPassword', e.target.value)} placeholder="auto-generated if blank" /></div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label style={lab}>Address lookup (Google Maps)</label>
+            <AddressAutocomplete onPick={({ street, city, state, zip }) => setForm(f => ({ ...f, streetAddress: street || f.streetAddress, city: city || f.city, state: state || f.state, zip: zip || f.zip }))} />
+          </div>
           <div><label style={lab}>Street address</label><input style={inp} value={form.streetAddress} onChange={e => set('streetAddress', e.target.value)} /></div>
           <div><label style={lab}>City</label><input style={inp} value={form.city} onChange={e => set('city', e.target.value)} /></div>
           <div><label style={lab}>State</label><input style={inp} value={form.state} onChange={e => set('state', e.target.value)} /></div>
