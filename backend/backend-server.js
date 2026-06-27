@@ -6009,6 +6009,24 @@ async function transferWorkspaceCustomer(domain, account, planDoc, seats, planTy
   return { ok: true, claimed };
 }
 
+// Map a country name (or code) to a 2-letter ISO code for Google's postalAddress.
+function countryNameToCode(input) {
+  if (!input) return 'US';
+  const s = String(input).trim();
+  if (s.length === 2) return s.toUpperCase();
+  const map = {
+    'united states': 'US', 'usa': 'US', 'united states of america': 'US',
+    'pakistan': 'PK', 'united kingdom': 'GB', 'uk': 'GB', 'canada': 'CA',
+    'australia': 'AU', 'india': 'IN', 'germany': 'DE', 'france': 'FR',
+    'united arab emirates': 'AE', 'uae': 'AE', 'saudi arabia': 'SA',
+    'netherlands': 'NL', 'spain': 'ES', 'italy': 'IT', 'ireland': 'IE',
+    'new zealand': 'NZ', 'singapore': 'SG', 'south africa': 'ZA',
+    'nigeria': 'NG', 'kenya': 'KE', 'bangladesh': 'BD', 'philippines': 'PH',
+    'mexico': 'MX', 'brazil': 'BR', 'japan': 'JP', 'china': 'CN',
+  };
+  return map[s.toLowerCase()] || 'US';
+}
+
 // Provision a workspace order into Google: create customer + create subscription
 // Reusable provisioning: creates Google customer + admin user + Workspace subscription.
 // Returns { success, message } or throws. Used by the manual endpoint AND auto-provision-on-payment.
@@ -6057,7 +6075,7 @@ async function provisionWorkspaceOrder(order) {
           locality: org.city,
           region: org.state,
           postalCode: org.zip,
-          countryCode: 'US',
+          countryCode: countryNameToCode(org.country),
         },
       },
     });
@@ -6119,8 +6137,13 @@ async function provisionWorkspaceOrder(order) {
     console.log(`PROVISION [${account}] step 3 OK: subscription created (${planDoc.skuId}, ${planType})`);
   } catch (subErr) {
     const msg = subErr?.errors?.[0]?.message || subErr?.message || '';
-    console.error(`PROVISION [${account}] step 3 FAILED (subscription):`, msg);
-    throw new Error(`Subscription creation failed on the ${account.toUpperCase()} account: ${msg}`);
+    if (/already exists|entity already|duplicate|resource already/i.test(msg)) {
+      // The subscription is already in Google — this domain is already provisioned. Treat as success.
+      console.log(`PROVISION [${account}] step 3: subscription already exists for ${domain} (treating as provisioned)`);
+    } else {
+      console.error(`PROVISION [${account}] step 3 FAILED (subscription):`, msg);
+      throw new Error(`Subscription creation failed on the ${account.toUpperCase()} account: ${msg}`);
+    }
   }
 
   order.status = 'provisioned';

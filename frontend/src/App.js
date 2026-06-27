@@ -5753,8 +5753,8 @@ const AdminOrderWorkspace = () => {
   const [plans, setPlans] = useState([]);
   const [form, setForm] = useState({
     domain: '', planId: '', seats: 1, planType: 'flexible', account: '',
-    orgName: '', firstName: '', lastName: '', email: '', phone: '',
-    streetAddress: '', city: '', state: '', zip: '',
+    orgName: '', firstName: '', lastName: '', email: '', alternateEmail: '', phone: '',
+    country: 'United States', streetAddress: '', streetAddress2: '', city: '', state: '', zip: '',
     desiredAdminUsername: 'admin', tempPassword: '',
   });
   const [busy, setBusy] = useState(false);
@@ -5780,8 +5780,8 @@ const AdminOrderWorkspace = () => {
     setBusy(true); setMsg('');
     try {
       const payload = {
-        organization: { domain: form.domain.toLowerCase().trim(), name: form.orgName, streetAddress: form.streetAddress, city: form.city, state: form.state, zip: form.zip, desiredAdminUsername: form.desiredAdminUsername, tempPassword: form.tempPassword },
-        contact: { firstName: form.firstName, lastName: form.lastName, email: form.email, phone: form.phone },
+        organization: { domain: form.domain.toLowerCase().trim(), name: form.orgName, country: form.country, streetAddress: form.streetAddress, streetAddress2: form.streetAddress2, city: form.city, state: form.state, zip: form.zip, desiredAdminUsername: form.desiredAdminUsername, tempPassword: form.tempPassword },
+        contact: { firstName: form.firstName, lastName: form.lastName, email: form.email, alternateEmail: form.alternateEmail, phone: form.phone },
         plan: plans.find(p => p.id === form.planId),
         seats: Number(form.seats),
         planType: form.planType,
@@ -5842,14 +5842,21 @@ const AdminOrderWorkspace = () => {
           <div><label style={lab}>Admin first name</label><input style={inp} value={form.firstName} onChange={e => set('firstName', e.target.value)} /></div>
           <div><label style={lab}>Admin last name</label><input style={inp} value={form.lastName} onChange={e => set('lastName', e.target.value)} /></div>
           <div><label style={lab}>Contact email</label><input style={inp} value={form.email} onChange={e => set('email', e.target.value)} placeholder="owner@redvi.shop" /></div>
+          <div><label style={lab}>Alternate email</label><input style={inp} value={form.alternateEmail} onChange={e => set('alternateEmail', e.target.value)} placeholder="recovery email" /></div>
           <div><label style={lab}>Phone</label><input style={inp} value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
           <div><label style={lab}>Admin username</label><input style={inp} value={form.desiredAdminUsername} onChange={e => set('desiredAdminUsername', e.target.value)} placeholder="admin" /></div>
           <div><label style={lab}>Temp password (optional)</label><input style={inp} value={form.tempPassword} onChange={e => set('tempPassword', e.target.value)} placeholder="auto-generated if blank" /></div>
+          <div><label style={lab}>Country</label>
+            <select style={inp} value={form.country} onChange={e => set('country', e.target.value)}>
+              {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <label style={lab}>Address lookup (Google Maps)</label>
             <AddressAutocomplete onPick={({ street, city, state, zip }) => setForm(f => ({ ...f, streetAddress: street || f.streetAddress, city: city || f.city, state: state || f.state, zip: zip || f.zip }))} />
           </div>
           <div><label style={lab}>Street address</label><input style={inp} value={form.streetAddress} onChange={e => set('streetAddress', e.target.value)} /></div>
+          <div><label style={lab}>Street address 2 (optional)</label><input style={inp} value={form.streetAddress2} onChange={e => set('streetAddress2', e.target.value)} /></div>
           <div><label style={lab}>City</label><input style={inp} value={form.city} onChange={e => set('city', e.target.value)} /></div>
           <div><label style={lab}>State</label><input style={inp} value={form.state} onChange={e => set('state', e.target.value)} /></div>
           <div><label style={lab}>ZIP</label><input style={inp} value={form.zip} onChange={e => set('zip', e.target.value)} /></div>
