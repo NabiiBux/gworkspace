@@ -830,6 +830,25 @@ const ProductsSection = () => {
                 Annual (12-month commitment, monthly pay)
               </label>
             </div>
+
+            <div style={{ borderTop: '1px solid #eee', marginTop: 16, paddingTop: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Workspace transfer tokens</div>
+              <p style={{ color: '#6b7280', fontSize: 12, marginTop: 0 }}>Your reseller transfer tokens — customers paste these in their Google Admin to authorize transferring their Workspace to you. Set the one for whichever account takes orders.</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }} className="grid-2">
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>🇵🇰 Pakistan transfer token</label>
+                  <input style={inp} value={os.pkTransferToken || ''} onChange={e => setOs({ ...os, pkTransferToken: e.target.value })} onBlur={() => saveOs({})} placeholder="e.g. C02qvoufl" />
+                  <label style={{ fontSize: 12, fontWeight: 600, marginTop: 8, display: 'block' }}>🇵🇰 Pakistan Partner ID (optional)</label>
+                  <input style={inp} value={os.pkPartnerId || ''} onChange={e => setOs({ ...os, pkPartnerId: e.target.value })} onBlur={() => saveOs({})} placeholder="Partner/Reseller ID" />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>🇺🇸 USA transfer token</label>
+                  <input style={inp} value={os.usaTransferToken || ''} onChange={e => setOs({ ...os, usaTransferToken: e.target.value })} onBlur={() => saveOs({})} placeholder="e.g. C0xxxxxxx" />
+                  <label style={{ fontSize: 12, fontWeight: 600, marginTop: 8, display: 'block' }}>🇺🇸 USA Partner ID (optional)</label>
+                  <input style={inp} value={os.usaPartnerId || ''} onChange={e => setOs({ ...os, usaPartnerId: e.target.value })} onBlur={() => saveOs({})} placeholder="Partner/Reseller ID" />
+                </div>
+              </div>
+            </div>
           </>
         )}
       </div>
@@ -5451,68 +5470,129 @@ const ResponsiveStyles = () => (
 // ==================== CUSTOMER: IMPORT GOOGLE WORKSPACE (transfer) ====================
 const CustomerWorkspaceImport = () => {
   const [domain, setDomain] = useState('');
-  const [token, setToken] = useState('');
+  const [info, setInfo] = useState(null);       // our token + partner id
+  const [plans, setPlans] = useState([]);
+  const [planId, setPlanId] = useState('');
+  const [seats, setSeats] = useState(1);
+  const [planType, setPlanType] = useState('flexible');
+  const [opts, setOpts] = useState({ flexibleEnabled: true, annualEnabled: false });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [transfers, setTransfers] = useState([]);
+  const [copied, setCopied] = useState(false);
 
-  const load = async () => { try { const r = await axios.get(`${API_URL}/customer/workspace/transfers`); setTransfers(r.data.transfers || []); } catch (_) { } };
+  const load = async () => {
+    try {
+      const [i, p, o, t] = await Promise.all([
+        axios.get(`${API_URL}/customer/workspace/transfer-info`).catch(() => null),
+        axios.get(`${API_URL}/products`).catch(() => null),
+        axios.get(`${API_URL}/order-options`).catch(() => null),
+        axios.get(`${API_URL}/customer/workspace/transfers`).catch(() => null),
+      ]);
+      if (i?.data) setInfo(i.data);
+      if (p?.data?.workspace) { setPlans(p.data.workspace); if (p.data.workspace[0]) setPlanId(p.data.workspace[0].id); }
+      if (o?.data) { setOpts(o.data); if (!o.data.flexibleEnabled && o.data.annualEnabled) setPlanType('annual'); }
+      if (t?.data) setTransfers(t.data.transfers || []);
+    } catch (_) { }
+  };
   useEffect(() => { load(); }, []);
 
-  const submit = async () => {
+  const copyToken = () => { if (info?.token) { navigator.clipboard?.writeText(info.token); setCopied(true); setTimeout(() => setCopied(false), 2000); } };
+
+  const submit = async (method) => {
     const dom = domain.toLowerCase().trim();
     if (!/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) { setMsg('Enter a valid domain like example.com'); return; }
-    if (!token.trim()) { setMsg('Enter your Google transfer token.'); return; }
+    if (!planId) { setMsg('Choose the plan you are currently using.'); return; }
     setBusy(true); setMsg('');
     try {
-      const r = await axios.post(`${API_URL}/customer/workspace/transfer`, { domain: dom, transferToken: token.trim() });
-      setMsg('✓ ' + (r.data.message || 'Transfer complete.'));
-      setToken(''); load();
-    } catch (e) { setMsg(e?.response?.data?.error || 'Transfer failed. Check your domain and token.'); }
+      const r = await axios.post(`${API_URL}/customer/workspace/transfer`, { domain: dom, planId, seats: Number(seats), planType, method });
+      if (r.data.checkoutUrl) window.location.href = r.data.checkoutUrl;
+      else setMsg('Could not start checkout.');
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not start transfer.'); }
     finally { setBusy(false); }
   };
 
+  const selectedPlan = plans.find(p => p.id === planId);
+  const monthly = selectedPlan ? Number(selectedPlan.monthlyPrice) * Math.max(1, Number(seats) || 1) : 0;
+
   const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 18 };
   const inp = { width: '100%', height: 46, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px', fontSize: 15 };
-  const step = { display: 'flex', gap: 12, marginBottom: 14 };
+  const stepRow = { display: 'flex', gap: 12, marginBottom: 14 };
   const num = { flexShrink: 0, width: 28, height: 28, borderRadius: 999, background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14 };
 
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>📥 Import your Google Workspace</h2>
-      <p style={{ color: MUTE }}>Already have Google Workspace with another reseller (or direct from Google)? Move billing & management to us — your users, email, and data stay exactly the same.</p>
+      <p style={{ color: MUTE }}>Already using Google Workspace? Move billing & management to us. Your users, email, and data stay exactly the same.</p>
 
       <div style={card}>
-        <h3 style={{ marginTop: 0 }}>How to get your transfer token</h3>
-        <div style={step}><div style={num}>1</div><div>Sign in to <a href="https://admin.google.com" target="_blank" rel="noreferrer" style={{ color: TEAL }}>admin.google.com</a> as a Super Admin.</div></div>
-        <div style={step}><div style={num}>2</div><div>Go to <a href="https://admin.google.com/TransferToken" target="_blank" rel="noreferrer" style={{ color: TEAL }}>admin.google.com/TransferToken</a>. Enter your domain and our Partner ID, agree to terms, and click <strong>Generate Transfer Token</strong>.</div></div>
-        <div style={step}><div style={num}>3</div><div>Copy the token (looks like <code>C02qvoufl</code>) and paste it below.</div></div>
-        <div style={step}><div style={num}>4</div><div>Submit — we claim the transfer instantly. Your users, data, and settings are unchanged; only billing and management move to us.</div></div>
+        <h3 style={{ marginTop: 0 }}>Step 1 — Grant us permission in your Google Admin</h3>
+        {!info?.configured ? (
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '12px 14px', color: '#92600a' }}>
+            Transfer isn't set up yet. Please contact support to get your transfer token.
+          </div>
+        ) : (
+          <>
+            <div style={stepRow}><div style={num}>1</div><div>Sign in to <a href="https://admin.google.com" target="_blank" rel="noreferrer" style={{ color: TEAL }}>admin.google.com</a> as a Super Admin.</div></div>
+            <div style={stepRow}><div style={num}>2</div><div>Open <a href="https://admin.google.com/TransferToken" target="_blank" rel="noreferrer" style={{ color: TEAL }}>admin.google.com/TransferToken</a>. Enter your domain{info.partnerId ? <> and our Partner ID <strong>{info.partnerId}</strong></> : ''}, agree to terms.</div></div>
+            <div style={stepRow}><div style={num}>3</div><div>
+              Paste <strong>our transfer token</strong> below and submit it in your Google Admin to authorize us:
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                <code style={{ background: '#f1f5f4', padding: '8px 14px', borderRadius: 8, fontSize: 16, fontWeight: 700, letterSpacing: 1 }}>{info.token}</code>
+                <button onClick={copyToken} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, cursor: 'pointer' }}>{copied ? 'Copied ✓' : 'Copy token'}</button>
+              </div>
+            </div></div>
+            <div style={stepRow}><div style={num}>4</div><div>Once you've authorized us in Google Admin, complete Step 2 below — pick your plan and pay. The transfer finishes instantly.</div></div>
+          </>
+        )}
       </div>
 
-      <div style={card}>
-        <h3 style={{ marginTop: 0 }}>Start the transfer</h3>
-        <div style={{ display: 'grid', gap: 12, marginBottom: 12 }}>
-          <div><label style={{ fontSize: 13, fontWeight: 600 }}>Your domain</label><input style={inp} value={domain} onChange={e => setDomain(e.target.value)} placeholder="yourcompany.com" /></div>
-          <div><label style={{ fontSize: 13, fontWeight: 600 }}>Transfer token</label><input style={inp} value={token} onChange={e => setToken(e.target.value)} placeholder="e.g. C02qvoufl" /></div>
+      {info?.configured && (
+        <div style={card}>
+          <h3 style={{ marginTop: 0 }}>Step 2 — Your domain & plan</h3>
+          <div style={{ display: 'grid', gap: 12, marginBottom: 12 }}>
+            <div><label style={{ fontSize: 13, fontWeight: 600 }}>Your domain</label><input style={inp} value={domain} onChange={e => setDomain(e.target.value)} placeholder="yourcompany.com" /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }} className="grid-2">
+              <div><label style={{ fontSize: 13, fontWeight: 600 }}>Plan you're using</label>
+                <select style={inp} value={planId} onChange={e => setPlanId(e.target.value)}>
+                  {plans.map(p => <option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}/seat/mo</option>)}
+                </select>
+              </div>
+              <div><label style={{ fontSize: 13, fontWeight: 600 }}>Seats</label><input type="number" min="1" style={inp} value={seats} onChange={e => setSeats(Math.max(1, parseInt(e.target.value || '1', 10)))} /></div>
+            </div>
+            {(opts.flexibleEnabled && opts.annualEnabled) && (
+              <div>
+                <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Payment plan</label>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {[['flexible', 'Flexible (monthly)'], ['annual', 'Annual (monthly pay)']].map(([v, l]) => (
+                    <button key={v} type="button" onClick={() => setPlanType(v)} style={{ padding: '8px 16px', borderRadius: 8, cursor: 'pointer', border: planType === v ? `2px solid ${TEAL}` : '1px solid #d8dbe6', background: planType === v ? '#f0f7f5' : '#fff', fontWeight: 600 }}>{l}{planType === v ? ' ✓' : ''}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <div style={{ background: '#f8fafc', borderRadius: 10, padding: '12px 16px', marginBottom: 12, fontSize: 15 }}>
+            Monthly total: <strong style={{ color: TEAL, fontSize: 18 }}>${monthly.toFixed(2)}</strong> <span style={{ color: MUTE, fontSize: 13 }}>+ tax (for {seats} seat{seats == 1 ? '' : 's'})</span>
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button onClick={() => submit('stripe')} disabled={busy} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 22px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '💳 Pay & complete transfer'}</button>
+            <button onClick={() => submit('nicky')} disabled={busy} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '11px 22px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '🪙 Pay with crypto'}</button>
+          </div>
+          {msg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</div>}
         </div>
-        <button onClick={submit} disabled={busy} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 24px', fontWeight: 700, cursor: 'pointer' }}>
-          {busy ? 'Transferring…' : 'Transfer to us'}
-        </button>
-        {msg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</div>}
-      </div>
+      )}
 
       {transfers.length > 0 && (
         <div style={card}>
           <h3 style={{ marginTop: 0 }}>Transfer history</h3>
           <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
-            <thead><tr style={{ textAlign: 'left', color: MUTE }}><th style={{ padding: '6px 0' }}>Domain</th><th>Status</th><th>Subscriptions</th><th>Date</th></tr></thead>
+            <thead><tr style={{ textAlign: 'left', color: MUTE }}><th style={{ padding: '6px 0' }}>Domain</th><th>Plan</th><th>Status</th><th>Date</th></tr></thead>
             <tbody>
               {transfers.map(t => (
                 <tr key={t.id} style={{ borderTop: '1px solid #f0f0f0' }}>
                   <td style={{ padding: '8px 0', fontWeight: 600 }}>{t.domain}</td>
-                  <td><span style={{ color: t.status === 'completed' ? '#166534' : t.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{t.status === 'completed' ? '✓ Completed' : t.status === 'failed' ? 'Failed' : 'Pending'}</span>{t.status === 'failed' && t.note && <div style={{ fontSize: 12, color: '#b42318' }}>{t.note}</div>}</td>
-                  <td>{t.claimed ?? 0}</td>
+                  <td>{t.planName || '—'}</td>
+                  <td><span style={{ color: t.status === 'completed' ? '#166534' : t.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{t.status === 'completed' ? '✓ Completed' : t.status === 'failed' ? 'Failed' : t.status === 'test_paid' ? 'Test' : 'Processing'}</span>{t.status === 'failed' && t.note && <div style={{ fontSize: 12, color: '#b42318' }}>{t.note}</div>}</td>
                   <td>{new Date(t.createdAt).toLocaleDateString()}</td>
                 </tr>
               ))}

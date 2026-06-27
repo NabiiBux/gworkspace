@@ -213,7 +213,7 @@ const PaymentSchema = new mongoose.Schema({
   customerEmail: String,
   domain: String,
   orderId: mongoose.Schema.Types.ObjectId,
-  orderType: { type: String, enum: ['workspace', 'domain', 'domain_transfer', 'ssl', 'hosting', 'addon'], default: 'workspace' },
+  orderType: { type: String, enum: ['workspace', 'domain', 'domain_transfer', 'workspace_transfer', 'ssl', 'hosting', 'addon'], default: 'workspace' },
   amount: Number,            // total charged (subtotal + tax)
   subtotal: Number,          // pre-tax amount
   tax: Number,               // tax portion
@@ -266,9 +266,12 @@ const WorkspaceTransferSchema = new mongoose.Schema({
   customerId: mongoose.Schema.Types.ObjectId,
   orderNumber: { type: String, unique: true },
   domain: String,
-  transferToken: String,           // Google customerAuthToken from admin.google.com/TransferToken
-  account: { type: String, default: 'pk' },   // which reseller account receives it: 'pk' or 'usa'
-  status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
+  account: { type: String, default: 'pk' },   // which reseller account receives it
+  planId: String,
+  planName: String,
+  seats: { type: Number, default: 1 },
+  planType: { type: String, enum: ['flexible', 'annual'], default: 'flexible' },
+  status: { type: String, enum: ['pending', 'completed', 'failed', 'test_paid'], default: 'pending' },
   subscriptionsClaimed: { type: Number, default: 0 },
   resultNote: String,
   completedAt: Date,
@@ -427,6 +430,11 @@ const OrderSettingsSchema = new mongoose.Schema({
   // Payment plans the customer may choose.
   flexibleEnabled: { type: Boolean, default: true },    // monthly / pay-as-you-go
   annualEnabled: { type: Boolean, default: false },     // annual commitment (monthly pay)
+  // Our reseller transfer tokens (we give these to customers to paste in THEIR Google Admin).
+  pkTransferToken: { type: String, default: '' },       // Pakistan reseller's transfer token
+  usaTransferToken: { type: String, default: '' },      // USA reseller's transfer token
+  pkPartnerId: { type: String, default: '' },           // Pakistan Partner/Reseller ID (shown to customer)
+  usaPartnerId: { type: String, default: '' },          // USA Partner/Reseller ID
   updatedAt: { type: Date, default: Date.now },
 });
 const OrderSettings = mongoose.model('OrderSettings', OrderSettingsSchema);
@@ -1913,6 +1921,43 @@ async function markPaidAndProvision(payment) {
     } catch (e) {
       console.error('SSL PURCHASE FAILED for payment', String(payment._id), e.message);
       try { const sOrder = await SslOrder.findById(payment.orderId); if (sOrder) { sOrder.status = 'failed'; sOrder.activationNote = e.message; await sOrder.save(); } } catch (_) { }
+    }
+    return;
+  }
+
+  // WORKSPACE TRANSFER orders: claim the customer + create their subscription on payment.
+  if (payment.orderType === 'workspace_transfer') {
+    try {
+      const xfer = await WorkspaceTransfer.findById(payment.orderId);
+      if (xfer && xfer.status === 'pending') {
+        if (payment.isTest) {
+          console.log('TEST PAYMENT — marking workspace transfer test_paid for', xfer.domain);
+          xfer.status = 'test_paid'; xfer.resultNote = 'Test payment — no real transfer performed.'; await xfer.save();
+          return;
+        }
+        const planDoc = await Plan.findOne({ planId: xfer.planId });
+        if (!planDoc || !planDoc.skuId) throw new Error('Plan missing SKU for transfer.');
+        const result = await transferWorkspaceCustomer(xfer.domain, xfer.account, planDoc, xfer.seats, xfer.planType);
+        xfer.status = 'completed';
+        xfer.subscriptionsClaimed = result.claimed;
+        xfer.completedAt = new Date();
+        xfer.resultNote = result.note || `Transferred. ${result.claimed} subscription(s) now managed by us.`;
+        await xfer.save();
+        console.log('WORKSPACE TRANSFER completed:', xfer.domain, 'account:', xfer.account, 'claimed:', result.claimed);
+        const me = await Customer.findById(payment.customerId);
+        if (me && !me.domain) { me.domain = xfer.domain; me.account = xfer.account; await me.save(); }
+        try { await syncSubscriptionsForBilling(xfer.account); } catch (_) { }
+        try {
+          const html = emailShell('Workspace transfer complete', `
+            <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+            <p>Your Google Workspace for <strong>${xfer.domain}</strong> is now managed by us.</p>
+            <p>Your users, email, and data are unchanged — only billing and management moved to us. You can see your subscription under <strong>Subscriptions</strong> in your portal.</p>`);
+          await sendEmail(me?.businessEmail, `Workspace transfer complete: ${xfer.domain}`, html);
+        } catch (_) { }
+      }
+    } catch (e) {
+      console.error('WORKSPACE TRANSFER FAILED for payment', String(payment._id), e.message);
+      try { const xfer = await WorkspaceTransfer.findById(payment.orderId); if (xfer) { xfer.status = 'failed'; xfer.resultNote = e.message; await xfer.save(); } } catch (_) { }
     }
     return;
   }
@@ -5114,7 +5159,10 @@ app.get('/api/admin/order-settings', authenticateCustomer, requireAdmin, async (
   try {
     let s = await OrderSettings.findOne({ singleton: 'main' });
     if (!s) s = await OrderSettings.create({ singleton: 'main' });
-    res.json({ pkOrdersEnabled: s.pkOrdersEnabled, usaOrdersEnabled: s.usaOrdersEnabled, flexibleEnabled: s.flexibleEnabled, annualEnabled: s.annualEnabled });
+    res.json({
+      pkOrdersEnabled: s.pkOrdersEnabled, usaOrdersEnabled: s.usaOrdersEnabled, flexibleEnabled: s.flexibleEnabled, annualEnabled: s.annualEnabled,
+      pkTransferToken: s.pkTransferToken || '', usaTransferToken: s.usaTransferToken || '', pkPartnerId: s.pkPartnerId || '', usaPartnerId: s.usaPartnerId || ''
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -5129,12 +5177,16 @@ app.post('/api/admin/order-settings', authenticateCustomer, requireAdmin, async 
           ...(b.usaOrdersEnabled !== undefined ? { usaOrdersEnabled: !!b.usaOrdersEnabled } : {}),
           ...(b.flexibleEnabled !== undefined ? { flexibleEnabled: !!b.flexibleEnabled } : {}),
           ...(b.annualEnabled !== undefined ? { annualEnabled: !!b.annualEnabled } : {}),
+          ...(b.pkTransferToken !== undefined ? { pkTransferToken: String(b.pkTransferToken).trim() } : {}),
+          ...(b.usaTransferToken !== undefined ? { usaTransferToken: String(b.usaTransferToken).trim() } : {}),
+          ...(b.pkPartnerId !== undefined ? { pkPartnerId: String(b.pkPartnerId).trim() } : {}),
+          ...(b.usaPartnerId !== undefined ? { usaPartnerId: String(b.usaPartnerId).trim() } : {}),
           updatedAt: new Date(),
         }
       },
       { upsert: true, new: true }
     );
-    res.json({ success: true, settings: { pkOrdersEnabled: s.pkOrdersEnabled, usaOrdersEnabled: s.usaOrdersEnabled, flexibleEnabled: s.flexibleEnabled, annualEnabled: s.annualEnabled } });
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -5148,56 +5200,86 @@ app.get('/api/order-options', async (req, res) => {
 });
 
 // ---- GOOGLE WORKSPACE TRANSFER (import subscription from another reseller) ----
-// Customer submits their domain + transfer token; we claim it into the admin-selected account.
+// Helper: pick the active reseller account for transfers (admin-routed).
+async function activeTransferAccount() {
+  const os = await OrderSettings.findOne({ singleton: 'main' });
+  let account = 'pk';
+  if (os && os.usaOrdersEnabled && !os.pkOrdersEnabled) account = 'usa';
+  else if (os && os.pkOrdersEnabled) account = 'pk';
+  else if (os && os.usaOrdersEnabled) account = 'usa';
+  return { account, os };
+}
+
+// Customer: get the transfer instructions — OUR token + Partner ID for the active account.
+app.get('/api/customer/workspace/transfer-info', authenticateCustomer, async (req, res) => {
+  try {
+    const { account, os } = await activeTransferAccount();
+    const token = account === 'usa' ? (os?.usaTransferToken || '') : (os?.pkTransferToken || '');
+    const partnerId = account === 'usa' ? (os?.usaPartnerId || '') : (os?.pkPartnerId || '');
+    res.json({ account, token, partnerId, configured: !!token });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Customer: submit a Workspace transfer — they've already pasted OUR token in their Google Admin.
+// They pick a plan and PAY; on payment we claim the customer + subscription into our reseller.
 app.post('/api/customer/workspace/transfer', authenticateCustomer, async (req, res) => {
   try {
-    const { domain, transferToken } = req.body;
+    const { domain, planId, seats, planType, method } = req.body;
     const dom = (domain || '').toLowerCase().trim();
     if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) return res.status(400).json({ error: 'Enter a valid domain like example.com' });
-    if (!transferToken || !String(transferToken).trim()) return res.status(400).json({ error: 'Enter your Google transfer token.' });
+    const plan = await Plan.findOne({ planId });
+    if (!plan || !plan.skuId) return res.status(400).json({ error: 'Choose the plan you are currently using.' });
     const me = await Customer.findById(req.customerId);
+    const { account } = await activeTransferAccount();
 
-    // Decide which reseller account receives it (admin-controlled, same logic as orders).
-    const os = await OrderSettings.findOne({ singleton: 'main' });
-    let account = 'pk';
-    if (os && os.usaOrdersEnabled && !os.pkOrdersEnabled) account = 'usa';
-    else if (os && os.pkOrdersEnabled) account = 'pk';
-    else if (os && os.usaOrdersEnabled) account = 'usa';
+    const numSeats = Math.max(1, Number(seats) || 1);
+    const subtotal = Number(plan.monthlyPrice || 0) * numSeats;
+    const taxed = await applyTaxAndFee(subtotal);
+    const amount = taxed.total;
 
     const orderNumber = `WT-${Date.now()}`;
     const xfer = await WorkspaceTransfer.create({
-      customerId: me._id, orderNumber, domain: dom, transferToken: String(transferToken).trim(), account, status: 'pending',
+      customerId: me._id, orderNumber, domain: dom, account, status: 'pending',
+      planId: plan.planId, planName: plan.name, seats: numSeats, planType: planType === 'annual' ? 'annual' : 'flexible',
     });
 
-    // Transfers are free to initiate (no charge) — execute immediately.
+    const payment = await Payment.create({
+      customerId: me._id, customerEmail: me.businessEmail, domain: dom,
+      orderId: xfer._id, orderType: 'workspace_transfer', amount, subtotal: taxed.subtotal, tax: taxed.tax, fee: taxed.fee, currency: 'USD',
+      method: method === 'nicky' ? 'nicky' : 'stripe', status: 'pending',
+    });
+
+    const orderDesc = `Workspace transfer: ${dom} — ${plan.name} (${numSeats} seat${numSeats === 1 ? '' : 's'})`;
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
+
+    if (payment.method === 'stripe') {
+      let stripe; try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const sd = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (sd?.stripeMode || 'test') !== 'live'; await payment.save();
+      const line_items = [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(taxed.subtotal * 100) }, quantity: 1 }];
+      if (taxed.fee > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) }, quantity: 1 });
+      if (taxed.tax > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) }, quantity: 1 });
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment', line_items, success_url: successUrl, cancel_url: cancelUrl,
+        client_reference_id: String(payment._id), metadata: { paymentId: String(payment._id), orderId: String(xfer._id), orderType: 'workspace_transfer' },
+      });
+      payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
+      return res.json({ checkoutUrl: session.url, paymentId: payment._id });
+    }
+
     try {
-      const result = await transferWorkspaceCustomer(dom, xfer.transferToken, account);
-      xfer.status = 'completed';
-      xfer.subscriptionsClaimed = result.claimed;
-      xfer.completedAt = new Date();
-      xfer.resultNote = result.alreadyOurs ? 'Domain already under our reseller; claimed subscriptions.' : `Transferred. ${result.claimed} subscription(s) claimed.`;
-      await xfer.save();
-
-      // Link the domain to the customer + seed billing for the claimed subs.
-      if (me && !me.domain) { me.domain = dom; me.account = account; await me.save(); }
-      try { await syncSubscriptionsForBilling(account); } catch (_) { }
-
-      // Notify the customer.
-      try {
-        const html = emailShell('Workspace transfer complete', `
-          <p>Hi ${me?.firstName || me?.username || 'there'},</p>
-          <p>Your Google Workspace for <strong>${dom}</strong> has been transferred to us successfully.</p>
-          <p>${result.claimed} subscription(s) are now managed under our reseller account. Your users, data, and settings are unchanged — only billing and management moved to us.</p>
-          <p>You can view everything under <strong>Subscriptions</strong> in your portal.</p>`);
-        await sendEmail(me?.businessEmail, `Workspace transfer complete: ${dom}`, html);
-      } catch (_) { }
-
-      return res.json({ success: true, claimed: result.claimed, account, message: `Transfer complete. ${result.claimed} subscription(s) are now managed by us.` });
+      const nicky = await createNickyPayment({
+        amount, currency: 'USD', description: orderDesc, orderNumber,
+        reference: String(payment._id), billDescription: orderDesc,
+        customerEmail: me.businessEmail, customerName: me.firstName ? `${me.firstName} ${me.lastName || ''}`.trim() : me.businessEmail,
+        redirectUrl: successUrl, cancelUrl,
+      });
+      payment.checkoutUrl = nicky.url; payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id); payment.providerShortId = nicky.shortId || null;
+      await payment.save();
+      return res.json({ checkoutUrl: nicky.url, paymentId: payment._id });
     } catch (e) {
-      xfer.status = 'failed';
-      xfer.resultNote = e.message;
-      await xfer.save();
-      return res.status(502).json({ error: e.message });
+      return res.status(500).json({ error: 'Crypto checkout not available: ' + e.message });
     }
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -5208,7 +5290,7 @@ app.post('/api/customer/workspace/transfer', authenticateCustomer, async (req, r
 app.get('/api/customer/workspace/transfers', authenticateCustomer, async (req, res) => {
   try {
     const rows = await WorkspaceTransfer.find({ customerId: req.customerId }).sort({ createdAt: -1 });
-    res.json({ transfers: rows.map((t) => ({ id: t._id, domain: t.domain, status: t.status, claimed: t.subscriptionsClaimed, account: t.account, note: t.resultNote, createdAt: t.createdAt })) });
+    res.json({ transfers: rows.map((t) => ({ id: t._id, domain: t.domain, status: t.status, claimed: t.subscriptionsClaimed, account: t.account, planName: t.planName, note: t.resultNote, createdAt: t.createdAt })) });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -5671,46 +5753,60 @@ app.post('/api/admin/backfill-skus', async (req, res) => {
   }
 });
 
-// Transfer a Google Workspace customer + subscriptions INTO our reseller account
-// using the customer's transfer token (customerAuthToken from admin.google.com/TransferToken).
-async function transferWorkspaceCustomer(domain, transferToken, account) {
+// Claim a Google Workspace customer + create their subscription under our reseller.
+// The customer has already pasted OUR transfer token in their Google Admin, granting us
+// reseller permission. So we create the subscription for the plan they chose + paid for.
+async function transferWorkspaceCustomer(domain, account, planDoc, seats, planType) {
   const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
   const reseller = google.reseller({ version: 'v1', auth });
   const dom = String(domain).toLowerCase().trim();
 
-  let alreadyOurs = false;
-  try { await reseller.customers.get({ customerId: dom }); alreadyOurs = true; }
-  catch (_) { /* not ours yet — expected for a transfer */ }
-
-  if (!alreadyOurs) {
+  // Step 1: make sure the customer exists under our reseller. After they grant the token,
+  // we should be able to get them. If not yet visible, try to create the customer record.
+  let customerOk = false;
+  try { await reseller.customers.get({ customerId: dom }); customerOk = true; }
+  catch (_) {
     try {
-      await reseller.customers.insert({ customerAuthToken: transferToken, requestBody: { customerDomain: dom } });
+      await reseller.customers.insert({ requestBody: { customerDomain: dom } });
+      customerOk = true;
     } catch (e) {
       const msg = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
-      throw new Error('Could not claim domain with that transfer token: ' + msg);
+      throw new Error('Could not access this domain under our reseller. Make sure you pasted our transfer token in your Google Admin first. (' + msg + ')');
     }
   }
 
+  // Step 2: does the customer already have an active subscription (transferred)? If so, count it.
   let claimed = 0;
   try {
-    const resp = await reseller.subscriptions.list({ customerAuthToken: transferToken, customerId: dom });
-    const subs = resp.data.subscriptions || [];
-    for (const s of subs) {
-      try {
-        await reseller.subscriptions.insert({
-          customerId: dom, customerAuthToken: transferToken,
-          requestBody: { customerId: dom, skuId: s.skuId, plan: s.plan, seats: s.seats, purchaseOrderId: s.purchaseOrderId },
-        });
-        claimed++;
-      } catch (e) {
-        console.error('WS TRANSFER sub claim failed', dom, s.skuId, '→', e?.errors?.[0]?.message || e.message);
-      }
+    const existing = await reseller.subscriptions.list({ customerId: dom });
+    const subs = existing.data.subscriptions || [];
+    if (subs.length > 0) {
+      // The transfer already carried the subscription over — nothing to create.
+      return { ok: true, claimed: subs.length, note: 'Existing subscription(s) transferred and now managed by us.' };
     }
+  } catch (_) { }
+
+  // Step 3: create the subscription for the plan the customer chose + paid for.
+  const planType_ = planType === 'annual' ? 'ANNUAL_MONTHLY_PAY' : 'FLEXIBLE';
+  const seatsBody = planType_ === 'FLEXIBLE' ? { maximumNumberOfSeats: seats } : { numberOfSeats: seats };
+  try {
+    await reseller.subscriptions.insert({
+      customerId: dom,
+      requestBody: {
+        customerId: dom,
+        skuId: planDoc.skuId,
+        plan: { planName: planType_ },
+        seats: seatsBody,
+        purchaseOrderId: 'transfer-' + Date.now(),
+      },
+    });
+    claimed = 1;
   } catch (e) {
-    console.error('WS TRANSFER list failed for', dom, '→', e?.errors?.[0]?.message || e.message);
+    const msg = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
+    throw new Error('Could not create the subscription: ' + msg);
   }
 
-  return { ok: true, claimed, alreadyOurs };
+  return { ok: true, claimed };
 }
 
 // Provision a workspace order into Google: create customer + create subscription
