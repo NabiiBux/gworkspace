@@ -5350,6 +5350,79 @@ app.delete('/api/admin/plans/:id', authenticateCustomer, requireAdmin, async (re
 });
 
 // WORKSPACE ORDERS (Stage 1 customer order intake)
+// Admin: create a workspace order AND provision it immediately — NO payment step.
+// Admin fills the sign-up form, hits submit, and the Workspace is created in Google right away.
+app.post('/api/admin/workspace-orders/provision', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    if (!body.organization?.domain || !body.plan?.id || !body.seats) {
+      return res.status(400).json({ error: 'Missing required fields: domain, plan, and seats.' });
+    }
+    const dom = (body.organization.domain || '').toLowerCase().trim();
+
+    // Find or create a customer record for this domain (so it shows in subscriptions/billing).
+    let cust = await Customer.findOne({ domain: dom });
+    if (!cust && body.contact?.email) cust = await Customer.findOne({ businessEmail: (body.contact.email || '').toLowerCase() });
+    if (!cust) {
+      // Create a lightweight customer record owned by this domain.
+      cust = await Customer.create({
+        username: dom.split('.')[0],
+        businessEmail: body.contact?.email || `admin@${dom}`,
+        firstName: body.contact?.firstName || 'Admin',
+        lastName: body.contact?.lastName || '',
+        domain: dom,
+        role: 'customer',
+        account: body.account || undefined,
+        passwordHash: 'ADMIN_CREATED_NO_LOGIN', // placeholder; admin-created, no customer login
+      });
+    } else if (!cust.domain) {
+      cust.domain = dom; await cust.save();
+    }
+
+    const orderNumber = `WS-${Date.now()}`;
+    const order = await WorkspaceOrder.create({
+      customerId: cust._id,
+      orderNumber,
+      type: 'workspace',
+      planType: body.planType === 'annual' ? 'annual' : 'flexible',
+      account: body.account || '', // 'pk' / 'usa' / '' (auto by order settings)
+      plan: body.plan,
+      seats: Number(body.seats),
+      monthlyTotal: body.monthlyTotal,
+      organization: body.organization,
+      contact: body.contact,
+      status: 'pending',
+    });
+
+    // Provision into Google immediately (no payment).
+    try {
+      const result = await provisionWorkspaceOrder(order);
+      // Seed billing so this subscription is tracked on its monthly anchor.
+      try {
+        const planDoc = await Plan.findOne({ planId: order.plan?.id });
+        if (planDoc?.skuId) {
+          const now = new Date();
+          await SubBilling.findOneAndUpdate(
+            { domain: dom, skuId: planDoc.skuId },
+            {
+              $setOnInsert: { account: order.account || 'pk', purchaseDate: now, billingStatus: 'active' },
+              $set: { lastPaymentDate: now, nextBillingDate: nextMonthlyRenewal(now, now) }
+            },
+            { upsert: true }
+          );
+        }
+      } catch (_) { }
+      return res.json({ success: true, orderNumber, account: order.account || 'auto', message: result.message || 'Workspace provisioned in Google.', provisionNote: order.provisionNote || null });
+    } catch (e) {
+      order.status = 'failed';
+      await order.save();
+      return res.status(502).json({ error: e.message, orderNumber });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/workspace-orders', authenticateCustomer, async (req, res) => {
   try {
     const body = req.body || {};
@@ -5730,6 +5803,34 @@ async function getResellerAuth() {
   oauth2.setCredentials({ refresh_token: conn.refreshToken });
   return oauth2;
 }
+
+// Admin: list/search workspace orders (by number or domain) with provisioning status.
+app.get('/api/admin/workspace-orders', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { q, status } = req.query;
+    const filter = {};
+    if (q) {
+      const rx = new RegExp(String(q).trim(), 'i');
+      filter.$or = [{ orderNumber: rx }, { 'organization.domain': rx }];
+    }
+    if (status) filter.status = status;
+    const orders = await WorkspaceOrder.find(filter).sort({ createdAt: -1 }).limit(50);
+    res.json({
+      orders: orders.map((o) => ({
+        orderNumber: o.orderNumber,
+        domain: o.organization?.domain || '',
+        planName: o.plan?.name || '',
+        seats: o.seats,
+        account: o.account || 'auto',
+        status: o.status,
+        googleProvisioned: !!o.googleProvisioned,
+        planType: o.planType,
+        provisionNote: o.provisionNote || null,
+        createdAt: o.createdAt,
+      }))
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // Admin: diagnose a failed workspace order — shows account, status, and lets you retry provisioning.
 app.get('/api/admin/workspace-order-diagnostic', authenticateCustomer, requireAdmin, async (req, res) => {

@@ -529,7 +529,7 @@ const Dashboard = () => {
 
       <main className="dashboard-content">
         {activeSection === 'overview' && <OverviewSection stats={stats} />}
-        {activeSection === 'order-workspace' && <WorkspaceOrderFlow />}
+        {activeSection === 'order-workspace' && <AdminOrderWorkspace />}
         {activeSection === 'products' && <ProductsSection />}
         {activeSection === 'addon-pricing' && <AdminAddonPricing />}
         {activeSection === 'subs-pk' && <SubscriptionsSection account="PK" />}
@@ -5681,6 +5681,148 @@ const CustomerHosting = () => {
                   <td style={{ padding: '8px 0', fontWeight: 600 }}>{o.planName}</td>
                   <td>{o.forDomain || '—'}</td>
                   <td><span style={{ color: o.status === 'active' ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{o.status === 'active' ? '✓ Active' : o.status === 'failed' ? 'Failed' : o.status === 'test_paid' ? 'Test' : 'Processing'}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ==================== ADMIN: CREATE & PROVISION WORKSPACE (no payment) + TRACK ORDERS ====================
+const AdminOrderWorkspace = () => {
+  const [plans, setPlans] = useState([]);
+  const [form, setForm] = useState({
+    domain: '', planId: '', seats: 1, planType: 'flexible', account: '',
+    orgName: '', firstName: '', lastName: '', email: '', phone: '',
+    streetAddress: '', city: '', state: '', zip: '',
+    desiredAdminUsername: 'admin', tempPassword: '',
+  });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  // Order tracking
+  const [q, setQ] = useState('');
+  const [orders, setOrders] = useState([]);
+  const [retryBusy, setRetryBusy] = useState('');
+
+  const loadPlans = async () => {
+    try { const r = await axios.get(`${API_URL}/products`); if (r.data?.workspace) { setPlans(r.data.workspace); if (r.data.workspace[0]) setForm(f => ({ ...f, planId: r.data.workspace[0].id })); } } catch (_) { }
+  };
+  const loadOrders = async () => {
+    try { const r = await axios.get(`${API_URL}/admin/workspace-orders${q ? `?q=${encodeURIComponent(q)}` : ''}`); setOrders(r.data.orders || []); } catch (_) { }
+  };
+  useEffect(() => { loadPlans(); loadOrders(); }, []);
+
+  const set = (k, v) => setForm({ ...form, [k]: v });
+
+  const submit = async () => {
+    if (!form.domain || !form.planId || !form.seats) { setMsg('Domain, plan, and seats are required.'); return; }
+    setBusy(true); setMsg('');
+    try {
+      const payload = {
+        organization: { domain: form.domain.toLowerCase().trim(), name: form.orgName, streetAddress: form.streetAddress, city: form.city, state: form.state, zip: form.zip, desiredAdminUsername: form.desiredAdminUsername, tempPassword: form.tempPassword },
+        contact: { firstName: form.firstName, lastName: form.lastName, email: form.email, phone: form.phone },
+        plan: plans.find(p => p.id === form.planId),
+        seats: Number(form.seats),
+        planType: form.planType,
+        account: form.account || undefined,
+        monthlyTotal: (plans.find(p => p.id === form.planId)?.monthlyPrice || 0) * Number(form.seats),
+      };
+      const r = await axios.post(`${API_URL}/admin/workspace-orders/provision`, payload);
+      setMsg('✓ ' + (r.data.message || 'Workspace provisioned.') + ` (Order ${r.data.orderNumber})` + (r.data.provisionNote ? ` — Note: ${r.data.provisionNote}` : ''));
+      loadOrders();
+    } catch (e) { setMsg('✗ ' + (e?.response?.data?.error || 'Provisioning failed.')); }
+    finally { setBusy(false); }
+  };
+
+  const retry = async (orderNumber) => {
+    setRetryBusy(orderNumber); setMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/admin/workspace-order-reprovision`, { orderNumber });
+      setMsg('✓ Re-provisioned ' + orderNumber + (r.data?.result?.message ? ` — ${r.data.result.message}` : ''));
+      loadOrders();
+    } catch (e) { setMsg('✗ Retry failed for ' + orderNumber + ': ' + (e?.response?.data?.error || 'error')); }
+    finally { setRetryBusy(''); }
+  };
+
+  const box = { background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #e5e7eb', marginBottom: 20 };
+  const inp = { width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', boxSizing: 'border-box' };
+  const lab = { fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 };
+
+  return (
+    <div className="section">
+      <h2>✨ Create Google Workspace (no payment)</h2>
+      <p style={{ color: '#5b6075' }}>Fill the form and submit — the Workspace is created in Google immediately. No checkout required.</p>
+
+      {msg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</div>}
+
+      <div style={box}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }} className="grid-2">
+          <div><label style={lab}>Domain *</label><input style={inp} value={form.domain} onChange={e => set('domain', e.target.value)} placeholder="redvi.shop" /></div>
+          <div><label style={lab}>Reseller account</label>
+            <select style={inp} value={form.account} onChange={e => set('account', e.target.value)}>
+              <option value="">Auto (by order routing)</option>
+              <option value="pk">🇵🇰 Pakistan</option>
+              <option value="usa">🇺🇸 USA</option>
+            </select>
+          </div>
+          <div><label style={lab}>Plan *</label>
+            <select style={inp} value={form.planId} onChange={e => set('planId', e.target.value)}>
+              {plans.map(p => <option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}/seat/mo</option>)}
+            </select>
+          </div>
+          <div><label style={lab}>Seats *</label><input type="number" min="1" style={inp} value={form.seats} onChange={e => set('seats', e.target.value)} /></div>
+          <div><label style={lab}>Plan type</label>
+            <select style={inp} value={form.planType} onChange={e => set('planType', e.target.value)}>
+              <option value="flexible">Flexible (monthly)</option>
+              <option value="annual">Annual (monthly pay)</option>
+            </select>
+          </div>
+          <div><label style={lab}>Organization name</label><input style={inp} value={form.orgName} onChange={e => set('orgName', e.target.value)} /></div>
+          <div><label style={lab}>Admin first name</label><input style={inp} value={form.firstName} onChange={e => set('firstName', e.target.value)} /></div>
+          <div><label style={lab}>Admin last name</label><input style={inp} value={form.lastName} onChange={e => set('lastName', e.target.value)} /></div>
+          <div><label style={lab}>Contact email</label><input style={inp} value={form.email} onChange={e => set('email', e.target.value)} placeholder="owner@redvi.shop" /></div>
+          <div><label style={lab}>Phone</label><input style={inp} value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
+          <div><label style={lab}>Admin username</label><input style={inp} value={form.desiredAdminUsername} onChange={e => set('desiredAdminUsername', e.target.value)} placeholder="admin" /></div>
+          <div><label style={lab}>Temp password (optional)</label><input style={inp} value={form.tempPassword} onChange={e => set('tempPassword', e.target.value)} placeholder="auto-generated if blank" /></div>
+          <div><label style={lab}>Street address</label><input style={inp} value={form.streetAddress} onChange={e => set('streetAddress', e.target.value)} /></div>
+          <div><label style={lab}>City</label><input style={inp} value={form.city} onChange={e => set('city', e.target.value)} /></div>
+          <div><label style={lab}>State</label><input style={inp} value={form.state} onChange={e => set('state', e.target.value)} /></div>
+          <div><label style={lab}>ZIP</label><input style={inp} value={form.zip} onChange={e => set('zip', e.target.value)} /></div>
+        </div>
+        <button onClick={submit} disabled={busy} className="btn btn-primary" style={{ marginTop: 16 }}>{busy ? 'Provisioning…' : 'Submit & create Workspace'}</button>
+      </div>
+
+      <h2>📋 Track & retry orders</h2>
+      <p style={{ color: '#5b6075' }}>Search by order number (e.g. WS-1782543824372) or domain. Retry provisioning for orders that were paid but not created.</p>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <input style={{ ...inp, maxWidth: 360 }} value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') loadOrders(); }} placeholder="WS-... or domain.com" />
+        <button onClick={loadOrders} className="btn btn-secondary">Search</button>
+      </div>
+
+      {orders.length === 0 ? <p style={{ color: '#9ca3af' }}>No orders found.</p> : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}>
+              <th style={{ padding: '8px 0' }}>Order #</th><th>Domain</th><th>Plan</th><th>Acct</th><th>Status</th><th>In Google</th><th></th>
+            </tr></thead>
+            <tbody>
+              {orders.map(o => (
+                <tr key={o.orderNumber} style={{ borderTop: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '8px 0', fontFamily: 'monospace', fontSize: 13 }}>{o.orderNumber}</td>
+                  <td style={{ fontWeight: 600 }}>{o.domain}</td>
+                  <td>{o.planName} ({o.seats})</td>
+                  <td>{o.account}</td>
+                  <td><span style={{ color: o.status === 'provisioned' ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{o.status}</span>{o.provisionNote && <div style={{ fontSize: 11, color: '#b45309' }}>{o.provisionNote}</div>}</td>
+                  <td>{o.googleProvisioned ? '✓' : '—'}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button onClick={() => retry(o.orderNumber)} disabled={retryBusy === o.orderNumber} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>
+                      {retryBusy === o.orderNumber ? '…' : 'Retry provision'}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
