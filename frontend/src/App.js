@@ -48,21 +48,22 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
   // Load the Google Maps JavaScript API (with Places) once — same as the customer form.
   useEffect(() => {
     if (!MAPS_KEY) return;
-    if (window.google && window.google.maps && window.google.maps.places) {
-      setMapsReady(true);
-      return;
-    }
+    let poll;
+    const ready = () => setMapsReady(true);
+    if (window.google && window.google.maps && window.google.maps.places) { ready(); return; }
     const existing = document.getElementById('gmaps-places-script');
     if (existing) {
-      existing.addEventListener('load', () => setMapsReady(true));
-      return;
+      existing.addEventListener('load', ready);
+      // The script may already be mid-load (added by another form) and we missed 'load' — poll.
+      poll = setInterval(() => { if (window.google && window.google.maps && window.google.maps.places) { clearInterval(poll); ready(); } }, 250);
+      return () => { existing.removeEventListener('load', ready); if (poll) clearInterval(poll); };
     }
     const script = document.createElement('script');
     script.id = 'gmaps-places-script';
     script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&loading=async&v=weekly`;
     script.async = true;
     script.defer = true;
-    script.onload = () => setMapsReady(true);
+    script.onload = ready;
     document.body.appendChild(script);
   }, []);
 
@@ -75,7 +76,7 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
     (async () => {
       try {
         const { PlaceAutocompleteElement } = await window.google.maps.importLibrary('places');
-        if (cancelled) return;
+        if (cancelled || !containerRef.current) return;
 
         const el = new PlaceAutocompleteElement({
           componentRestrictions: { country: countries },
@@ -113,7 +114,7 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
   }, [mapsReady]);
 
   if (!MAPS_KEY) return null;
-  return <div ref={containerRef} style={{ width: '100%' }} />;
+  return <div ref={containerRef} style={{ width: '100%', minHeight: 44 }} />;
 };
 
 // Auth Context
