@@ -1,8 +1,18 @@
+# GNB Mentor — robots.txt
+# Allow public pages, keep the logged-in app sections out of search.
+
 User-agent: *
 Allow: /
 Disallow: /overview
 Disallow: /dashboard
 Disallow: /payments
 Disallow: /settings
+Disallow: /support
+Disallow: /import
+Disallow: /hosting
+Disallow: /ssl
+Disallow: /domains
+Disallow: /voice
+Disallow: /addons
 
 Sitemap: https://portal.gnbmentor.com/sitemap.xml
