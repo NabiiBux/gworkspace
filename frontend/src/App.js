@@ -533,7 +533,7 @@ const Dashboard = () => {
               className={`menu-item ${activeSection === 'subs-pk' ? 'active' : ''}`}
               onClick={() => setActiveSection('subs-pk')}
             >
-              🇵🇰 Pakistan Workspace
+              Pakistan Workspace
             </button>
           </li>
           <li>
@@ -541,7 +541,7 @@ const Dashboard = () => {
               className={`menu-item ${activeSection === 'subs-usa' ? 'active' : ''}`}
               onClick={() => setActiveSection('subs-usa')}
             >
-              🇺🇸 USA Voice
+              USA Voice
             </button>
           </li>
           <li>
@@ -589,7 +589,7 @@ const Dashboard = () => {
               className={`menu-item ${activeSection === 'voice-monitor' ? 'active' : ''}`}
               onClick={() => setActiveSection('voice-monitor')}
             >
-              🛡️ Abuse Monitor
+              🛡 Abuse Monitor
             </button>
           </li>
           <li>
@@ -664,8 +664,8 @@ const OverviewSection = ({ stats }) => {
       {/* Per-account breakdown: USA vs Pakistan */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }} className="grid-2">
         {[
-          { key: 'pk', label: '🇵🇰 Pakistan reseller', sub: 'gnbmentor.com · Workspace', color: '#0F766E', data: live?.pk },
-          { key: 'usa', label: '🇺🇸 USA reseller', sub: 'artisandrywallaz.com · Voice', color: '#1d4ed8', data: live?.usa },
+          { key: 'pk', label: 'Pakistan reseller', sub: 'gnbmentor.com · Workspace', color: '#0F766E', data: live?.pk },
+          { key: 'usa', label: 'USA reseller', sub: 'artisandrywallaz.com · Voice', color: '#1d4ed8', data: live?.usa },
         ].map(acc => (
           <div key={acc.key} style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #e5e7eb', borderTop: `4px solid ${acc.color}` }}>
             <div style={{ fontWeight: 700, fontSize: 16 }}>{acc.label}</div>
@@ -880,7 +880,7 @@ const ProductsSection = () => {
 
       {/* Order routing + payment plans */}
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: 20, marginBottom: 20 }}>
-        <h3 style={{ marginTop: 0 }}>⚙️ Order routing & payment plans</h3>
+        <h3 style={{ marginTop: 0 }}>⚙ Order routing & payment plans</h3>
         {osMsg && <div style={{ color: osMsg.startsWith('✓') ? '#166534' : '#b42318', fontSize: 13, marginBottom: 8 }}>{osMsg}</div>}
         {!os ? <p style={{ color: '#9ca3af' }}>Loading…</p> : (
           <>
@@ -888,11 +888,11 @@ const ProductsSection = () => {
             <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 16 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input type="checkbox" checked={!!os.pkOrdersEnabled} onChange={e => saveOs({ pkOrdersEnabled: e.target.checked })} />
-                🇵🇰 Pakistan reseller (gnbmentor.com)
+                Pakistan reseller (gnbmentor.com)
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input type="checkbox" checked={!!os.usaOrdersEnabled} onChange={e => saveOs({ usaOrdersEnabled: e.target.checked })} />
-                🇺🇸 USA reseller (artisandrywallaz.com)
+                USA reseller (artisandrywallaz.com)
               </label>
             </div>
             <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
@@ -916,15 +916,15 @@ const ProductsSection = () => {
               <p style={{ color: '#6b7280', fontSize: 12, marginTop: 0 }}>Your reseller transfer tokens — customers paste these in their Google Admin to authorize transferring their Workspace to you. Set the one for whichever account takes orders.</p>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }} className="grid-2">
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600 }}>🇵🇰 Pakistan transfer token</label>
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>Pakistan transfer token</label>
                   <input style={inp} value={os.pkTransferToken || ''} onChange={e => setOs({ ...os, pkTransferToken: e.target.value })} onBlur={() => saveOs({})} placeholder="e.g. C02qvoufl" />
-                  <label style={{ fontSize: 12, fontWeight: 600, marginTop: 8, display: 'block' }}>🇵🇰 Pakistan Partner ID (optional)</label>
+                  <label style={{ fontSize: 12, fontWeight: 600, marginTop: 8, display: 'block' }}>Pakistan Partner ID (optional)</label>
                   <input style={inp} value={os.pkPartnerId || ''} onChange={e => setOs({ ...os, pkPartnerId: e.target.value })} onBlur={() => saveOs({})} placeholder="Partner/Reseller ID" />
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600 }}>🇺🇸 USA transfer token</label>
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>USA transfer token</label>
                   <input style={inp} value={os.usaTransferToken || ''} onChange={e => setOs({ ...os, usaTransferToken: e.target.value })} onBlur={() => saveOs({})} placeholder="e.g. C0xxxxxxx" />
-                  <label style={{ fontSize: 12, fontWeight: 600, marginTop: 8, display: 'block' }}>🇺🇸 USA Partner ID (optional)</label>
+                  <label style={{ fontSize: 12, fontWeight: 600, marginTop: 8, display: 'block' }}>USA Partner ID (optional)</label>
                   <input style={inp} value={os.usaPartnerId || ''} onChange={e => setOs({ ...os, usaPartnerId: e.target.value })} onBlur={() => saveOs({})} placeholder="Partner/Reseller ID" />
                 </div>
               </div>
@@ -938,7 +938,7 @@ const ProductsSection = () => {
       {/* Hosting plans management */}
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: 20, marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ margin: 0 }}>🖥️ Hosting plans</h3>
+          <h3 style={{ margin: 0 }}>🖥 Hosting plans</h3>
           <button className="btn btn-secondary" onClick={() => setHForm({ name: '', description: '', price: '', cost: '', billingCycle: 'yearly', features: '', active: true, sortOrder: 0 })}>+ Add hosting plan</button>
         </div>
         {hMsg && <div style={{ color: hMsg.startsWith('✓') ? '#166534' : '#b42318', fontSize: 13, marginTop: 8 }}>{hMsg}</div>}
@@ -1280,7 +1280,7 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
     TRIAL: 'Trial', FREE: 'Free',
   }[p] || p || '—');
 
-  const title = isUSA ? '🇺🇸 USA Voice Subscriptions' : '🇵🇰 Pakistan Workspace Subscriptions';
+  const title = isUSA ? 'USA Voice Subscriptions' : 'Pakistan Workspace Subscriptions';
 
   if (loading) return <div className="loading">Loading {isUSA ? 'USA' : 'Pakistan'} subscriptions from Google…</div>;
 
@@ -2165,7 +2165,7 @@ const AdminVoiceMonitorSection = () => {
 
   return (
     <div className="section">
-      <h2>🛡️ Abuse & Spam Monitoring</h2>
+      <h2>🛡 Abuse & Spam Monitoring</h2>
       <p style={{ color: '#6b7280' }}>
         Log complaints you receive about customers (from recipients, carriers, or Google), track which customers have a
         pattern of abuse, and suspend confirmed bad actors to protect your reseller account.
@@ -3245,12 +3245,12 @@ const CustomerPortal = () => {
     { key: 'import', label: 'Import Workspace', icon: '📥' },
     { key: 'domains', label: 'Domains', icon: '🌐' },
     { key: 'ssl', label: 'SSL certificates', icon: '🔒' },
-    { key: 'hosting', label: 'Hosting', icon: '🖥️' },
+    { key: 'hosting', label: 'Hosting', icon: '🖥' },
     { key: 'voice', label: 'Google Voice', icon: '📞' },
     { key: 'addons', label: 'Add-ons', icon: '🧩' },
     { key: 'payments', label: 'Payments', icon: '💳' },
     { key: 'support', label: 'Support', icon: '🎫' },
-    { key: 'settings', label: 'Account settings', icon: '⚙️' },
+    { key: 'settings', label: 'Account settings', icon: '⚙' },
   ];
 
   const name = user?.username || (user?.businessEmail || '').split('@')[0];
@@ -3325,6 +3325,7 @@ const CustomerOverview = ({ onNavigate }) => {
   const { user } = useAuth();
   const [data, setData] = useState(null);
   const [domains, setDomains] = useState([]);
+  const [hosting, setHosting] = useState([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState(null);
 
@@ -3333,6 +3334,8 @@ const CustomerOverview = ({ onNavigate }) => {
       try { const res = await axios.get(`${API_URL}/customer/my-subscriptions`); setData(res.data); }
       catch (_) { setData({ subscriptions: [] }); }
       try { const dr2 = await axios.get(`${API_URL}/customer/my-domains`); setDomains(dr2.data?.domains || []); }
+      catch (_) { }
+      try { const h = await axios.get(`${API_URL}/customer/nc/hosting/orders`); setHosting(h.data?.orders || []); }
       catch (_) { }
       finally { setLoading(false); }
       try { const dr = await axios.get(`${API_URL}/workspace-orders/draft`); setDraft(dr.data.draft || null); }
@@ -3353,6 +3356,7 @@ const CustomerOverview = ({ onNavigate }) => {
   const suspended = subs.filter(s => (s.status || '').toUpperCase() === 'SUSPENDED').length;
   // Only count fully registered domains (exclude failed / pending-checkout).
   const activeDomains = domains.filter(d => d.status === 'registered' || d.status === 'test_paid');
+  const activeHosting = hosting.filter(h => h.status === 'active' || h.status === 'test_paid');
 
   const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
   const pill = (color, bg) => ({ background: bg, color, padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600 });
@@ -3384,9 +3388,9 @@ const CustomerOverview = ({ onNavigate }) => {
           <div style={{ color: MUTE, fontSize: 14 }}>Active subscriptions</div>
         </div>
         <div style={card}>
-          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>SEATS</div>
-          <div style={{ fontSize: 40, fontWeight: 800, color: TEAL, margin: '6px 0' }}>{loading ? '…' : activeSubs.reduce((n, s) => n + (s.seats || 0), 0)}</div>
-          <div style={{ color: MUTE, fontSize: 14 }}>Across active plans</div>
+          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>HOSTING</div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: TEAL, margin: '6px 0' }}>{loading ? '…' : activeHosting.length}</div>
+          <div style={{ color: MUTE, fontSize: 14 }}>Active plans</div>
         </div>
         <div style={card}>
           <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>DOMAINS</div>
@@ -3779,7 +3783,7 @@ const CustomerDomains = () => {
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                         <button onClick={() => setManageDomain(d.domainName)}
                           style={{ background: '#fff', color: INK, border: '1px solid #d8dbe6', borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
-                          ⚙️ Manage
+                          ⚙ Manage
                         </button>
                         <button onClick={() => renewDomain(d, 'stripe')} disabled={renewBusy === d.id}
                           style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
@@ -4165,7 +4169,12 @@ const CustomerSubscriptions = () => {
           axios.get(`${API_URL}/customer/my-subscriptions`).catch((e) => ({ error: e })),
           axios.get(`${API_URL}/customer/my-domains`).catch(() => ({ data: { domains: [] } })),
         ]);
-        if (subRes.error) setError(subRes.error?.response?.data?.error || 'Could not load your subscriptions.');
+        if (subRes.error) {
+          const raw = subRes.error?.response?.data?.error || '';
+          // Hide confusing raw Google errors (e.g. "transfer token does not exist") — show a friendly message.
+          if (/transfer token|does not exist|not found|no customer/i.test(raw)) setError('');
+          else setError(raw || '');
+        }
         else setData(subRes.data);
         setDomains(domRes.data?.domains || []);
       } catch (e) { setError(e?.response?.data?.error || 'Could not load your subscriptions.'); }
@@ -4550,7 +4559,7 @@ const CustomerSettings = () => {
 
   return (
     <div className="section">
-      <h2>⚙️ Account Settings</h2>
+      <h2>⚙ Account Settings</h2>
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20, marginBottom: 20, maxWidth: 480 }}>
         <h3 style={{ marginTop: 0 }}>Profile</h3>
         <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Username</label>
@@ -5766,7 +5775,7 @@ const CustomerHosting = () => {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0 }}>🖥️ Web Hosting</h2>
+      <h2 style={{ marginTop: 0 }}>🖥 Web Hosting</h2>
       <p style={{ color: MUTE }}>Fast, reliable hosting for your website. Pick a plan to get started.</p>
 
       {plans.length === 0 ? (
@@ -5893,8 +5902,8 @@ const AdminOrderWorkspace = () => {
           <div><label style={lab}>Reseller account</label>
             <select style={inp} value={form.account} onChange={e => set('account', e.target.value)}>
               <option value="">Auto (by order routing)</option>
-              <option value="pk">🇵🇰 Pakistan</option>
-              <option value="usa">🇺🇸 USA</option>
+              <option value="pk">Pakistan</option>
+              <option value="usa">USA</option>
             </select>
           </div>
           <div><label style={lab}>Plan *</label>

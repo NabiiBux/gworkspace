@@ -1113,29 +1113,63 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
   try {
     const me = await Customer.findById(req.customerId);
     if (!me) return res.status(404).json({ error: 'Not found' });
-    if (!me.domain) return res.json({ subscriptions: [], domain: null, note: 'No domain linked to your account yet.' });
 
-    // Look up this domain on the correct reseller account
-    const account = (me.account || 'pk');
-    let auth;
-    try {
-      auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
-    } catch (e) {
-      return res.status(400).json({ error: 'Reseller not connected for your account.' });
+    // Figure out which domain(s) belong to this customer. Prefer me.domain; otherwise
+    // derive from their workspace orders / transfers (covers existing/previous customers).
+    let domain = me.domain;
+    if (!domain) {
+      const wo = await WorkspaceOrder.findOne({ customerId: me._id, 'organization.domain': { $exists: true } }).sort({ createdAt: -1 });
+      if (wo?.organization?.domain) domain = wo.organization.domain.toLowerCase();
     }
-    const reseller = google.reseller({ version: 'v1', auth });
+    if (!domain) {
+      const wt = await WorkspaceTransfer.findOne({ customerId: me._id }).sort({ createdAt: -1 });
+      if (wt?.domain) domain = wt.domain.toLowerCase();
+    }
+    if (!domain) {
+      // Last resort: derive from their email domain.
+      const emailDom = (me.businessEmail || '').split('@')[1];
+      if (emailDom) domain = emailDom.toLowerCase();
+    }
+    if (!domain) return res.json({ subscriptions: [], domain: null, note: 'No domain linked to your account yet.' });
 
+    // Try BOTH reseller accounts (the domain could be on PK or USA).
+    const accountsToTry = me.account ? [me.account] : ['pk', 'usa'];
     let subs = [];
-    try {
-      const resp = await reseller.subscriptions.list({ customerId: me.domain });
-      subs = resp.data.subscriptions || [];
-    } catch (e) {
-      if (e?.code === 404) return res.json({ subscriptions: [], domain: me.domain });
-      throw e;
+    let foundAccount = null;
+    let lastErr = null;
+
+    for (const account of accountsToTry) {
+      let auth;
+      try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
+      catch (e) { lastErr = e; continue; } // account not configured — try the next
+      const reseller = google.reseller({ version: 'v1', auth });
+      try {
+        const resp = await reseller.subscriptions.list({ customerId: domain });
+        subs = resp.data.subscriptions || [];
+        foundAccount = account;
+        break; // success
+      } catch (e) {
+        // 404 / "not found" / transfer-token style errors just mean this domain isn't on this account.
+        const msg = (e?.errors?.[0]?.message || e?.message || '').toLowerCase();
+        if (e?.code === 404 || /not found|does not exist|transfer token|no customer/i.test(msg)) {
+          lastErr = e; continue; // try the other account
+        }
+        lastErr = e; // unexpected error — keep trying the other account too
+        continue;
+      }
     }
+
+    // If the domain isn't on any reseller account, return an empty (not an error) so the
+    // dashboard shows "no subscriptions" cleanly instead of a scary message.
+    if (foundAccount === null && subs.length === 0) {
+      return res.json({ subscriptions: [], domain, note: 'No active Workspace subscription found for your domain yet.' });
+    }
+
+    // Remember the account we found it on (so future loads are faster + billing is correct).
+    if (foundAccount && me.account !== foundAccount) { try { me.account = foundAccount; if (!me.domain) me.domain = domain; await me.save(); } catch (_) { } }
 
     const rows = subs.map((s) => ({
-      domain: s.customerDomain || me.domain,
+      domain: s.customerDomain || domain,
       skuId: s.skuId,
       skuName: s.skuName || s.skuId,
       planName: s.plan?.planName,
@@ -1143,7 +1177,7 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
       status: s.status,
       creationTime: s.creationTime ? Number(s.creationTime) : null,
     }));
-    res.json({ subscriptions: rows, domain: me.domain });
+    res.json({ subscriptions: rows, domain, account: foundAccount });
   } catch (e) {
     const msg = e?.errors?.[0]?.message || e?.message || 'Could not load your subscriptions.';
     res.status(500).json({ error: msg });
