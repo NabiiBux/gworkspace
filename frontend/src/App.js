@@ -1800,6 +1800,20 @@ const AdminCustomersSection = () => {
     }
   };
 
+  // Attach domain
+  const [attaching, setAttaching] = useState(null); // customer id
+  const [attachDom, setAttachDom] = useState('');
+  const [attachAcct, setAttachAcct] = useState('pk');
+  const [attachMsg, setAttachMsg] = useState({});
+  const saveAttach = async (id) => {
+    setAttachMsg(m => ({ ...m, [id]: '' }));
+    try {
+      const r = await axios.post(`${API_URL}/admin/customers/${id}/attach-domain`, { domain: attachDom, account: attachAcct });
+      setAttachMsg(m => ({ ...m, [id]: '✓ Linked ' + r.data.domain + ' (' + r.data.account.toUpperCase() + ')' + (r.data.note ? ' — ' + r.data.note : '') }));
+      setAttaching(null); setAttachDom(''); load();
+    } catch (e) { setAttachMsg(m => ({ ...m, [id]: e?.response?.data?.error || 'Could not attach.' })); }
+  };
+
   if (loading) return <div className="loading">Loading customers…</div>;
 
   return (
@@ -1808,25 +1822,39 @@ const AdminCustomersSection = () => {
       {error && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
       <p style={{ color: '#5b6075' }}>{customers.length} registered customer{customers.length === 1 ? '' : 's'}</p>
       {customers.length === 0 ? <p>No customers have registered yet.</p> : (
-        <table className="data-table">
-          <thead><tr><th>Username</th><th>Email</th><th>Domain</th><th>Reg. IP</th><th>Last login IP</th><th>Status</th><th>Action</th></tr></thead>
-          <tbody>
-            {customers.map(c => (
-              <tr key={c.id}>
-                <td>{c.username || '—'}</td>
-                <td>{c.email}</td>
-                <td>{c.domain || '—'}</td>
-                <td style={{ fontSize: 12 }}>{c.registrationIp || '—'}</td>
-                <td style={{ fontSize: 12 }}>{c.lastLoginIp || '—'}</td>
-                <td><span className={`status ${c.status}`}>{c.status}</span></td>
-                <td>
-                  <button className="btn btn-secondary" onClick={() => resetPassword(c.id)}>Reset password</button>
-                  {resetMsg[c.id] && <div style={{ fontSize: 12, color: '#166534', marginTop: 4 }}>{resetMsg[c.id]}</div>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="data-table">
+            <thead><tr><th>Username</th><th>Email</th><th>Domain</th><th>Account</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+              {customers.map(c => (
+                <tr key={c.id}>
+                  <td>{c.username || '—'}</td>
+                  <td>{c.email}</td>
+                  <td>{c.domain || <span style={{ color: '#b45309' }}>none</span>}</td>
+                  <td>{c.account ? c.account.toUpperCase() : '—'}</td>
+                  <td><span className={`status ${c.status}`}>{c.status}</span></td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => resetPassword(c.id)}>Reset pwd</button>
+                      <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => { setAttaching(attaching === c.id ? null : c.id); setAttachDom(c.domain || ''); setAttachAcct(c.account || 'pk'); }}>Attach domain</button>
+                    </div>
+                    {attaching === c.id && (
+                      <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <input value={attachDom} onChange={e => setAttachDom(e.target.value)} placeholder="domain.com" style={{ height: 32, borderRadius: 6, border: '1px solid #d8dbe6', padding: '0 8px', fontSize: 13 }} />
+                        <select value={attachAcct} onChange={e => setAttachAcct(e.target.value)} style={{ height: 32, borderRadius: 6, border: '1px solid #d8dbe6', fontSize: 13 }}>
+                          <option value="pk">Pakistan</option><option value="usa">USA</option>
+                        </select>
+                        <button className="btn btn-primary" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => saveAttach(c.id)}>Save</button>
+                      </div>
+                    )}
+                    {resetMsg[c.id] && <div style={{ fontSize: 12, color: '#166534', marginTop: 4 }}>{resetMsg[c.id]}</div>}
+                    {attachMsg[c.id] && <div style={{ fontSize: 12, color: attachMsg[c.id].startsWith('✓') ? '#166534' : '#b42318', marginTop: 4 }}>{attachMsg[c.id]}</div>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -4203,7 +4231,7 @@ const CustomerSubscriptions = () => {
         </div>
       ) : (
         <table className="data-table" style={{ marginBottom: 24 }}>
-          <thead><tr><th>Product</th><th>Plan</th><th>Seats</th><th>Status</th><th>Started</th></tr></thead>
+          <thead><tr><th>Product</th><th>Plan</th><th>Seats</th><th>Status</th><th>Started</th><th>Renews</th></tr></thead>
           <tbody>
             {data.subscriptions.map((s, i) => (
               <tr key={i}>
@@ -4212,6 +4240,7 @@ const CustomerSubscriptions = () => {
                 <td>{s.seats ?? '—'}</td>
                 <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
                 <td>{fmtDate(s.creationTime)}</td>
+                <td>{fmtDate(s.renewalDate)}</td>
               </tr>
             ))}
           </tbody>
@@ -4226,11 +4255,12 @@ const CustomerSubscriptions = () => {
         </div>
       ) : (
         <table className="data-table">
-          <thead><tr><th>Domain</th><th>Status</th><th>Registered</th><th>Renews</th></tr></thead>
+          <thead><tr><th>Domain</th><th>Order #</th><th>Status</th><th>Registered</th><th>Renews</th></tr></thead>
           <tbody>
             {domains.map((d) => (
               <tr key={d.id}>
                 <td style={{ fontWeight: 600 }}>{d.domainName}</td>
+                <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{d.orderNumber || '—'}</td>
                 <td><span className={`status ${(d.status || '').toLowerCase()}`}>{d.status === 'registered' ? 'Active' : d.status === 'test_paid' ? 'Test' : d.status === 'failed' ? 'Failed' : d.status}</span>{d.status === 'failed' && d.error && <div style={{ fontSize: 12, color: '#b42318' }}>{d.error}</div>}</td>
                 <td>{fmtD(d.registeredAt || d.createdAt)}</td>
                 <td>{fmtD(d.expiresAt)}</td>
@@ -5895,7 +5925,24 @@ const AdminOrderWorkspace = () => {
   const loadOrders = async () => {
     try { const r = await axios.get(`${API_URL}/admin/workspace-orders${q ? `?q=${encodeURIComponent(q)}` : ''}`); setOrders(r.data.orders || []); } catch (_) { }
   };
-  useEffect(() => { loadPlans(); loadOrders(); }, []);
+  // Domain order tracking
+  const [domQ, setDomQ] = useState('');
+  const [domOrders, setDomOrders] = useState([]);
+  const [domRetryBusy, setDomRetryBusy] = useState('');
+  const [domMsg, setDomMsg] = useState('');
+  const loadDomOrders = async () => {
+    try { const r = await axios.get(`${API_URL}/admin/domain-orders${domQ ? `?q=${encodeURIComponent(domQ)}` : ''}`); setDomOrders(r.data.orders || []); } catch (_) { }
+  };
+  const retryDom = async (orderNumber) => {
+    setDomRetryBusy(orderNumber); setDomMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/admin/domain-order-retry`, { orderNumber });
+      setDomMsg('✓ ' + orderNumber + ' → ' + (r.data.status || 'done'));
+      loadDomOrders();
+    } catch (e) { setDomMsg('✗ ' + orderNumber + ': ' + (e?.response?.data?.error || 'error')); }
+    finally { setDomRetryBusy(''); }
+  };
+  useEffect(() => { loadPlans(); loadOrders(); loadDomOrders(); }, []);
 
   const set = (k, v) => setForm({ ...form, [k]: v });
 
@@ -6014,6 +6061,40 @@ const AdminOrderWorkspace = () => {
                     <button onClick={() => retry(o.orderNumber)} disabled={retryBusy === o.orderNumber} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>
                       {retryBusy === o.orderNumber ? '…' : 'Retry provision'}
                     </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <h2 style={{ marginTop: 32 }}>🌐 Domain orders</h2>
+      <p style={{ color: '#5b6075' }}>Search domain purchases by order number (DM-...) or domain. Retry registration for orders that were paid but not registered.</p>
+      {domMsg && <div style={{ padding: '8px 12px', borderRadius: 8, marginBottom: 12, background: domMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: domMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{domMsg}</div>}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <input style={{ ...inp, maxWidth: 360 }} value={domQ} onChange={e => setDomQ(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') loadDomOrders(); }} placeholder="DM-... or domain.com" />
+        <button onClick={loadDomOrders} className="btn btn-secondary">Search</button>
+      </div>
+      {domOrders.length === 0 ? <p style={{ color: '#9ca3af' }}>No domain orders found.</p> : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}>
+              <th style={{ padding: '8px 0' }}>Order #</th><th>Domain</th><th>Years</th><th>Status</th><th></th>
+            </tr></thead>
+            <tbody>
+              {domOrders.map(o => (
+                <tr key={o.orderNumber} style={{ borderTop: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '8px 0', fontFamily: 'monospace', fontSize: 13 }}>{o.orderNumber}</td>
+                  <td style={{ fontWeight: 600 }}>{o.domainName}</td>
+                  <td>{o.period}</td>
+                  <td><span style={{ color: o.status === 'registered' ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{o.status}</span>{o.error && <div style={{ fontSize: 11, color: '#b42318' }}>{o.error}</div>}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    {o.status !== 'registered' && (
+                      <button onClick={() => retryDom(o.orderNumber)} disabled={domRetryBusy === o.orderNumber} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>
+                        {domRetryBusy === o.orderNumber ? '…' : 'Retry register'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

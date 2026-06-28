@@ -1171,15 +1171,21 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
     // Remember the account we found it on (so future loads are faster + billing is correct).
     if (foundAccount && me.account !== foundAccount) { try { me.account = foundAccount; if (!me.domain) me.domain = domain; await me.save(); } catch (_) { } }
 
-    const rows = subs.map((s) => ({
-      domain: s.customerDomain || domain,
-      skuId: s.skuId,
-      skuName: s.skuName || s.skuId,
-      planName: s.plan?.planName,
-      seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
-      status: s.status,
-      creationTime: s.creationTime ? Number(s.creationTime) : null,
-    }));
+    const rows = subs.map((s) => {
+      const created = s.creationTime ? Number(s.creationTime) : null;
+      // Renewal date = next occurrence of the purchase day-of-month (monthly anchor).
+      const renewal = created ? nextMonthlyRenewal(new Date(created), new Date()) : null;
+      return {
+        domain: s.customerDomain || domain,
+        skuId: s.skuId,
+        skuName: s.skuName || s.skuId,
+        planName: s.plan?.planName,
+        seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
+        status: s.status,
+        creationTime: created,
+        renewalDate: renewal ? renewal.getTime() : null,
+      };
+    });
     res.json({ subscriptions: rows, domain, account: foundAccount });
   } catch (e) {
     const msg = e?.errors?.[0]?.message || e?.message || 'Could not load your subscriptions.';
@@ -1202,6 +1208,7 @@ app.get('/api/customer/my-domains', authenticateCustomer, async (req, res) => {
       if (!show) continue;
       domains.push({
         id: o._id,
+        orderNumber: o.orderNumber,
         domainName: o.domainName,
         status: o.status,
         period: o.period,
@@ -1612,6 +1619,34 @@ app.get('/api/admin/customers', authenticateCustomer, requireAdmin, async (req, 
       lastLogin: c.lastLogin,
     }));
     res.json({ customers: rows, total: rows.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: attach (link) a domain + account to an existing customer.
+app.post('/api/admin/customers/:id/attach-domain', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { domain, account } = req.body;
+    const dom = (domain || '').toLowerCase().trim();
+    if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) return res.status(400).json({ error: 'Enter a valid domain like example.com' });
+    const acct = account === 'usa' ? 'usa' : 'pk';
+    const cust = await Customer.findById(req.params.id);
+    if (!cust) return res.status(404).json({ error: 'Customer not found.' });
+
+    // Optional: verify the domain exists on that reseller account (warn but don't block).
+    let foundOnGoogle = false, googleNote = '';
+    try {
+      const auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth();
+      const reseller = google.reseller({ version: 'v1', auth });
+      await reseller.customers.get({ customerId: dom });
+      foundOnGoogle = true;
+    } catch (e) { googleNote = 'Note: this domain was not found on the ' + acct.toUpperCase() + ' reseller account yet.'; }
+
+    cust.domain = dom;
+    cust.account = acct;
+    await cust.save();
+    res.json({ success: true, domain: dom, account: acct, foundOnGoogle, note: googleNote });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -2155,8 +2190,12 @@ async function markPaidAndProvision(payment) {
           if (!result.ok) throw new Error(result.error);
           if (!result.registered) throw new Error('Namecheap did not confirm registration.');
           console.log('DOMAIN REGISTERED via Namecheap:', dOrder.domainName);
+          // Only link this domain to the customer if they have NO domain yet.
+          // Never overwrite an existing Workspace domain (that would break their Workspace billing).
           if (me && !me.domain) { me.domain = dOrder.domainName; await me.save(); }
         }
+        // NOTE: domain registration/renewal does NOT touch Workspace (SubBilling) billing.
+        // A domain renewal must never trigger a Workspace suspension.
         dOrder.status = 'registered';
         dOrder.registeredAt = new Date();
         dOrder.registrationResult = JSON.stringify(result).slice(0, 500);
@@ -2484,6 +2523,25 @@ async function runSubscriptionBillingCheck() {
     // Suspend once we reach the suspend date (1 day before renewal) and still unpaid.
     // Once suspended, it STAYS suspended until an admin reactivates (no auto-roll).
     if (daysToSuspend <= 0 && r.billingStatus !== 'suspended') {
+      // SAFETY: never suspend if a payment for this domain succeeded recently (any product type).
+      // A renewal/payment must never trigger an auto-suspend.
+      try {
+        const recentPaid = await Payment.findOne({
+          domain: r.domain,
+          status: 'paid',
+          paidAt: { $gte: new Date(now.getTime() - 35 * 24 * 60 * 60 * 1000) },
+        }).sort({ paidAt: -1 });
+        if (recentPaid) {
+          // Roll this record's billing forward from its anchor and keep it active.
+          r.lastPaymentDate = recentPaid.paidAt || now;
+          r.nextBillingDate = recalcNextBilling(r, now);
+          r.billingStatus = 'active';
+          r.warnedAt = null;
+          await r.save();
+          console.log('SUB SUSPEND SKIPPED (recent payment found):', r.domain, r.skuId);
+          continue; // do not suspend
+        }
+      } catch (_) { }
       try {
         await setSubscriptionState(r.account, r.domain, r.skuId, 'suspend', r.subscriptionId);
         r.billingStatus = 'suspended';
@@ -6023,6 +6081,42 @@ async function getResellerAuth() {
   oauth2.setCredentials({ refresh_token: conn.refreshToken });
   return oauth2;
 }
+
+// Admin: list/search domain orders (by number or domain) with status + retry.
+app.get('/api/admin/domain-orders', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { q } = req.query;
+    const filter = {};
+    if (q) { const rx = new RegExp(String(q).trim(), 'i'); filter.$or = [{ orderNumber: rx }, { domainName: rx }]; }
+    const orders = await DomainOrder.find(filter).sort({ createdAt: -1 }).limit(50);
+    res.json({
+      orders: orders.map((o) => ({
+        orderNumber: o.orderNumber, domainName: o.domainName, status: o.status,
+        period: o.period, price: o.price, registeredAt: o.registeredAt, createdAt: o.createdAt,
+        error: o.status === 'failed' ? o.registrationResult : null,
+      }))
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin: retry a domain order that was paid but not registered.
+app.post('/api/admin/domain-order-retry', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { orderNumber } = req.body;
+    const order = await DomainOrder.findOne({ orderNumber });
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+    // Find the paid payment for this order.
+    const payment = await Payment.findOne({ orderId: order._id, orderType: 'domain', status: 'paid' });
+    if (!payment) return res.status(400).json({ error: 'No completed payment found for this order.' });
+    // Reset to pending and re-run fulfillment.
+    order.status = 'pending'; await order.save();
+    await markPaidAndProvision(payment);
+    const updated = await DomainOrder.findById(order._id);
+    res.json({ success: true, status: updated.status, domain: updated.domainName });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
 
 // Admin: list/search workspace orders (by number or domain) with provisioning status.
 app.get('/api/admin/workspace-orders', authenticateCustomer, requireAdmin, async (req, res) => {
