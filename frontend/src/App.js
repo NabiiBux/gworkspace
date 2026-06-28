@@ -3324,6 +3324,7 @@ const CustomerPortal = () => {
 const CustomerOverview = ({ onNavigate }) => {
   const { user } = useAuth();
   const [data, setData] = useState(null);
+  const [domains, setDomains] = useState([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState(null);
 
@@ -3331,6 +3332,8 @@ const CustomerOverview = ({ onNavigate }) => {
     (async () => {
       try { const res = await axios.get(`${API_URL}/customer/my-subscriptions`); setData(res.data); }
       catch (_) { setData({ subscriptions: [] }); }
+      try { const dr2 = await axios.get(`${API_URL}/customer/my-domains`); setDomains(dr2.data?.domains || []); }
+      catch (_) { }
       finally { setLoading(false); }
       try { const dr = await axios.get(`${API_URL}/workspace-orders/draft`); setDraft(dr.data.draft || null); }
       catch (_) { }
@@ -3370,16 +3373,21 @@ const CustomerOverview = ({ onNavigate }) => {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }} className="grid-2">
         <div style={card}>
-          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>SUBSCRIPTIONS</div>
+          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>WORKSPACE</div>
           <div style={{ fontSize: 40, fontWeight: 800, color: INK, margin: '6px 0' }}>{loading ? '…' : subs.length}</div>
-          <div style={{ color: MUTE, fontSize: 14 }}>Total orders</div>
+          <div style={{ color: MUTE, fontSize: 14 }}>Subscriptions</div>
         </div>
         <div style={card}>
           <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>ACTIVE</div>
           <div style={{ fontSize: 40, fontWeight: 800, color: TEAL, margin: '6px 0' }}>{loading ? '…' : active}</div>
-          <div style={{ color: MUTE, fontSize: 14 }}>Live Workspace</div>
+          <div style={{ color: MUTE, fontSize: 14 }}>&nbsp;</div>
+        </div>
+        <div style={card}>
+          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>DOMAINS</div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: INK, margin: '6px 0' }}>{loading ? '…' : domains.length}</div>
+          <div style={{ color: MUTE, fontSize: 14 }}>Registered</div>
         </div>
         <div style={card}>
           <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>NEEDS PAYMENT</div>
@@ -4140,14 +4148,20 @@ const DomainManagePanel = ({ domain, onClose }) => {
 
 const CustomerSubscriptions = () => {
   const [data, setData] = useState(null);
+  const [domains, setDomains] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     (async () => {
       try {
-        const res = await axios.get(`${API_URL}/customer/my-subscriptions`);
-        setData(res.data);
+        const [subRes, domRes] = await Promise.all([
+          axios.get(`${API_URL}/customer/my-subscriptions`).catch((e) => ({ error: e })),
+          axios.get(`${API_URL}/customer/my-domains`).catch(() => ({ data: { domains: [] } })),
+        ]);
+        if (subRes.error) setError(subRes.error?.response?.data?.error || 'Could not load your subscriptions.');
+        else setData(subRes.data);
+        setDomains(domRes.data?.domains || []);
       } catch (e) { setError(e?.response?.data?.error || 'Could not load your subscriptions.'); }
       finally { setLoading(false); }
     })();
@@ -4156,18 +4170,24 @@ const CustomerSubscriptions = () => {
   if (loading) return <div className="loading">Loading your subscriptions…</div>;
 
   const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString() : '—';
+  const fmtD = (d) => d ? new Date(d).toLocaleDateString() : '—';
+  const hasSubs = data?.subscriptions && data.subscriptions.length > 0;
+  const hasDomains = domains.length > 0;
 
   return (
     <div className="section">
       <h2>📊 My Subscriptions</h2>
-      {error && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
-      {data?.domain && <p style={{ color: '#5b6075' }}>Domain: <strong>{data.domain}</strong></p>}
-      {(!data?.subscriptions || data.subscriptions.length === 0) ? (
-        <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 20 }}>
-          <p style={{ margin: 0 }}>You don't have any subscriptions yet. Use <strong>Order Workspace</strong> to get started.</p>
+      {error && <div style={{ background: '#fff7ed', color: '#9a3412', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 14 }}>{error}</div>}
+
+      {/* Google Workspace subscriptions */}
+      <h3 style={{ marginTop: 8 }}>Google Workspace</h3>
+      {data?.domain && <p style={{ color: '#5b6075', marginTop: 0 }}>Domain: <strong>{data.domain}</strong>{data.account ? ` · ${data.account.toUpperCase()} account` : ''}</p>}
+      {!hasSubs ? (
+        <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 18, marginBottom: 24 }}>
+          <p style={{ margin: 0 }}>{data?.note || "No Workspace subscription yet."} Use <strong>New subscription</strong> to get started or <strong>Import Workspace</strong> to transfer an existing one.</p>
         </div>
       ) : (
-        <table className="data-table">
+        <table className="data-table" style={{ marginBottom: 24 }}>
           <thead><tr><th>Product</th><th>Plan</th><th>Seats</th><th>Status</th><th>Started</th></tr></thead>
           <tbody>
             {data.subscriptions.map((s, i) => (
@@ -4177,6 +4197,28 @@ const CustomerSubscriptions = () => {
                 <td>{s.seats ?? '—'}</td>
                 <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
                 <td>{fmtDate(s.creationTime)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {/* Purchased domains */}
+      <h3>Domains</h3>
+      {!hasDomains ? (
+        <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 12, padding: 18 }}>
+          <p style={{ margin: 0 }}>No domains yet. Browse the <strong>Domains</strong> tab to register one.</p>
+        </div>
+      ) : (
+        <table className="data-table">
+          <thead><tr><th>Domain</th><th>Status</th><th>Registered</th><th>Renews</th></tr></thead>
+          <tbody>
+            {domains.map((d) => (
+              <tr key={d.id}>
+                <td style={{ fontWeight: 600 }}>{d.domainName}</td>
+                <td><span className={`status ${(d.status || '').toLowerCase()}`}>{d.status === 'registered' ? 'Active' : d.status === 'test_paid' ? 'Test' : d.status === 'failed' ? 'Failed' : d.status}</span>{d.status === 'failed' && d.error && <div style={{ fontSize: 12, color: '#b42318' }}>{d.error}</div>}</td>
+                <td>{fmtD(d.registeredAt || d.createdAt)}</td>
+                <td>{fmtD(d.expiresAt)}</td>
               </tr>
             ))}
           </tbody>
