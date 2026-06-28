@@ -3347,8 +3347,12 @@ const CustomerOverview = ({ onNavigate }) => {
 
   const name = user?.username || (user?.businessEmail || '').split('@')[0];
   const subs = data?.subscriptions || [];
-  const active = subs.filter(s => s.status === 'ACTIVE').length;
-  const pending = subs.filter(s => s.status !== 'ACTIVE').length;
+  // Only count ACTIVE subscriptions for the headline counts (exclude suspended/pending/abandoned).
+  const activeSubs = subs.filter(s => (s.status || '').toUpperCase() === 'ACTIVE');
+  const active = activeSubs.length;
+  const suspended = subs.filter(s => (s.status || '').toUpperCase() === 'SUSPENDED').length;
+  // Only count fully registered domains (exclude failed / pending-checkout).
+  const activeDomains = domains.filter(d => d.status === 'registered' || d.status === 'test_paid');
 
   const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
   const pill = (color, bg) => ({ background: bg, color, padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600 });
@@ -3376,23 +3380,23 @@ const CustomerOverview = ({ onNavigate }) => {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }} className="grid-2">
         <div style={card}>
           <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>WORKSPACE</div>
-          <div style={{ fontSize: 40, fontWeight: 800, color: INK, margin: '6px 0' }}>{loading ? '…' : subs.length}</div>
-          <div style={{ color: MUTE, fontSize: 14 }}>Subscriptions</div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: INK, margin: '6px 0' }}>{loading ? '…' : active}</div>
+          <div style={{ color: MUTE, fontSize: 14 }}>Active subscriptions</div>
         </div>
         <div style={card}>
-          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>ACTIVE</div>
-          <div style={{ fontSize: 40, fontWeight: 800, color: TEAL, margin: '6px 0' }}>{loading ? '…' : active}</div>
-          <div style={{ color: MUTE, fontSize: 14 }}>&nbsp;</div>
+          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>SEATS</div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: TEAL, margin: '6px 0' }}>{loading ? '…' : activeSubs.reduce((n, s) => n + (s.seats || 0), 0)}</div>
+          <div style={{ color: MUTE, fontSize: 14 }}>Across active plans</div>
         </div>
         <div style={card}>
           <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>DOMAINS</div>
-          <div style={{ fontSize: 40, fontWeight: 800, color: INK, margin: '6px 0' }}>{loading ? '…' : domains.length}</div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: INK, margin: '6px 0' }}>{loading ? '…' : activeDomains.length}</div>
           <div style={{ color: MUTE, fontSize: 14 }}>Registered</div>
         </div>
         <div style={card}>
-          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>NEEDS PAYMENT</div>
-          <div style={{ fontSize: 40, fontWeight: 800, color: '#b45309', margin: '6px 0' }}>{loading ? '…' : pending}</div>
-          <div style={{ color: MUTE, fontSize: 14 }}>Awaiting checkout</div>
+          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>SUSPENDED</div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: suspended ? '#b42318' : MUTE, margin: '6px 0' }}>{loading ? '…' : suspended}</div>
+          <div style={{ color: MUTE, fontSize: 14 }}>Need attention</div>
         </div>
       </div>
 
@@ -3413,7 +3417,9 @@ const CustomerOverview = ({ onNavigate }) => {
               <div style={{ color: MUTE, fontSize: 14 }}>{s.skuName} · {s.seats ?? 1} seat{(s.seats ?? 1) === 1 ? '' : 's'}</div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <span style={s.status === 'ACTIVE' ? pill('#166534', '#dcfce7') : pill('#92600a', '#fef3c7')}>{s.status === 'ACTIVE' ? 'Active' : 'Pending'}</span>
+              <span style={(s.status === 'ACTIVE') ? pill('#166534', '#dcfce7') : (s.status === 'SUSPENDED') ? pill('#b42318', '#fde8e8') : pill('#92600a', '#fef3c7')}>
+                {s.status === 'ACTIVE' ? 'Active' : s.status === 'SUSPENDED' ? 'Suspended' : (s.status || 'Pending')}
+              </span>
             </div>
           </div>
         ))}
