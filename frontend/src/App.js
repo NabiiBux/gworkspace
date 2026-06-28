@@ -4351,6 +4351,10 @@ const CustomerAddons = () => {
   const [addons, setAddons] = useState([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
+  const [domains, setDomains] = useState(null); // null = not loaded; [] = none
+  const [picking, setPicking] = useState(null); // the addon being purchased
+  const [chosenDomain, setChosenDomain] = useState('');
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -4360,46 +4364,86 @@ const CustomerAddons = () => {
     })();
   }, []);
 
-  const purchase = async (a) => {
+  // When the customer clicks Buy, load their eligible Workspace domains and open the picker.
+  const startPurchase = async (a) => {
     setMsg('');
-    if (!a.purchasable) {
-      setMsg(`"${a.name}" isn't available for self-service purchase yet. Please contact support to enable it.`);
-      return;
-    }
+    if (!a.purchasable) { setMsg(`"${a.name}" isn't available for self-service purchase yet. Please contact support.`); return; }
+    setPicking(a); setChosenDomain('');
     try {
-      const r = await axios.post(`${API_URL}/customer/addons/purchase`, { skuId: a.skuId });
-      // Price is set → would proceed to checkout. For now confirm availability.
-      setMsg(`✓ ${a.name} ($${r.data.price}/user/mo) is ready — proceeding to checkout.`);
-      // TODO: hook into existing checkout flow with this sku + price
-    } catch (e) {
-      setMsg(e?.response?.data?.error || 'Could not start purchase. Please contact support.');
-    }
+      const r = await axios.get(`${API_URL}/customer/addon-domains`);
+      const list = r.data.domains || [];
+      setDomains(list);
+      if (list.length === 1) setChosenDomain(list[0].domain);
+    } catch (e) { setDomains([]); }
+  };
+
+  const checkout = async (method) => {
+    if (!chosenDomain) { setMsg('Please choose a domain.'); return; }
+    setBusy(true); setMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/customer/addons/purchase`, { skuId: picking.skuId, domain: chosenDomain, method });
+      if (r.data.checkoutUrl) window.location.href = r.data.checkoutUrl;
+      else setMsg('Could not start checkout.');
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not start purchase.'); }
+    finally { setBusy(false); }
   };
 
   const TEAL = '#0F766E';
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>🧩 Add-ons</h2>
-      <p style={{ color: '#6b7280' }}>Enhance your Google Workspace with add-ons like Gemini AI, AppSheet, Cloud Identity, and more.</p>
+      <p style={{ color: '#6b7280' }}>Enhance your Google Workspace with add-ons like Gemini AI, AppSheet, Cloud Identity, and more. Add-ons attach to a domain that already has an active Workspace plan.</p>
 
       {msg && <div style={{ padding: '12px 16px', borderRadius: 8, marginBottom: 16, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a' }}>{msg}</div>}
 
       {loading ? <p>Loading add-ons…</p> : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }} className="grid-2">
           {addons.map(a => (
             <div key={a.skuId} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <h3 style={{ margin: 0, fontSize: 16 }}>{a.name}</h3>
               <div style={{ color: a.purchasable ? TEAL : '#9ca3af', fontWeight: 700, fontSize: 18 }}>
                 {a.purchasable ? `$${a.price}/user/mo` : 'Contact support'}
               </div>
-              <button
-                className="btn btn-primary"
-                style={{ marginTop: 'auto', opacity: a.purchasable ? 1 : 0.6 }}
-                onClick={() => purchase(a)}>
-                {a.purchasable ? 'Add to my plan' : 'Contact support'}
+              <button className="btn btn-primary" style={{ marginTop: 'auto', opacity: a.purchasable ? 1 : 0.6 }} onClick={() => startPurchase(a)}>
+                {a.purchasable ? 'Buy' : 'Contact support'}
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Domain selection modal */}
+      {picking && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 1000 }} onClick={() => !busy && setPicking(null)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 440, width: '100%' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Add {picking.name}</h3>
+            {domains === null ? (
+              <p style={{ color: '#6b7280' }}>Checking your Workspace domains…</p>
+            ) : domains.length === 0 ? (
+              <div>
+                <div style={{ background: '#fef2f2', color: '#b42318', borderRadius: 10, padding: '14px 16px', marginBottom: 16 }}>
+                  Please purchase a Google Workspace plan first. Add-ons require an active Workspace subscription — they don't work on their own.
+                </div>
+                <button className="btn btn-secondary" onClick={() => setPicking(null)}>Close</button>
+              </div>
+            ) : (
+              <>
+                <p style={{ color: '#6b7280', marginTop: 0 }}>Choose the Workspace domain to add this to. It will be billed on that domain's account.</p>
+                <select value={chosenDomain} onChange={e => setChosenDomain(e.target.value)} style={{ width: '100%', height: 46, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 12px', marginBottom: 8 }}>
+                  <option value="">Select a domain…</option>
+                  {domains.map(d => <option key={d.domain} value={d.domain}>{d.domain} ({d.account.toUpperCase()})</option>)}
+                </select>
+                <div style={{ background: '#f8fafc', borderRadius: 8, padding: '10px 14px', margin: '10px 0', fontSize: 14 }}>
+                  {picking.name} — <strong style={{ color: TEAL }}>${picking.price}/user/mo</strong> <span style={{ color: '#6b7280' }}>+ tax</span>
+                </div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <button onClick={() => checkout('stripe')} disabled={busy || !chosenDomain} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '💳 Pay by card'}</button>
+                  <button onClick={() => checkout('nicky')} disabled={busy || !chosenDomain} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '🪙 Crypto'}</button>
+                  <button onClick={() => setPicking(null)} disabled={busy} style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}>Cancel</button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>

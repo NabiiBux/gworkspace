@@ -218,6 +218,9 @@ const PaymentSchema = new mongoose.Schema({
   subtotal: Number,          // pre-tax amount
   tax: Number,               // tax portion
   fee: Number,               // processing fee portion
+  addonSku: String,          // for addon orders: the SKU to provision
+  addonAccount: String,      // which reseller account the addon bills to ('pk'/'usa')
+  addonName: String,
   currency: { type: String, default: 'USD' },
   method: { type: String, enum: ['stripe', 'nicky'], default: 'stripe' },
   status: { type: String, enum: ['pending', 'paid', 'failed', 'cancelled'], default: 'pending' },
@@ -1997,6 +2000,55 @@ async function markPaidAndProvision(payment) {
     return;
   }
 
+  // ADD-ON orders: provision the add-on subscription on the domain's reseller account.
+  if (payment.orderType === 'addon') {
+    try {
+      if (payment.isTest) {
+        console.log('TEST PAYMENT — addon not really provisioned for', payment.domain, payment.addonSku);
+        return;
+      }
+      const account = payment.addonAccount || 'pk';
+      const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+      const reseller = google.reseller({ version: 'v1', auth });
+      const dom = (payment.domain || '').toLowerCase();
+      await reseller.subscriptions.insert({
+        customerId: dom,
+        requestBody: {
+          customerId: dom,
+          skuId: payment.addonSku,
+          plan: { planName: 'FLEXIBLE' },
+          seats: { maximumNumberOfSeats: 1 },
+          purchaseOrderId: 'addon-' + Date.now(),
+        },
+      });
+      console.log(`ADDON provisioned: ${payment.addonName} (${payment.addonSku}) for ${dom} on ${account}`);
+      // Seed billing for the addon so it's tracked on its monthly anchor.
+      try {
+        const now = new Date();
+        await SubBilling.findOneAndUpdate(
+          { domain: dom, skuId: payment.addonSku },
+          { $setOnInsert: { account, purchaseDate: now, billingStatus: 'active' }, $set: { lastPaymentDate: now, nextBillingDate: nextMonthlyRenewal(now, now) } },
+          { upsert: true }
+        );
+      } catch (_) { }
+      const me = await Customer.findById(payment.customerId);
+      try {
+        const html = emailShell('Add-on activated', `
+          <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+          <p>Your add-on <strong>${payment.addonName}</strong> for <strong>${dom}</strong> is now active.</p>`);
+        await sendEmail(me?.businessEmail, `Add-on activated: ${payment.addonName}`, html);
+      } catch (_) { }
+    } catch (e) {
+      const msg = e?.errors?.[0]?.message || e.message;
+      if (/already exists|duplicate|resource already/i.test(msg)) {
+        console.log('ADDON already exists for', payment.domain, payment.addonSku, '(treating as done)');
+      } else {
+        console.error('ADDON provision FAILED for payment', String(payment._id), msg);
+      }
+    }
+    return;
+  }
+
   // HOSTING orders: mark active on payment (hosting is provisioned by your team / cPanel).
   if (payment.orderType === 'hosting') {
     try {
@@ -2764,16 +2816,125 @@ app.post('/api/admin/sku-price', authenticateCustomer, requireAdmin, async (req,
 });
 
 // Customer: attempt an add-on purchase. Blocks if no admin price → contact support message.
+// Customer: list domains they own that have an ACTIVE Workspace subscription — addons attach to these.
+app.get('/api/customer/addon-domains', authenticateCustomer, async (req, res) => {
+  try {
+    const me = await Customer.findById(req.customerId);
+    if (!me) return res.status(404).json({ error: 'Not found' });
+
+    // Gather candidate domains for this customer (from linked domain, orders, transfers).
+    const candidates = new Set();
+    if (me.domain) candidates.add(me.domain.toLowerCase());
+    const wos = await WorkspaceOrder.find({ customerId: me._id, status: 'provisioned' });
+    wos.forEach((o) => { if (o.organization?.domain) candidates.add(o.organization.domain.toLowerCase()); });
+    const wts = await WorkspaceTransfer.find({ customerId: me._id, status: 'completed' });
+    wts.forEach((t) => { if (t.domain) candidates.add(t.domain.toLowerCase()); });
+
+    // For each candidate, check Google (PK then USA) for an ACTIVE Workspace subscription.
+    const domains = [];
+    for (const dom of candidates) {
+      for (const account of ['pk', 'usa']) {
+        let auth;
+        try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
+        const reseller = google.reseller({ version: 'v1', auth });
+        try {
+          const resp = await reseller.subscriptions.list({ customerId: dom });
+          const subs = resp.data.subscriptions || [];
+          // A Workspace plan = a non-addon SKU that's ACTIVE.
+          const hasWorkspace = subs.some((s) => {
+            const meta = SKU_CATALOG[String(s.skuId)];
+            return s.status === 'ACTIVE' && (!meta || meta.category === 'workspace');
+          });
+          if (hasWorkspace) { domains.push({ domain: dom, account }); break; } // found on this account
+        } catch (_) { /* not on this account */ }
+      }
+    }
+    res.json({ domains });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/customer/addons/purchase', authenticateCustomer, async (req, res) => {
   try {
     const sku = String(req.body.skuId || '');
+    const dom = String(req.body.domain || '').toLowerCase().trim();
+    const method = req.body.method === 'nicky' ? 'nicky' : 'stripe';
     const meta = SKU_CATALOG[sku];
     if (!meta || meta.category !== 'addon') return res.status(400).json({ error: 'Invalid add-on.' });
     const plan = await Plan.findOne({ skuId: sku, category: 'addon', active: true });
     if (!plan || !plan.monthlyPrice || plan.monthlyPrice <= 0) {
       return res.status(400).json({ error: 'This add-on isn\'t available for self-service purchase yet. Please contact support to enable it.' });
     }
-    res.json({ success: true, skuId: sku, name: meta.name, price: plan.monthlyPrice, message: 'Add-on available — proceed to checkout.' });
+    const me = await Customer.findById(req.customerId);
+
+    // MANDATORY: the customer must have a domain with an ACTIVE Workspace plan.
+    if (!dom) return res.status(400).json({ error: 'Please select the Workspace domain to add this to.' });
+
+    // Verify the domain has an active Workspace subscription and find which account it's on.
+    let account = null;
+    for (const acct of ['pk', 'usa']) {
+      let auth;
+      try { auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
+      const reseller = google.reseller({ version: 'v1', auth });
+      try {
+        const resp = await reseller.subscriptions.list({ customerId: dom });
+        const subs = resp.data.subscriptions || [];
+        const hasWorkspace = subs.some((s) => {
+          const m = SKU_CATALOG[String(s.skuId)];
+          return s.status === 'ACTIVE' && (!m || m.category === 'workspace');
+        });
+        if (hasWorkspace) { account = acct; break; }
+      } catch (_) { }
+    }
+    if (!account) {
+      return res.status(400).json({ error: 'Please purchase a Google Workspace plan for this domain first. Add-ons require an active Workspace subscription.' });
+    }
+
+    // Pay-first: build checkout. Add-on bills to whichever account the domain lives on.
+    const subtotal = Number(plan.monthlyPrice);
+    const taxed = await applyTaxAndFee(subtotal);
+    const amount = taxed.total;
+    const orderNumber = `AD-${Date.now()}`;
+    const payment = await Payment.create({
+      customerId: me._id, customerEmail: me.businessEmail, domain: dom,
+      orderType: 'addon', amount, subtotal: taxed.subtotal, tax: taxed.tax, fee: taxed.fee, currency: 'USD',
+      method, status: 'pending',
+      addonSku: sku, addonAccount: account, addonName: meta.name,
+    });
+
+    const orderDesc = `${meta.name} add-on for ${dom}`;
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
+
+    if (method === 'stripe') {
+      let stripe; try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const sd = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (sd?.stripeMode || 'test') !== 'live'; await payment.save();
+      const line_items = [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(taxed.subtotal * 100) }, quantity: 1 }];
+      if (taxed.fee > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) }, quantity: 1 });
+      if (taxed.tax > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) }, quantity: 1 });
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment', line_items, success_url: successUrl, cancel_url: cancelUrl,
+        client_reference_id: String(payment._id), metadata: { paymentId: String(payment._id), orderType: 'addon' },
+      });
+      payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
+      return res.json({ checkoutUrl: session.url, paymentId: payment._id });
+    }
+
+    try {
+      const nicky = await createNickyPayment({
+        amount, currency: 'USD', description: orderDesc, orderNumber,
+        reference: String(payment._id), billDescription: orderDesc,
+        customerEmail: me.businessEmail, customerName: me.firstName ? `${me.firstName} ${me.lastName || ''}`.trim() : me.businessEmail,
+        redirectUrl: successUrl, cancelUrl,
+      });
+      payment.checkoutUrl = nicky.url; payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id); payment.providerShortId = nicky.shortId || null;
+      await payment.save();
+      return res.json({ checkoutUrl: nicky.url, paymentId: payment._id });
+    } catch (e) {
+      return res.status(500).json({ error: 'Crypto checkout not available: ' + e.message });
+    }
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
