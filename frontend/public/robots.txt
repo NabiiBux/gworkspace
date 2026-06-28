@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /overview
+Disallow: /dashboard
+Disallow: /payments
+Disallow: /settings
+
+Sitemap: https://portal.gnbmentor.com/sitemap.xml
