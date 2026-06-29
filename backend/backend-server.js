@@ -1681,30 +1681,47 @@ app.get('/api/admin/lookup-domain', authenticateCustomer, requireAdmin, async (r
     const dom = (req.query.domain || '').toLowerCase().trim();
     if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) return res.status(400).json({ error: 'Enter a valid domain like example.com' });
 
+    const errors = [];
     for (const account of ['pk', 'usa']) {
       let auth;
-      try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
+      try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
+      catch (e) { errors.push(`${account.toUpperCase()}: not connected (${e.message})`); continue; }
       const reseller = google.reseller({ version: 'v1', auth });
+
+      // First confirm the domain is a customer under this reseller.
+      let customerExists = false;
+      try { await reseller.customers.get({ customerId: dom }); customerExists = true; }
+      catch (e) {
+        const msg = e?.errors?.[0]?.message || e?.message || '';
+        if (!/not found|does not exist|404/i.test(msg)) errors.push(`${account.toUpperCase()} customer check: ${msg}`);
+        // not a customer on this account → try next
+      }
+      if (!customerExists) continue;
+
+      // Now list subscriptions.
       try {
         const resp = await reseller.subscriptions.list({ customerId: dom });
         const subs = resp.data.subscriptions || [];
-        if (subs.length > 0) {
-          return res.json({
-            found: true,
-            account,
-            domain: dom,
-            subscriptions: subs.map((s) => ({
-              skuId: String(s.skuId),
-              skuName: skuName(s.skuId),
-              planName: s.plan?.planName,
-              seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
-              status: s.status,
-            })),
-          });
-        }
-      } catch (_) { /* not on this account */ }
+        return res.json({
+          found: true,
+          account,
+          domain: dom,
+          subscriptions: subs.map((s) => ({
+            skuId: String(s.skuId),
+            skuName: skuName(s.skuId),
+            planName: s.plan?.planName,
+            seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
+            status: s.status,
+          })),
+        });
+      } catch (e) {
+        const msg = e?.errors?.[0]?.message || e?.message || '';
+        // Customer exists but listing failed — still report found with the account.
+        errors.push(`${account.toUpperCase()} subscription list: ${msg}`);
+        return res.json({ found: true, account, domain: dom, subscriptions: [], note: 'Customer found, but could not list subscriptions: ' + msg });
+      }
     }
-    res.json({ found: false, domain: dom, note: 'No Google Workspace subscription found for this domain on either account.' });
+    res.json({ found: false, domain: dom, note: 'No Google Workspace customer found for this domain on either account.', diagnostics: errors });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1713,34 +1730,62 @@ app.get('/api/admin/lookup-domain', authenticateCustomer, requireAdmin, async (r
 // Admin: attach (link) a domain to an existing customer. Account auto-detected from Google.
 app.post('/api/admin/customers/:id/attach-domain', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
-    const { domain } = req.body;
+    const { domain, account: forceAccount } = req.body;
     const dom = (domain || '').toLowerCase().trim();
     if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) return res.status(400).json({ error: 'Enter a valid domain like example.com' });
     const cust = await Customer.findById(req.params.id);
     if (!cust) return res.status(404).json({ error: 'Customer not found.' });
 
-    // Auto-detect which account the domain's Workspace subscription lives on.
+    // Auto-detect which account the domain's Workspace customer lives on (or use forced account).
+    const tryAccounts = forceAccount ? [forceAccount] : ['pk', 'usa'];
     let account = null, subCount = 0;
-    for (const acct of ['pk', 'usa']) {
+    const errors = [];
+    for (const acct of tryAccounts) {
       let auth;
-      try { auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
+      try { auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
+      catch (e) { errors.push(`${acct.toUpperCase()}: not connected (${e.message})`); continue; }
       const reseller = google.reseller({ version: 'v1', auth });
       try {
-        const resp = await reseller.subscriptions.list({ customerId: dom });
-        const subs = resp.data.subscriptions || [];
-        if (subs.length > 0) { account = acct; subCount = subs.length; break; }
-      } catch (_) { }
+        await reseller.customers.get({ customerId: dom });
+        account = acct;
+        // Count subscriptions (best-effort).
+        try { const resp = await reseller.subscriptions.list({ customerId: dom }); subCount = (resp.data.subscriptions || []).length; } catch (_) { }
+        break;
+      } catch (e) {
+        const msg = e?.errors?.[0]?.message || e?.message || '';
+        if (!/not found|does not exist|404/i.test(msg)) errors.push(`${acct.toUpperCase()}: ${msg}`);
+      }
     }
     if (!account) {
-      return res.status(400).json({ error: 'No Google Workspace subscription found for ' + dom + ' on either account. Check the domain.' });
+      return res.status(400).json({
+        error: 'Could not find ' + dom + ' as a Workspace customer on ' + (forceAccount ? forceAccount.toUpperCase() + ' account' : 'either account') + '.',
+        diagnostics: errors.length ? errors : ['Domain is not a customer under your reseller. Add it in your Google reseller console first, or use "Force link" if you manage it manually.'],
+      });
     }
 
     cust.domain = dom;
     cust.account = account;
     await cust.save();
-    // Seed billing for the attached subscriptions so they're tracked.
     try { await syncSubscriptionsForBilling(account); } catch (_) { }
-    res.json({ success: true, domain: dom, account, subscriptions: subCount, message: `Attached ${dom} (${subCount} subscription${subCount === 1 ? '' : 's'}) on the ${account.toUpperCase()} account.` });
+    res.json({ success: true, domain: dom, account, subscriptions: subCount, message: `Attached ${dom} on the ${account.toUpperCase()} account${subCount ? ` (${subCount} subscription${subCount === 1 ? '' : 's'})` : ''}.` });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: force-link a domain to a customer WITHOUT Google verification (for manually-managed domains).
+app.post('/api/admin/customers/:id/force-link-domain', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { domain, account } = req.body;
+    const dom = (domain || '').toLowerCase().trim();
+    if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) return res.status(400).json({ error: 'Enter a valid domain like example.com' });
+    const acct = account === 'usa' ? 'usa' : 'pk';
+    const cust = await Customer.findById(req.params.id);
+    if (!cust) return res.status(404).json({ error: 'Customer not found.' });
+    cust.domain = dom;
+    cust.account = acct;
+    await cust.save();
+    res.json({ success: true, domain: dom, account: acct, message: `Force-linked ${dom} to ${cust.businessEmail} on the ${acct.toUpperCase()} account. (Not verified against Google.)` });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

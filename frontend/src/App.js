@@ -1877,6 +1877,17 @@ const AdminCustomersSection = () => {
   const [lookupBusy, setLookupBusy] = useState(false);
   const [attachBusy, setAttachBusy] = useState(false);
   const [attachMsg, setAttachMsg] = useState('');
+  const [forceAcct, setForceAcct] = useState('pk');
+
+  const forceLink = async () => {
+    setAttachBusy(true); setAttachMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/admin/customers/${attaching.id}/force-link-domain`, { domain: attachDom.toLowerCase().trim(), account: forceAcct });
+      setAttachMsg('✓ ' + r.data.message);
+      setAttaching(null); load();
+    } catch (e) { setAttachMsg(e?.response?.data?.error || 'Could not force link.'); }
+    finally { setAttachBusy(false); }
+  };
 
   const openAttach = (c) => {
     setAttaching(c);
@@ -1963,23 +1974,47 @@ const AdminCustomersSection = () => {
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>
                   Found on the {lookup.account === 'usa' ? 'USA' : 'Pakistan'} account ({lookup.account.toUpperCase()}) ✓
                 </div>
-                <div style={{ fontSize: 13, color: '#374151' }}>Subscriptions that will be attached:</div>
-                <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 13 }}>
-                  {lookup.subscriptions.map((s, i) => (
-                    <li key={i}>{s.skuName} — {s.planName || '—'} · {s.seats ?? '?'} seats · <span style={{ color: s.status === 'ACTIVE' ? '#166534' : '#b45309' }}>{s.status}</span></li>
-                  ))}
-                </ul>
+                {lookup.subscriptions && lookup.subscriptions.length > 0 ? (
+                  <>
+                    <div style={{ fontSize: 13, color: '#374151' }}>Subscriptions that will be attached:</div>
+                    <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 13 }}>
+                      {lookup.subscriptions.map((s, i) => (
+                        <li key={i}>{s.skuName} — {s.planName || '—'} · {s.seats ?? '?'} seats · <span style={{ color: s.status === 'ACTIVE' ? '#166534' : '#b45309' }}>{s.status}</span></li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 13, color: '#6b7280' }}>{lookup.note || 'Customer found. No subscriptions listed.'}</div>
+                )}
+              </div>
+            )}
+
+            {lookup && !lookup.found && lookup.diagnostics && lookup.diagnostics.length > 0 && (
+              <div style={{ background: '#fff7ed', borderRadius: 10, padding: 12, marginBottom: 12, fontSize: 12, color: '#9a3412' }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Why it wasn't found:</div>
+                <ul style={{ margin: 0, paddingLeft: 16 }}>{lookup.diagnostics.map((d, i) => <li key={i}>{d}</li>)}</ul>
               </div>
             )}
 
             {attachMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: attachMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: attachMsg.startsWith('✓') ? '#166534' : '#b42318', fontSize: 14 }}>{attachMsg}</div>}
 
-            <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button onClick={confirmAttach} disabled={attachBusy || !lookup?.found} className="btn btn-primary">
                 {attachBusy ? 'Attaching…' : 'Attach to this customer'}
               </button>
               <button onClick={() => setAttaching(null)} disabled={attachBusy} className="btn btn-secondary">Cancel</button>
             </div>
+            {lookup && !lookup.found && (
+              <div style={{ marginTop: 12, borderTop: '1px solid #eee', paddingTop: 12 }}>
+                <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 8px' }}>Manage this domain manually (not in your reseller console)? Link it anyway:</p>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select value={forceAcct} onChange={e => setForceAcct(e.target.value)} style={{ height: 36, borderRadius: 6, border: '1px solid #d8dbe6', fontSize: 13 }}>
+                    <option value="pk">Pakistan</option><option value="usa">USA</option>
+                  </select>
+                  <button onClick={forceLink} disabled={attachBusy} className="btn btn-secondary" style={{ fontSize: 13 }}>Force link to {forceAcct.toUpperCase()}</button>
+                </div>
+              </div>
+            )}
             <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 10, marginBottom: 0 }}>The account (Pakistan/USA) is detected automatically from where the subscription lives.</p>
           </div>
         </div>
