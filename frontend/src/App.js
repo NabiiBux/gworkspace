@@ -216,6 +216,8 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
   useEffect(() => {
     if (adminMode) return; // Google sign-in is for customers
     if (!GOOGLE_SIGNIN_CLIENT_ID) return; // not configured
+    let cancelled = false;
+    let tries = 0;
     const handleCredential = async (response) => {
       setError(''); setLoading(true);
       try {
@@ -225,21 +227,36 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
       finally { setLoading(false); }
     };
     const render = () => {
-      if (!window.google?.accounts?.id || !googleBtnRef.current) return;
-      window.google.accounts.id.initialize({ client_id: GOOGLE_SIGNIN_CLIENT_ID, callback: handleCredential });
-      googleBtnRef.current.innerHTML = '';
-      window.google.accounts.id.renderButton(googleBtnRef.current, { theme: 'outline', size: 'large', width: 376, text: activeTab === 'register' ? 'signup_with' : 'signin_with' });
+      if (cancelled) return;
+      // Wait for BOTH the GIS library and the target div to exist; retry up to ~3s.
+      if (!window.google?.accounts?.id || !googleBtnRef.current) {
+        if (tries++ < 30) setTimeout(render, 100);
+        return;
+      }
+      try {
+        window.google.accounts.id.initialize({ client_id: GOOGLE_SIGNIN_CLIENT_ID, callback: handleCredential });
+        googleBtnRef.current.innerHTML = '';
+        const w = Math.min(376, googleBtnRef.current.offsetWidth || 360);
+        window.google.accounts.id.renderButton(googleBtnRef.current, { theme: 'outline', size: 'large', width: w, text: activeTab === 'register' ? 'signup_with' : 'signin_with' });
+      } catch (e) { console.error('Google button render error:', e); }
     };
-    if (window.google?.accounts?.id) { render(); return; }
+    if (window.google?.accounts?.id) { render(); return () => { cancelled = true; }; }
     const existing = document.getElementById('google-gsi-script');
-    if (existing) { existing.addEventListener('load', render); return () => existing.removeEventListener('load', render); }
+    if (existing) {
+      existing.addEventListener('load', render);
+      // It may already be loaded; kick off a render attempt too.
+      render();
+      return () => { cancelled = true; existing.removeEventListener('load', render); };
+    }
     const s = document.createElement('script');
     s.id = 'google-gsi-script';
     s.src = 'https://accounts.google.com/gsi/client';
     s.async = true; s.defer = true;
     s.onload = render;
     document.body.appendChild(s);
+    return () => { cancelled = true; };
   }, [activeTab, adminMode]);
+
 
   // Login Form
   const [loginForm, setLoginForm] = useState({
@@ -4375,6 +4392,14 @@ const CustomerSubscriptions = () => {
 
   if (loading) return <div className="loading">Loading your subscriptions…</div>;
 
+  const renew = async (s) => {
+    try {
+      const r = await axios.post(`${API_URL}/customer/subscriptions/renew`, { skuId: s.skuId, domain: s.domain });
+      if (r.data.checkoutUrl) window.location.href = r.data.checkoutUrl;
+      else alert('Could not start renewal.');
+    } catch (e) { alert(e?.response?.data?.error || 'Could not start renewal.'); }
+  };
+
   const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString() : '—';
   const fmtD = (d) => d ? new Date(d).toLocaleDateString() : '—';
   const hasSubs = data?.subscriptions && data.subscriptions.length > 0;
@@ -4394,18 +4419,33 @@ const CustomerSubscriptions = () => {
         </div>
       ) : (
         <table className="data-table" style={{ marginBottom: 24 }}>
-          <thead><tr><th>Product</th><th>Plan</th><th>Seats</th><th>Status</th><th>Started</th><th>Renews</th></tr></thead>
+          <thead><tr><th>Product</th><th>Plan</th><th>Seats</th><th>Status</th><th>Started</th><th>Renews</th><th></th></tr></thead>
           <tbody>
-            {data.subscriptions.map((s, i) => (
-              <tr key={i}>
-                <td>{s.skuName}</td>
-                <td>{s.planName || '—'}</td>
-                <td>{s.seats ?? '—'}</td>
-                <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
-                <td>{fmtDate(s.creationTime)}</td>
-                <td>{fmtDate(s.renewalDate)}</td>
-              </tr>
-            ))}
+            {data.subscriptions.map((s, i) => {
+              const d = s.daysUntilRenewal;
+              const soon = d !== null && d !== undefined && d <= 7;
+              const overdue = d !== null && d !== undefined && d < 0;
+              return (
+                <tr key={i}>
+                  <td>{s.skuName}</td>
+                  <td>{s.planName || '—'}</td>
+                  <td>{s.seats ?? '—'}</td>
+                  <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
+                  <td>{fmtDate(s.creationTime)}</td>
+                  <td>
+                    <span style={{ fontWeight: 600, color: overdue ? '#b42318' : soon ? '#b45309' : '#111827' }}>{fmtDate(s.renewalDate)}</span>
+                    {d !== null && d !== undefined && (
+                      <div style={{ fontSize: 12, color: overdue ? '#b42318' : soon ? '#b45309' : '#6b7280' }}>
+                        {overdue ? `${Math.abs(d)} day${Math.abs(d) === 1 ? '' : 's'} overdue` : d === 0 ? 'Due today' : `in ${d} day${d === 1 ? '' : 's'}`}
+                      </div>
+                    )}
+                  </td>
+                  <td>
+                    <button className="btn btn-primary" style={{ fontSize: 12, padding: '5px 14px' }} onClick={() => renew(s)}>Renew</button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

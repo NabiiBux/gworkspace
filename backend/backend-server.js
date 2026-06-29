@@ -221,6 +221,8 @@ const PaymentSchema = new mongoose.Schema({
   addonSku: String,          // for addon orders: the SKU to provision
   addonAccount: String,      // which reseller account the addon bills to ('pk'/'usa')
   addonName: String,
+  isRenewal: { type: Boolean, default: false },  // true = Workspace renewal payment
+  renewalSkuId: String,      // which subscription SKU is being renewed
   currency: { type: String, default: 'USD' },
   method: { type: String, enum: ['stripe', 'nicky'], default: 'stripe' },
   status: { type: String, enum: ['pending', 'paid', 'failed', 'cancelled'], default: 'pending' },
@@ -1221,19 +1223,37 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
     // Remember the account we found it on (so future loads are faster + billing is correct).
     if (foundAccount && me.account !== foundAccount) { try { me.account = foundAccount; if (!me.domain) me.domain = domain; await me.save(); } catch (_) { } }
 
+    const nowD = new Date();
     const rows = subs.map((s) => {
       const created = s.creationTime ? Number(s.creationTime) : null;
-      // Renewal date = next occurrence of the purchase day-of-month (monthly anchor).
-      const renewal = created ? nextMonthlyRenewal(new Date(created), new Date()) : null;
+
+      // Determine the most accurate renewal date Google gives us:
+      // 1) For ANNUAL plans, plan.commitmentInterval.endTime is the renewal date.
+      // 2) Otherwise (FLEXIBLE/monthly), use the monthly anchor from creationTime.
+      let renewalMs = null;
+      const commitEnd = s.plan?.commitmentInterval?.endTime;
+      if (commitEnd) {
+        renewalMs = Number(commitEnd);
+      } else if (created) {
+        const r = nextMonthlyRenewal(new Date(created), nowD);
+        renewalMs = r ? r.getTime() : null;
+      }
+
+      // Days until renewal (for the "renew soon" highlight in the UI).
+      const daysUntil = renewalMs ? Math.ceil((renewalMs - nowD.getTime()) / 86400000) : null;
+
       return {
         domain: s.customerDomain || domain,
         skuId: s.skuId,
-        skuName: s.skuName || s.skuId,
+        skuName: s.skuName || skuName(s.skuId) || s.skuId,
         planName: s.plan?.planName,
         seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
         status: s.status,
         creationTime: created,
-        renewalDate: renewal ? renewal.getTime() : null,
+        renewalDate: renewalMs,
+        daysUntilRenewal: daysUntil,
+        billingMethod: s.billingMethod || null,
+        subscriptionId: s.subscriptionId || null,
       };
     });
     res.json({ subscriptions: rows, domain, account: foundAccount });
@@ -1445,6 +1465,76 @@ app.post('/api/customer/domains/:domain/resend-verification', authenticateCustom
     if (r.ok) return res.json({ success: true, message: 'Verification email re-sent. Please check the registrant inbox and click the link.' });
     // API resend unsupported — guide the customer to the reliable path.
     return res.json({ success: true, message: 'We\'ve emailed you verification instructions. Tip: updating your contact details (Verification tab) re-triggers Namecheap\'s verification email automatically.' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: renew a Google Workspace subscription (pay the monthly amount; rolls billing forward).
+app.post('/api/customer/subscriptions/renew', authenticateCustomer, async (req, res) => {
+  try {
+    const { skuId, domain, method } = req.body;
+    const me = await Customer.findById(req.customerId);
+    const dom = (domain || me.domain || '').toLowerCase().trim();
+    if (!dom) return res.status(400).json({ error: 'No domain on your account.' });
+    if (!skuId) return res.status(400).json({ error: 'Missing subscription.' });
+
+    const plan = await Plan.findOne({ skuId: String(skuId) });
+    if (!plan || !plan.monthlyPrice) return res.status(400).json({ error: 'Could not determine the price for this subscription. Please contact support.' });
+
+    const account = me.account || 'pk';
+    let seats = 1;
+    try {
+      const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+      const reseller = google.reseller({ version: 'v1', auth });
+      const resp = await reseller.subscriptions.list({ customerId: dom });
+      const sub = (resp.data.subscriptions || []).find((s) => String(s.skuId) === String(skuId));
+      if (sub) seats = sub.seats?.numberOfSeats ?? sub.seats?.licensedNumberOfSeats ?? 1;
+    } catch (_) { }
+
+    const subtotal = Number(plan.monthlyPrice) * seats;
+    const taxed = await applyTaxAndFee(subtotal);
+    const amount = taxed.total;
+    const orderNumber = `RN-${Date.now()}`;
+    const payment = await Payment.create({
+      customerId: me._id, customerEmail: me.businessEmail, domain: dom,
+      orderType: 'workspace', amount, subtotal: taxed.subtotal, tax: taxed.tax, fee: taxed.fee, currency: 'USD',
+      method: method === 'nicky' ? 'nicky' : 'stripe', status: 'pending',
+      isRenewal: true, renewalSkuId: String(skuId),
+    });
+
+    const orderDesc = `Renewal: ${skuName(skuId)} for ${dom} (${seats} seat${seats === 1 ? '' : 's'})`;
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
+
+    if (payment.method === 'stripe') {
+      let stripe; try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const sd = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (sd?.stripeMode || 'test') !== 'live'; await payment.save();
+      const line_items = [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(taxed.subtotal * 100) }, quantity: 1 }];
+      if (taxed.fee > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) }, quantity: 1 });
+      if (taxed.tax > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) }, quantity: 1 });
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment', line_items, success_url: successUrl, cancel_url: cancelUrl,
+        client_reference_id: String(payment._id), metadata: { paymentId: String(payment._id), orderType: 'workspace', renewal: 'true' },
+      });
+      payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
+      return res.json({ checkoutUrl: session.url, paymentId: payment._id });
+    }
+
+    try {
+      const nicky = await createNickyPayment({
+        amount, currency: 'USD', description: orderDesc, orderNumber,
+        reference: String(payment._id), billDescription: orderDesc,
+        customerEmail: me.businessEmail, customerName: me.firstName ? `${me.firstName} ${me.lastName || ''}`.trim() : me.businessEmail,
+        redirectUrl: successUrl, cancelUrl,
+      });
+      payment.checkoutUrl = nicky.url; payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id); payment.providerShortId = nicky.shortId || null;
+      await payment.save();
+      return res.json({ checkoutUrl: nicky.url, paymentId: payment._id });
+    } catch (e) {
+      return res.status(500).json({ error: 'Crypto checkout not available: ' + e.message });
+    }
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -2358,6 +2448,50 @@ async function markPaidAndProvision(payment) {
         const dOrder = await DomainOrder.findById(payment.orderId);
         if (dOrder) { dOrder.status = 'failed'; dOrder.registrationResult = e.message; await dOrder.save(); }
       } catch (_) { }
+    }
+    return;
+  }
+
+  // RENEWAL payment (Workspace subscription renewal — no WorkspaceOrder attached).
+  // Roll the billing record forward and make sure it's active in Google. Never suspends.
+  if (payment.isRenewal && payment.renewalSkuId) {
+    try {
+      if (payment.isTest) { console.log('TEST PAYMENT — workspace renewal not applied for', payment.domain); return; }
+      const dom = (payment.domain || '').toLowerCase();
+      const me = await Customer.findById(payment.customerId);
+      const account = me?.account || 'pk';
+      const now = new Date();
+
+      // Update/seed the billing record so the renewal date moves forward.
+      let rec = await SubBilling.findOne({ domain: dom, skuId: payment.renewalSkuId });
+      if (!rec) rec = new SubBilling({ domain: dom, skuId: payment.renewalSkuId, account, purchaseDate: now });
+      rec.lastPaymentDate = now;
+      rec.nextBillingDate = recalcNextBilling(rec, now);
+      rec.billingStatus = 'active';
+      rec.warnedAt = null;
+      await rec.save();
+
+      // If Google had it suspended, reactivate it.
+      try {
+        const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+        const reseller = google.reseller({ version: 'v1', auth });
+        const resp = await reseller.subscriptions.list({ customerId: dom });
+        const sub = (resp.data.subscriptions || []).find((s) => String(s.skuId) === String(payment.renewalSkuId));
+        if (sub && sub.status === 'SUSPENDED' && rec.subscriptionId) {
+          await setSubscriptionState(account, dom, payment.renewalSkuId, 'activate', rec.subscriptionId);
+          console.log('RENEWAL reactivated suspended sub:', dom, payment.renewalSkuId);
+        }
+      } catch (_) { }
+
+      console.log('WORKSPACE RENEWAL applied:', dom, payment.renewalSkuId, '→ next', rec.nextBillingDate);
+      try {
+        const html = emailShell('Subscription renewed', `
+          <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+          <p>Thanks — your Google Workspace subscription for <strong>${dom}</strong> has been renewed. Your next renewal date is <strong>${rec.nextBillingDate ? new Date(rec.nextBillingDate).toLocaleDateString() : 'updated'}</strong>.</p>`);
+        await sendEmail(me?.businessEmail, `Subscription renewed: ${dom}`, html);
+      } catch (_) { }
+    } catch (e) {
+      console.error('WORKSPACE RENEWAL FAILED for payment', String(payment._id), e.message);
     }
     return;
   }
