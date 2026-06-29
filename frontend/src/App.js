@@ -10,6 +10,7 @@ import './App.css';
 // API Config
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 const MAPS_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '';
+const GOOGLE_SIGNIN_CLIENT_ID = process.env.REACT_APP_GOOGLE_SIGNIN_CLIENT_ID || '';
 
 // ====== EDIT THIS: allowed countries for the address autocomplete ======
 // Use lowercase 2-letter country codes. Examples:
@@ -209,6 +210,36 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
   const [error, setError] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [showPwReg, setShowPwReg] = useState(false);
+  const googleBtnRef = useRef(null);
+
+  // Google Identity Services: load the script and render the sign-in button.
+  useEffect(() => {
+    if (adminMode) return; // Google sign-in is for customers
+    if (!GOOGLE_SIGNIN_CLIENT_ID) return; // not configured
+    const handleCredential = async (response) => {
+      setError(''); setLoading(true);
+      try {
+        const r = await axios.post(`${API_URL}/auth/google`, { credential: response.credential });
+        login(r.data.customer.businessEmail, r.data.token, r.data.customer);
+      } catch (e) { setError(e?.response?.data?.error || 'Google sign-in failed.'); }
+      finally { setLoading(false); }
+    };
+    const render = () => {
+      if (!window.google?.accounts?.id || !googleBtnRef.current) return;
+      window.google.accounts.id.initialize({ client_id: GOOGLE_SIGNIN_CLIENT_ID, callback: handleCredential });
+      googleBtnRef.current.innerHTML = '';
+      window.google.accounts.id.renderButton(googleBtnRef.current, { theme: 'outline', size: 'large', width: 376, text: activeTab === 'register' ? 'signup_with' : 'signin_with' });
+    };
+    if (window.google?.accounts?.id) { render(); return; }
+    const existing = document.getElementById('google-gsi-script');
+    if (existing) { existing.addEventListener('load', render); return () => existing.removeEventListener('load', render); }
+    const s = document.createElement('script');
+    s.id = 'google-gsi-script';
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true; s.defer = true;
+    s.onload = render;
+    document.body.appendChild(s);
+  }, [activeTab, adminMode]);
 
   // Login Form
   const [loginForm, setLoginForm] = useState({
@@ -279,6 +310,38 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
 
   return (
     <div className="auth-container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: 'linear-gradient(135deg,#0F766E 0%,#0b5750 45%,#0a3f3a 100%)' }}>
+      <style>{`
+        .auth-card, .auth-card * { box-sizing: border-box; }
+        .auth-card .auth-form { display: flex; flex-direction: column; gap: 14px; width: 100%; }
+        .auth-card .form-row { display: flex; gap: 12px; flex-wrap: wrap; width: 100%; }
+        .auth-card .form-row .form-group { flex: 1 1 0; min-width: 0; max-width: 100%; }
+        .auth-card .form-group { display: flex; flex-direction: column; width: 100%; min-width: 0; }
+        .auth-card .form-group label { font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #374151; }
+        .auth-card .form-group input,
+        .auth-card .form-group select,
+        .auth-card .form-group textarea {
+          width: 100%; max-width: 100%; min-width: 0; height: 42px; border-radius: 8px;
+          border: 1px solid #d8dbe6; padding: 0 12px; font-size: 14px; box-sizing: border-box;
+          display: block; appearance: none; -webkit-appearance: none;
+        }
+        .auth-card .form-group select { padding-right: 28px; text-overflow: ellipsis; }
+        .auth-card .form-group input:focus,
+        .auth-card .form-group select:focus { outline: none; border-color: #0F766E; }
+        .auth-card .btn { width: 100%; height: 44px; border-radius: 8px; font-weight: 700; cursor: pointer; border: none; }
+        .auth-card .btn-primary { background: #0F766E; color: #fff; }
+        .auth-card .btn-primary:disabled { opacity: 0.6; cursor: default; }
+        .auth-card .btn-google { width: 100%; height: 44px; border-radius: 8px; font-weight: 600; cursor: pointer;
+          border: 1px solid #d8dbe6; background: #fff; color: #374151; display: flex; align-items: center;
+          justify-content: center; gap: 10px; font-size: 14px; }
+        .auth-card .btn-google:hover { background: #f8fafc; }
+        .auth-card .auth-divider { display: flex; align-items: center; gap: 10px; color: #9ca3af; font-size: 13px; margin: 4px 0; }
+        .auth-card .auth-divider::before, .auth-card .auth-divider::after { content: ''; flex: 1; height: 1px; background: #e5e7eb; }
+        .auth-card .auth-tabs { display: flex; gap: 8px; margin: 16px 0; }
+        .auth-card .auth-tabs .tab { flex: 1; height: 40px; border-radius: 8px; border: 1px solid #d8dbe6; background: #fff; cursor: pointer; font-weight: 600; color: #6b7280; }
+        .auth-card .auth-tabs .tab.active { background: #0F766E; color: #fff; border-color: #0F766E; }
+        .auth-card .error-message { background: #fde8e8; color: #b42318; padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 8px; word-break: break-word; }
+        @media (max-width: 460px) { .auth-card .form-row { flex-direction: column; gap: 14px; } }
+      `}</style>
       <div className="auth-card" style={{ background: '#fff', borderRadius: 20, padding: '32px', width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
         <div className="auth-header" style={{ textAlign: 'center', marginBottom: 8 }}>
           {brand.logoDataUrl
@@ -309,6 +372,13 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
           <p style={{ textAlign: 'center', color: '#6b7280', fontSize: 13, margin: '8px 0 0' }}>
             Administrator login
           </p>
+        )}
+
+        {!adminMode && GOOGLE_SIGNIN_CLIENT_ID && (
+          <div style={{ marginBottom: 8 }}>
+            <div ref={googleBtnRef} style={{ display: 'flex', justifyContent: 'center', minHeight: 44 }} />
+            <div className="auth-divider">or {activeTab === 'register' ? 'sign up' : 'sign in'} with email</div>
+          </div>
         )}
 
         {error && <div className="error-message">{error}</div>}
@@ -1808,18 +1878,28 @@ const AdminCustomersSection = () => {
   const [attachBusy, setAttachBusy] = useState(false);
   const [attachMsg, setAttachMsg] = useState('');
 
-  const openAttach = (c) => { setAttaching(c); setAttachDom(c.domain || ''); setLookup(null); setAttachMsg(''); };
-  const doLookup = async () => {
-    const dom = attachDom.toLowerCase().trim();
-    if (!dom) { setAttachMsg('Enter the customer\'s domain.'); return; }
+  const openAttach = (c) => {
+    setAttaching(c);
+    // Pre-fill the domain: use their linked domain, else guess from their email address.
+    const emailDom = (c.email || '').split('@')[1] || '';
+    const guess = c.domain || emailDom || '';
+    setAttachDom(guess);
+    setLookup(null); setAttachMsg('');
+    // Auto-look up immediately if we have a domain guess.
+    if (guess) setTimeout(() => doLookupFor(guess), 100);
+  };
+  const doLookupFor = async (dom) => {
+    const d = (dom || '').toLowerCase().trim();
+    if (!d) { setAttachMsg('Enter the customer\'s domain.'); return; }
     setLookupBusy(true); setAttachMsg(''); setLookup(null);
     try {
-      const r = await axios.get(`${API_URL}/admin/lookup-domain`, { params: { domain: dom } });
+      const r = await axios.get(`${API_URL}/admin/lookup-domain`, { params: { domain: d } });
       setLookup(r.data);
-      if (!r.data.found) setAttachMsg(r.data.note || 'No subscription found for this domain.');
+      if (!r.data.found) setAttachMsg(r.data.note || 'No subscription found for this domain. Try a different domain.');
     } catch (e) { setAttachMsg(e?.response?.data?.error || 'Lookup failed.'); }
     finally { setLookupBusy(false); }
   };
+  const doLookup = () => doLookupFor(attachDom);
   const confirmAttach = async () => {
     setAttachBusy(true); setAttachMsg('');
     try {
@@ -1868,9 +1948,10 @@ const AdminCustomersSection = () => {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 1000 }} onClick={() => !attachBusy && setAttaching(null)}>
           <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 520, width: '100%' }} onClick={e => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>Attach Workspace subscription</h3>
-            <p style={{ color: '#6b7280', marginTop: 0, fontSize: 14 }}>Customer: <strong>{attaching.email}</strong></p>
+            <p style={{ color: '#374151', marginTop: 0, fontSize: 14 }}>Linking to customer: <strong>{attaching.email}</strong></p>
+            <p style={{ color: '#6b7280', marginTop: 0, fontSize: 13 }}>Enter or confirm the domain of the Google Workspace you manage for this customer. We'll find it on your reseller accounts and detect PK/USA automatically.</p>
 
-            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Customer's Workspace domain</label>
+            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Workspace domain</label>
             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
               <input value={attachDom} onChange={e => { setAttachDom(e.target.value); setLookup(null); }} placeholder="customerdomain.com"
                 style={{ flex: 1, height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }} />

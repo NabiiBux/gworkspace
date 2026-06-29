@@ -1023,6 +1023,56 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// Sign in or sign up with Google (Google Identity Services).
+// Frontend sends the Google ID token (credential); we verify it and log the customer in.
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    const { credential } = req.body;
+    if (!credential) return res.status(400).json({ error: 'Missing Google credential.' });
+    const clientId = process.env.GOOGLE_SIGNIN_CLIENT_ID || process.env.GOOGLE_OAUTH_CLIENT_ID;
+    if (!clientId) return res.status(500).json({ error: 'Google sign-in is not configured. Set GOOGLE_SIGNIN_CLIENT_ID.' });
+
+    const oauthClient = new google.auth.OAuth2(clientId);
+    let payload;
+    try {
+      const ticket = await oauthClient.verifyIdToken({ idToken: credential, audience: clientId });
+      payload = ticket.getPayload();
+    } catch (e) {
+      return res.status(401).json({ error: 'Could not verify Google sign-in. Please try again.' });
+    }
+    if (!payload || !payload.email || !payload.email_verified) {
+      return res.status(401).json({ error: 'Your Google email could not be verified.' });
+    }
+
+    const email = payload.email.toLowerCase();
+    let customer = await Customer.findOne({ businessEmail: email });
+    if (!customer) {
+      customer = await Customer.create({
+        businessEmail: email,
+        username: (payload.given_name || email.split('@')[0]),
+        firstName: payload.given_name || '',
+        lastName: payload.family_name || '',
+        companyName: payload.name || '',
+        role: 'customer',
+        password: await bcrypt.hash('google-' + Math.random().toString(36).slice(2) + Date.now(), 10),
+      });
+      const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase();
+      if (adminEmail && email === adminEmail) { customer.role = 'admin'; await customer.save(); }
+    }
+
+    const token = generateToken(customer._id, customer.businessEmail, customer.role || 'customer');
+    res.json({
+      success: true, token,
+      customer: {
+        id: customer._id, companyName: customer.companyName, username: customer.username,
+        businessEmail: customer.businessEmail, domain: customer.domain, role: customer.role || 'customer',
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // One-time admin promotion by secret (diagnoses + fixes admin role).
 // Visit: /api/admin/fix-admin?secret=YOUR_JWT_SECRET&email=admin@gnbmentor.com
 app.get('/api/admin/fix-admin', async (req, res) => {
