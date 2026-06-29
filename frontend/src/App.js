@@ -1800,18 +1800,34 @@ const AdminCustomersSection = () => {
     }
   };
 
-  // Attach domain
-  const [attaching, setAttaching] = useState(null); // customer id
+  // Attach subscription to a customer (auto-detect account from Google)
+  const [attaching, setAttaching] = useState(null); // customer object
   const [attachDom, setAttachDom] = useState('');
-  const [attachAcct, setAttachAcct] = useState('pk');
-  const [attachMsg, setAttachMsg] = useState({});
-  const saveAttach = async (id) => {
-    setAttachMsg(m => ({ ...m, [id]: '' }));
+  const [lookup, setLookup] = useState(null); // { found, account, subscriptions } | null
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [attachBusy, setAttachBusy] = useState(false);
+  const [attachMsg, setAttachMsg] = useState('');
+
+  const openAttach = (c) => { setAttaching(c); setAttachDom(c.domain || ''); setLookup(null); setAttachMsg(''); };
+  const doLookup = async () => {
+    const dom = attachDom.toLowerCase().trim();
+    if (!dom) { setAttachMsg('Enter the customer\'s domain.'); return; }
+    setLookupBusy(true); setAttachMsg(''); setLookup(null);
     try {
-      const r = await axios.post(`${API_URL}/admin/customers/${id}/attach-domain`, { domain: attachDom, account: attachAcct });
-      setAttachMsg(m => ({ ...m, [id]: '✓ Linked ' + r.data.domain + ' (' + r.data.account.toUpperCase() + ')' + (r.data.note ? ' — ' + r.data.note : '') }));
-      setAttaching(null); setAttachDom(''); load();
-    } catch (e) { setAttachMsg(m => ({ ...m, [id]: e?.response?.data?.error || 'Could not attach.' })); }
+      const r = await axios.get(`${API_URL}/admin/lookup-domain`, { params: { domain: dom } });
+      setLookup(r.data);
+      if (!r.data.found) setAttachMsg(r.data.note || 'No subscription found for this domain.');
+    } catch (e) { setAttachMsg(e?.response?.data?.error || 'Lookup failed.'); }
+    finally { setLookupBusy(false); }
+  };
+  const confirmAttach = async () => {
+    setAttachBusy(true); setAttachMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/admin/customers/${attaching.id}/attach-domain`, { domain: attachDom.toLowerCase().trim() });
+      setAttachMsg('✓ ' + r.data.message);
+      setAttaching(null); load();
+    } catch (e) { setAttachMsg(e?.response?.data?.error || 'Could not attach.'); }
+    finally { setAttachBusy(false); }
   };
 
   if (loading) return <div className="loading">Loading customers…</div>;
@@ -1836,24 +1852,55 @@ const AdminCustomersSection = () => {
                   <td>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => resetPassword(c.id)}>Reset pwd</button>
-                      <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => { setAttaching(attaching === c.id ? null : c.id); setAttachDom(c.domain || ''); setAttachAcct(c.account || 'pk'); }}>Attach domain</button>
+                      <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openAttach(c)}>Attach subscription</button>
                     </div>
-                    {attaching === c.id && (
-                      <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                        <input value={attachDom} onChange={e => setAttachDom(e.target.value)} placeholder="domain.com" style={{ height: 32, borderRadius: 6, border: '1px solid #d8dbe6', padding: '0 8px', fontSize: 13 }} />
-                        <select value={attachAcct} onChange={e => setAttachAcct(e.target.value)} style={{ height: 32, borderRadius: 6, border: '1px solid #d8dbe6', fontSize: 13 }}>
-                          <option value="pk">Pakistan</option><option value="usa">USA</option>
-                        </select>
-                        <button className="btn btn-primary" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => saveAttach(c.id)}>Save</button>
-                      </div>
-                    )}
                     {resetMsg[c.id] && <div style={{ fontSize: 12, color: '#166534', marginTop: 4 }}>{resetMsg[c.id]}</div>}
-                    {attachMsg[c.id] && <div style={{ fontSize: 12, color: attachMsg[c.id].startsWith('✓') ? '#166534' : '#b42318', marginTop: 4 }}>{attachMsg[c.id]}</div>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Attach subscription modal */}
+      {attaching && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 1000 }} onClick={() => !attachBusy && setAttaching(null)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 520, width: '100%' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Attach Workspace subscription</h3>
+            <p style={{ color: '#6b7280', marginTop: 0, fontSize: 14 }}>Customer: <strong>{attaching.email}</strong></p>
+
+            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Customer's Workspace domain</label>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <input value={attachDom} onChange={e => { setAttachDom(e.target.value); setLookup(null); }} placeholder="customerdomain.com"
+                style={{ flex: 1, height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }} />
+              <button onClick={doLookup} disabled={lookupBusy} className="btn btn-secondary">{lookupBusy ? 'Looking…' : 'Look up'}</button>
+            </div>
+
+            {lookup?.found && (
+              <div style={{ background: '#f0f7f5', borderRadius: 10, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                  Found on the {lookup.account === 'usa' ? 'USA' : 'Pakistan'} account ({lookup.account.toUpperCase()}) ✓
+                </div>
+                <div style={{ fontSize: 13, color: '#374151' }}>Subscriptions that will be attached:</div>
+                <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 13 }}>
+                  {lookup.subscriptions.map((s, i) => (
+                    <li key={i}>{s.skuName} — {s.planName || '—'} · {s.seats ?? '?'} seats · <span style={{ color: s.status === 'ACTIVE' ? '#166534' : '#b45309' }}>{s.status}</span></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {attachMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: attachMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: attachMsg.startsWith('✓') ? '#166534' : '#b42318', fontSize: 14 }}>{attachMsg}</div>}
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={confirmAttach} disabled={attachBusy || !lookup?.found} className="btn btn-primary">
+                {attachBusy ? 'Attaching…' : 'Attach to this customer'}
+              </button>
+              <button onClick={() => setAttaching(null)} disabled={attachBusy} className="btn btn-secondary">Cancel</button>
+            </div>
+            <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 10, marginBottom: 0 }}>The account (Pakistan/USA) is detected automatically from where the subscription lives.</p>
+          </div>
         </div>
       )}
     </div>

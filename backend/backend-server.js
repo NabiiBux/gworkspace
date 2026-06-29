@@ -1624,29 +1624,73 @@ app.get('/api/admin/customers', authenticateCustomer, requireAdmin, async (req, 
   }
 });
 
-// Admin: attach (link) a domain + account to an existing customer.
+// Admin: look up a domain's Google Workspace subscriptions across BOTH accounts.
+// Used by the "attach subscription" UI so the account auto-selects.
+app.get('/api/admin/lookup-domain', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const dom = (req.query.domain || '').toLowerCase().trim();
+    if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) return res.status(400).json({ error: 'Enter a valid domain like example.com' });
+
+    for (const account of ['pk', 'usa']) {
+      let auth;
+      try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
+      const reseller = google.reseller({ version: 'v1', auth });
+      try {
+        const resp = await reseller.subscriptions.list({ customerId: dom });
+        const subs = resp.data.subscriptions || [];
+        if (subs.length > 0) {
+          return res.json({
+            found: true,
+            account,
+            domain: dom,
+            subscriptions: subs.map((s) => ({
+              skuId: String(s.skuId),
+              skuName: skuName(s.skuId),
+              planName: s.plan?.planName,
+              seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
+              status: s.status,
+            })),
+          });
+        }
+      } catch (_) { /* not on this account */ }
+    }
+    res.json({ found: false, domain: dom, note: 'No Google Workspace subscription found for this domain on either account.' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: attach (link) a domain to an existing customer. Account auto-detected from Google.
 app.post('/api/admin/customers/:id/attach-domain', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
-    const { domain, account } = req.body;
+    const { domain } = req.body;
     const dom = (domain || '').toLowerCase().trim();
     if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) return res.status(400).json({ error: 'Enter a valid domain like example.com' });
-    const acct = account === 'usa' ? 'usa' : 'pk';
     const cust = await Customer.findById(req.params.id);
     if (!cust) return res.status(404).json({ error: 'Customer not found.' });
 
-    // Optional: verify the domain exists on that reseller account (warn but don't block).
-    let foundOnGoogle = false, googleNote = '';
-    try {
-      const auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth();
+    // Auto-detect which account the domain's Workspace subscription lives on.
+    let account = null, subCount = 0;
+    for (const acct of ['pk', 'usa']) {
+      let auth;
+      try { auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
       const reseller = google.reseller({ version: 'v1', auth });
-      await reseller.customers.get({ customerId: dom });
-      foundOnGoogle = true;
-    } catch (e) { googleNote = 'Note: this domain was not found on the ' + acct.toUpperCase() + ' reseller account yet.'; }
+      try {
+        const resp = await reseller.subscriptions.list({ customerId: dom });
+        const subs = resp.data.subscriptions || [];
+        if (subs.length > 0) { account = acct; subCount = subs.length; break; }
+      } catch (_) { }
+    }
+    if (!account) {
+      return res.status(400).json({ error: 'No Google Workspace subscription found for ' + dom + ' on either account. Check the domain.' });
+    }
 
     cust.domain = dom;
-    cust.account = acct;
+    cust.account = account;
     await cust.save();
-    res.json({ success: true, domain: dom, account: acct, foundOnGoogle, note: googleNote });
+    // Seed billing for the attached subscriptions so they're tracked.
+    try { await syncSubscriptionsForBilling(account); } catch (_) { }
+    res.json({ success: true, domain: dom, account, subscriptions: subCount, message: `Attached ${dom} (${subCount} subscription${subCount === 1 ? '' : 's'}) on the ${account.toUpperCase()} account.` });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
