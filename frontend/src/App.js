@@ -4401,8 +4401,12 @@ const CustomerSubscriptions = () => {
     try {
       const r = await axios.post(`${API_URL}/customer/subscriptions/renew`, { skuId: renewing.skuId, domain: renewing.domain, method });
       if (r.data.checkoutUrl) window.location.href = r.data.checkoutUrl;
-      else setRenewMsg('Could not start renewal.');
-    } catch (e) { setRenewMsg(e?.response?.data?.error || 'Could not start renewal.'); }
+      else setRenewMsg('No checkout URL returned. Response: ' + JSON.stringify(r.data));
+    } catch (e) {
+      const status = e?.response?.status;
+      const serverMsg = e?.response?.data?.error || e?.response?.data?.message;
+      setRenewMsg(serverMsg ? serverMsg : (status ? `Renewal failed (HTTP ${status}). ${status === 404 ? 'The renewal feature may not be deployed yet.' : ''}` : 'Network error: ' + e.message));
+    }
     finally { setRenewBusy(false); }
   };
 
