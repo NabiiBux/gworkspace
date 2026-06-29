@@ -4369,6 +4369,9 @@ const CustomerSubscriptions = () => {
   const [domains, setDomains] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [renewing, setRenewing] = useState(null);
+  const [renewBusy, setRenewBusy] = useState(false);
+  const [renewMsg, setRenewMsg] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -4392,12 +4395,15 @@ const CustomerSubscriptions = () => {
 
   if (loading) return <div className="loading">Loading your subscriptions…</div>;
 
-  const renew = async (s) => {
+  const renew = (s) => { setRenewing(s); setRenewMsg(''); };
+  const doRenew = async (method) => {
+    setRenewBusy(true); setRenewMsg('');
     try {
-      const r = await axios.post(`${API_URL}/customer/subscriptions/renew`, { skuId: s.skuId, domain: s.domain });
+      const r = await axios.post(`${API_URL}/customer/subscriptions/renew`, { skuId: renewing.skuId, domain: renewing.domain, method });
       if (r.data.checkoutUrl) window.location.href = r.data.checkoutUrl;
-      else alert('Could not start renewal.');
-    } catch (e) { alert(e?.response?.data?.error || 'Could not start renewal.'); }
+      else setRenewMsg('Could not start renewal.');
+    } catch (e) { setRenewMsg(e?.response?.data?.error || 'Could not start renewal.'); }
+    finally { setRenewBusy(false); }
   };
 
   const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString() : '—';
@@ -4472,11 +4478,26 @@ const CustomerSubscriptions = () => {
           </tbody>
         </table>
       )}
+
+      {/* Renewal modal */}
+      {renewing && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 1000 }} onClick={() => !renewBusy && setRenewing(null)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 420, width: '100%' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Renew {renewing.skuName}</h3>
+            <p style={{ color: '#6b7280', marginTop: 0, fontSize: 14 }}>Domain: <strong>{renewing.domain}</strong> · {renewing.seats ?? '?'} seat{renewing.seats === 1 ? '' : 's'}</p>
+            <p style={{ color: '#374151', fontSize: 14 }}>Renewing keeps your subscription active and moves your next renewal date forward by one month. Choose how to pay:</p>
+            {renewMsg && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{renewMsg}</div>}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button onClick={() => doRenew('stripe')} disabled={renewBusy} style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{renewBusy ? '…' : '💳 Pay by card'}</button>
+              <button onClick={() => doRenew('nicky')} disabled={renewBusy} style={{ background: '#fff', color: '#0F766E', border: '1px solid #0F766E', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{renewBusy ? '…' : '🪙 Pay with crypto'}</button>
+              <button onClick={() => setRenewing(null)} disabled={renewBusy} style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-
-// Customer: Google Voice info + guidance (number assignment happens in their Admin console)
 // ==================== CUSTOMER: SSL ====================
 const CustomerSsl = () => {
   const [products, setProducts] = useState([]);

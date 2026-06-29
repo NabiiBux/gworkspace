@@ -1479,8 +1479,19 @@ app.post('/api/customer/subscriptions/renew', authenticateCustomer, async (req, 
     if (!dom) return res.status(400).json({ error: 'No domain on your account.' });
     if (!skuId) return res.status(400).json({ error: 'Missing subscription.' });
 
-    const plan = await Plan.findOne({ skuId: String(skuId) });
-    if (!plan || !plan.monthlyPrice) return res.status(400).json({ error: 'Could not determine the price for this subscription. Please contact support.' });
+    // Find the plan/price for this SKU. Try exact SKU match, then by category, then any matching name.
+    let plan = await Plan.findOne({ skuId: String(skuId) });
+    if (!plan || !plan.monthlyPrice) {
+      // Fallback: some attached/managed subs may not have an exact Plan row.
+      // Try to find ANY active workspace plan as a price reference, or use the catalog.
+      const meta = SKU_CATALOG[String(skuId)];
+      if (meta) {
+        plan = await Plan.findOne({ name: new RegExp(meta.name, 'i'), monthlyPrice: { $gt: 0 } });
+      }
+    }
+    if (!plan || !plan.monthlyPrice) {
+      return res.status(400).json({ error: 'This subscription doesn\'t have a price set up for renewal yet. Please ask support to add a price for it, or contact us to renew.' });
+    }
 
     const account = me.account || 'pk';
     let seats = 1;
