@@ -1292,7 +1292,7 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
 
     const nowD = new Date();
     // Pull our billing records for this domain to show the FIXED next_billing_date + cycle status.
-    const billingRecs = await SubBilling.find({ domain: dom });
+    const billingRecs = await SubBilling.find({ domain: domain });
     const billingBySku = {};
     billingRecs.forEach((b) => { billingBySku[String(b.skuId)] = b; });
 
