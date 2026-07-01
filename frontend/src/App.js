@@ -4463,7 +4463,7 @@ const CustomerSubscriptions = () => {
                   <td>{isPrimary ? <span style={{ fontSize: 12, background: '#e0f2f1', color: '#0F766E', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>Primary</span> : <span style={{ fontSize: 12, background: '#f3f4f6', color: '#6b7280', padding: '2px 8px', borderRadius: 99 }}>Add-on</span>}</td>
                   <td>
                     <div style={{ fontWeight: 600 }}>{s.seats ?? '—'}</div>
-                    {isPrimary && s.status === 'ACTIVE' && (
+                    {s.status === 'ACTIVE' && (
                       <div style={{ marginTop: 6 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <button onClick={() => setSeatDraft(d => ({ ...d, [s.skuId]: Math.max((s.seats || 1) + 1, (d[s.skuId] ?? (s.seats || 1) + 1) - 1) }))}
@@ -4475,7 +4475,7 @@ const CustomerSubscriptions = () => {
                         <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>new total users</div>
                         <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 10px', marginTop: 4 }}
                           onClick={() => openSeats(s, seatDraft[s.skuId] ?? (s.seats || 1) + 1)}>
-                          Add & checkout
+                          Add &amp; checkout
                         </button>
                       </div>
                     )}
