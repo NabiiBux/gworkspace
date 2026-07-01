@@ -1115,7 +1115,9 @@ app.post('/api/auth/google', async (req, res) => {
 
     const email = payload.email.toLowerCase();
     let customer = await Customer.findOne({ businessEmail: email });
+    let isNewUser = false;
     if (!customer) {
+      isNewUser = true;
       customer = await Customer.create({
         businessEmail: email,
         username: (payload.given_name || email.split('@')[0]),
@@ -1127,6 +1129,12 @@ app.post('/api/auth/google', async (req, res) => {
       });
       const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase();
       if (adminEmail && email === adminEmail) { customer.role = 'admin'; await customer.save(); }
+    }
+
+    // Send the welcome email to brand-new Google sign-up users (same as email registration).
+    if (isNewUser) {
+      try { await sendWelcomeEmail(customer.businessEmail, customer.firstName || customer.username); }
+      catch (e) { console.error('Welcome email (google signup) failed:', e.message); }
     }
 
     const token = generateToken(customer._id, customer.businessEmail, customer.role || 'customer');

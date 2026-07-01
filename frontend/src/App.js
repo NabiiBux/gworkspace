@@ -4374,7 +4374,8 @@ const CustomerSubscriptions = () => {
   const [renewMsg, setRenewMsg] = useState('');
   const [seatSub, setSeatSub] = useState(null);   // subscription we're adding users to
   const [seatCount, setSeatCount] = useState(1);
-  const [seatDraft, setSeatDraft] = useState({}); // per-sku draft counter in the table
+  const [seatDraft, setSeatDraft] = useState({}); // per-sku: number of users to ADD (starts at 1)
+  const [seatOpen, setSeatOpen] = useState({});   // per-sku: is the inline counter open
   const [seatBusy, setSeatBusy] = useState(false);
   const [seatMsg, setSeatMsg] = useState('');
 
@@ -4462,22 +4463,36 @@ const CustomerSubscriptions = () => {
                   <td style={{ fontWeight: 600 }}>{s.skuName}</td>
                   <td>{isPrimary ? <span style={{ fontSize: 12, background: '#e0f2f1', color: '#0F766E', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>Primary</span> : <span style={{ fontSize: 12, background: '#f3f4f6', color: '#6b7280', padding: '2px 8px', borderRadius: 99 }}>Add-on</span>}</td>
                   <td>
-                    <div style={{ fontWeight: 600 }}>{s.seats ?? '—'}</div>
-                    {s.status === 'ACTIVE' && (
-                      <div style={{ marginTop: 6 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <button onClick={() => setSeatDraft(d => ({ ...d, [s.skuId]: Math.max((s.seats || 1) + 1, (d[s.skuId] ?? (s.seats || 1) + 1) - 1) }))}
-                            style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid #d8dbe6', background: '#fff', cursor: 'pointer', lineHeight: 1 }}>−</button>
-                          <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 700 }}>{seatDraft[s.skuId] ?? (s.seats || 1) + 1}</span>
-                          <button onClick={() => setSeatDraft(d => ({ ...d, [s.skuId]: (d[s.skuId] ?? (s.seats || 1) + 1) + 1 }))}
-                            style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid #d8dbe6', background: '#fff', cursor: 'pointer', lineHeight: 1 }}>+</button>
+                    {isPrimary && s.status === 'ACTIVE' ? (
+                      seatOpen[s.skuId] ? (
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <button onClick={() => setSeatDraft(d => ({ ...d, [s.skuId]: Math.max(1, (d[s.skuId] ?? 1) - 1) }))}
+                              style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid #d8dbe6', background: '#fff', cursor: 'pointer', lineHeight: 1 }}>−</button>
+                            <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 700 }}>{seatDraft[s.skuId] ?? 1}</span>
+                            <button onClick={() => setSeatDraft(d => ({ ...d, [s.skuId]: (d[s.skuId] ?? 1) + 1 }))}
+                              style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid #d8dbe6', background: '#fff', cursor: 'pointer', lineHeight: 1 }}>+</button>
+                          </div>
+                          <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>users to add (now {s.seats ?? 1})</div>
+                          <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                            <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 10px' }}
+                              onClick={() => openSeats(s, (s.seats || 0) + (seatDraft[s.skuId] ?? 1))}>
+                              Add &amp; checkout
+                            </button>
+                            <button style={{ fontSize: 11, padding: '4px 6px', background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}
+                              onClick={() => setSeatOpen(o => ({ ...o, [s.skuId]: false }))}>Cancel</button>
+                          </div>
                         </div>
-                        <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>new total users</div>
-                        <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 10px', marginTop: 4 }}
-                          onClick={() => openSeats(s, seatDraft[s.skuId] ?? (s.seats || 1) + 1)}>
-                          Add &amp; checkout
-                        </button>
-                      </div>
+                      ) : (
+                        <span
+                          onClick={() => { setSeatOpen(o => ({ ...o, [s.skuId]: true })); setSeatDraft(d => ({ ...d, [s.skuId]: 1 })); }}
+                          style={{ fontWeight: 600, cursor: 'pointer', borderBottom: '1px dashed #0F766E', color: '#0F766E' }}
+                          title="Click to add users">
+                          {s.seats ?? '—'} ✎
+                        </span>
+                      )
+                    ) : (
+                      <span style={{ fontWeight: 600 }}>{s.seats ?? '—'}</span>
                     )}
                   </td>
                   <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
