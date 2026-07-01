@@ -344,25 +344,88 @@ const HostingOrderSchema = new mongoose.Schema({
 });
 const HostingOrder = mongoose.model('HostingOrder', HostingOrderSchema);
 
-// Tracks a 29-day billing cycle for EACH Google subscription (incl. pre-existing ones).
-// Seeded from the Google subscription creation date.
+// Fixed 29-day recurring billing cycle for EACH Google subscription.
+// CORE RULE: payments mark the current cycle paid but NEVER shift the schedule.
+// Only two events define a new cycle: (1) initial creation, (2) manual admin unsuspension.
+const BILLING_CYCLE_DAYS = 29;
 const SubBillingSchema = new mongoose.Schema({
   account: { type: String, default: 'pk' },        // 'pk' or 'usa'
   domain: { type: String, index: true },
   skuId: String,
   subscriptionId: String,
-  purchaseDate: Date,                                // Google creationTime
-  nextBillingDate: Date,                             // purchaseDate (or last payment) + 29 days
-  billingStatus: { type: String, enum: ['active', 'warned', 'suspended'], default: 'active' },
+
+  // The fixed schedule (only changed by creation or manual unsuspension):
+  billingCycleStart: Date,                          // when the current cycle started
+  nextBillingDate: Date,                            // billingCycleStart + 29 days
+  currentCycleStatus: { type: String, enum: ['paid', 'unpaid'], default: 'unpaid' },
+
+  // Audit / tracking:
   lastPaymentDate: Date,
-  warnedAt: Date,
+  lastManualUnsuspendAt: Date,
   suspendedAt: Date,
-  whitelisted: { type: Boolean, default: false },   // whitelisted = treated as renewed, never auto-suspended
+
+  billingStatus: { type: String, enum: ['active', 'warned', 'suspended'], default: 'active' },
+  warnedAt: Date,
+  whitelisted: { type: Boolean, default: false },   // whitelisted = never auto-suspended
   whitelistedAt: Date,
+
+  // Legacy field kept for backward compatibility with older records (mirrors billingCycleStart).
+  purchaseDate: Date,
+
   updatedAt: { type: Date, default: Date.now },
 });
 SubBillingSchema.index({ domain: 1, skuId: 1 }, { unique: true });
 const SubBilling = mongoose.model('SubBilling', SubBillingSchema);
+
+// ---- Billing cycle helpers (implement the fixed-schedule rules) ----
+
+// Add days to a date.
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+// Start a BRAND NEW cycle from a given moment (creation or manual unsuspension only).
+// Sets billingCycleStart = start, nextBillingDate = start + 29 days, cycle unpaid.
+function startNewBillingCycle(rec, start = new Date()) {
+  rec.billingCycleStart = new Date(start);
+  rec.purchaseDate = rec.purchaseDate || new Date(start); // keep legacy mirror on first set
+  rec.nextBillingDate = addDays(start, BILLING_CYCLE_DAYS);
+  rec.currentCycleStatus = 'unpaid';
+  rec.billingStatus = 'active';
+  rec.warnedAt = null;
+  rec.suspendedAt = null;
+  rec.updatedAt = new Date();
+  return rec;
+}
+
+// Advance the schedule to the NEXT fixed cycle WITHOUT using the payment date.
+// New start = the previous next_billing_date; new next = start + 29 days.
+// Used when a paid cycle completes (rolled by the cron on/after the due date).
+function advanceToNextCycle(rec) {
+  const prevNext = rec.nextBillingDate ? new Date(rec.nextBillingDate) : new Date();
+  rec.billingCycleStart = prevNext;
+  rec.nextBillingDate = addDays(prevNext, BILLING_CYCLE_DAYS);
+  rec.currentCycleStatus = 'unpaid';
+  rec.warnedAt = null;
+  rec.updatedAt = new Date();
+  return rec;
+}
+
+// Apply a customer PAYMENT to the CURRENT cycle. Never shifts the schedule.
+// Just marks the current cycle paid + records the payment date, and reactivates if suspended.
+function applyPaymentToCurrentCycle(rec, when = new Date()) {
+  rec.currentCycleStatus = 'paid';
+  rec.lastPaymentDate = new Date(when);
+  rec.billingStatus = 'active';   // unsuspend if it was suspended (late payment)
+  rec.warnedAt = null;
+  rec.suspendedAt = null;
+  rec.updatedAt = new Date();
+  // NOTE: billingCycleStart and nextBillingDate are intentionally UNCHANGED.
+  return rec;
+}
+
 
 // Editable email templates (admin can customize subject + body; {{vars}} are filled at send time)
 const EmailTemplateSchema = new mongoose.Schema({
@@ -1224,22 +1287,20 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
     if (foundAccount && me.account !== foundAccount) { try { me.account = foundAccount; if (!me.domain) me.domain = domain; await me.save(); } catch (_) { } }
 
     const nowD = new Date();
+    // Pull our billing records for this domain to show the FIXED next_billing_date + cycle status.
+    const billingRecs = await SubBilling.find({ domain: dom });
+    const billingBySku = {};
+    billingRecs.forEach((b) => { billingBySku[String(b.skuId)] = b; });
+
     const rows = subs.map((s) => {
       const created = s.creationTime ? Number(s.creationTime) : null;
+      const rec = billingBySku[String(s.skuId)];
 
-      // Determine the most accurate renewal date Google gives us:
-      // 1) For ANNUAL plans, plan.commitmentInterval.endTime is the renewal date.
-      // 2) Otherwise (FLEXIBLE/monthly), use the monthly anchor from creationTime.
-      let renewalMs = null;
-      const commitEnd = s.plan?.commitmentInterval?.endTime;
-      if (commitEnd) {
-        renewalMs = Number(commitEnd);
-      } else if (created) {
-        const r = nextMonthlyRenewal(new Date(created), nowD);
-        renewalMs = r ? r.getTime() : null;
-      }
+      // Renewal date comes from our FIXED billing schedule (next_billing_date), not the payment date.
+      let renewalMs = rec?.nextBillingDate ? new Date(rec.nextBillingDate).getTime() : null;
+      // Fallback for subs without a billing record yet: creation + 29 days.
+      if (!renewalMs && created) renewalMs = addDays(new Date(created), BILLING_CYCLE_DAYS).getTime();
 
-      // Days until renewal (for the "renew soon" highlight in the UI).
       const daysUntil = renewalMs ? Math.ceil((renewalMs - nowD.getTime()) / 86400000) : null;
 
       return {
@@ -1252,7 +1313,10 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
         creationTime: created,
         renewalDate: renewalMs,
         daysUntilRenewal: daysUntil,
-        billingMethod: s.billingMethod || null,
+        cycleStatus: rec?.currentCycleStatus || 'unpaid',
+        category: skuCategory(s.skuId),
+        isPrimary: isPrimarySku(s.skuId),
+        billingCycleStart: rec?.billingCycleStart ? new Date(rec.billingCycleStart).getTime() : null,
         subscriptionId: s.subscriptionId || null,
       };
     });
@@ -2297,14 +2361,13 @@ async function markPaidAndProvision(payment) {
         },
       });
       console.log(`ADDON provisioned: ${payment.addonName} (${payment.addonSku}) for ${dom} on ${account}`);
-      // Seed billing for the addon so it's tracked on its monthly anchor.
+      // Seed billing for the addon: new 29-day cycle from now, marked paid.
       try {
         const now = new Date();
-        await SubBilling.findOneAndUpdate(
-          { domain: dom, skuId: payment.addonSku },
-          { $setOnInsert: { account, purchaseDate: now, billingStatus: 'active' }, $set: { lastPaymentDate: now, nextBillingDate: nextMonthlyRenewal(now, now) } },
-          { upsert: true }
-        );
+        let rec = await SubBilling.findOne({ domain: dom, skuId: payment.addonSku });
+        if (!rec) { rec = new SubBilling({ account, domain: dom, skuId: payment.addonSku }); startNewBillingCycle(rec, now); }
+        applyPaymentToCurrentCycle(rec, now);
+        await rec.save();
       } catch (_) { }
       const me = await Customer.findById(payment.customerId);
       try {
@@ -2473,13 +2536,14 @@ async function markPaidAndProvision(payment) {
       const account = me?.account || 'pk';
       const now = new Date();
 
-      // Update/seed the billing record so the renewal date moves forward.
+      // Update/seed the billing record. RULE: mark the CURRENT cycle paid — never shift the schedule.
       let rec = await SubBilling.findOne({ domain: dom, skuId: payment.renewalSkuId });
-      if (!rec) rec = new SubBilling({ domain: dom, skuId: payment.renewalSkuId, account, purchaseDate: now });
-      rec.lastPaymentDate = now;
-      rec.nextBillingDate = recalcNextBilling(rec, now);
-      rec.billingStatus = 'active';
-      rec.warnedAt = null;
+      if (!rec) {
+        // No record yet — create one anchored to now as a fresh cycle, then mark it paid.
+        rec = new SubBilling({ domain: dom, skuId: payment.renewalSkuId, account });
+        startNewBillingCycle(rec, now);
+      }
+      applyPaymentToCurrentCycle(rec, now);
       await rec.save();
 
       // If Google had it suspended, reactivate it.
@@ -2494,12 +2558,14 @@ async function markPaidAndProvision(payment) {
         }
       } catch (_) { }
 
-      console.log('WORKSPACE RENEWAL applied:', dom, payment.renewalSkuId, '→ next', rec.nextBillingDate);
+      console.log('SUBSCRIPTION RENEWAL applied:', dom, payment.renewalSkuId, '→ next', rec.nextBillingDate);
       try {
+        const prodName = skuName(payment.renewalSkuId);
         const html = emailShell('Subscription renewed', `
           <p>Hi ${me?.firstName || me?.username || 'there'},</p>
-          <p>Thanks — your Google Workspace subscription for <strong>${dom}</strong> has been renewed. Your next renewal date is <strong>${rec.nextBillingDate ? new Date(rec.nextBillingDate).toLocaleDateString() : 'updated'}</strong>.</p>`);
-        await sendEmail(me?.businessEmail, `Subscription renewed: ${dom}`, html);
+          <p>Thanks — your <strong>${prodName}</strong> subscription for <strong>${dom}</strong> has been renewed and is active. Your next renewal date is <strong>${rec.nextBillingDate ? new Date(rec.nextBillingDate).toLocaleDateString() : 'updated'}</strong>.</p>
+          <p>Note: each subscription is billed separately. If you have other subscriptions (like Google Voice or add-ons), please make sure each one is paid to keep it active.</p>`);
+        await sendEmail(me?.businessEmail, `Subscription renewed: ${prodName} · ${dom}`, html);
       } catch (_) { }
     } catch (e) {
       console.error('WORKSPACE RENEWAL FAILED for payment', String(payment._id), e.message);
@@ -2551,29 +2617,26 @@ async function markPaidAndProvision(payment) {
           await sendPaymentConfirmationEmail(me?.businessEmail, order.organization?.domain, payment.amount);
         } catch (_) { }
 
-        // Also reset/extend the 29-day cycle for this subscription's billing record
+        // Also set/refresh the 29-day billing cycle for this subscription's billing record.
         try {
           const domain = (order.organization?.domain || '').toLowerCase();
           const planDoc = await Plan.findOne({ planId: order.plan?.id });
           if (domain && planDoc?.skuId) {
             const nowD = new Date();
-            const rec = await SubBilling.findOne({ domain, skuId: planDoc.skuId });
-            if (rec) {
-              if (rec.billingStatus === 'suspended') {
-                try { await setSubscriptionState(rec.account, domain, planDoc.skuId, 'activate'); } catch (_) { }
-              }
-              rec.lastPaymentDate = nowD;
-              rec.nextBillingDate = recalcNextBilling(rec, nowD);
-              rec.billingStatus = 'active';
-              rec.suspendedAt = null;
-              rec.warnedAt = null;
-              await rec.save();
+            let rec = await SubBilling.findOne({ domain, skuId: planDoc.skuId });
+            if (!rec) {
+              // First provisioning → brand new cycle (RULE: creation defines a cycle).
+              rec = new SubBilling({ account: order.account || 'pk', domain, skuId: planDoc.skuId, subscriptionId: order.subscriptionId });
+              startNewBillingCycle(rec, nowD);
+              applyPaymentToCurrentCycle(rec, nowD); // this first cycle is paid
             } else {
-              await SubBilling.create({
-                account: order.account || 'pk', domain, skuId: planDoc.skuId,
-                purchaseDate: nowD, lastPaymentDate: nowD, nextBillingDate: nextMonthlyRenewal(nowD, nowD), billingStatus: 'active',
-              });
+              // Existing record → this payment marks the CURRENT cycle paid (no schedule shift).
+              if (rec.billingStatus === 'suspended') {
+                try { await setSubscriptionState(rec.account, domain, planDoc.skuId, 'activate', rec.subscriptionId); } catch (_) { }
+              }
+              applyPaymentToCurrentCycle(rec, nowD);
             }
+            await rec.save();
           }
         } catch (_) { }
       }
@@ -2712,31 +2775,32 @@ async function syncSubscriptionsForBilling(account) {
     if (seen.has(key)) continue;
     seen.add(key);
 
-    // Purchase date = Google creation time (ms epoch as string). Fall back to now only if truly missing.
-    const purchaseDate = s.creationTime && !isNaN(Number(s.creationTime))
+    // Seed the FIXED cycle from the Google creation date on FIRST insert only.
+    // billing_cycle_start = creation date; next_billing_date = start + 29 days.
+    const creation = s.creationTime && !isNaN(Number(s.creationTime))
       ? new Date(Number(s.creationTime))
       : new Date();
-
-    // Renewal date = next occurrence of the purchase day-of-month (monthly anchor).
-    // Suspension happens 1 day before this date (handled in the billing check).
-    const nextBillingDate = nextMonthlyRenewal(purchaseDate, new Date());
+    const seededNext = addDays(creation, BILLING_CYCLE_DAYS);
 
     try {
-      // Atomic upsert: insert if new, AND refresh the billing date from purchase date each sync.
+      // Insert if new. DO NOT overwrite an existing record's schedule (payments/cron own it).
       const r = await SubBilling.updateOne(
         { domain, skuId },
         {
           $setOnInsert: {
-            account, purchaseDate,
+            account,
+            billingCycleStart: creation,
+            purchaseDate: creation,
+            nextBillingDate: seededNext,
+            currentCycleStatus: 'unpaid',
             billingStatus: s.status === 'SUSPENDED' ? 'suspended' : 'active',
           },
-          $set: { subscriptionId: s.subscriptionId || '', nextBillingDate, updatedAt: new Date() },
+          $set: { subscriptionId: s.subscriptionId || '', updatedAt: new Date() },
         },
         { upsert: true }
       );
       if (r.upsertedCount) seeded++;
     } catch (e) {
-      // Ignore duplicate-key races; keep going
       if (!String(e.message || '').includes('E11000')) {
         console.error('SUB BILLING SYNC error for', domain, skuId, e.message);
       }
@@ -2763,80 +2827,77 @@ async function setSubscriptionState(account, domain, skuId, action, subscription
 // The 29-day check for ALL tracked subscriptions (existing + new).
 async function runSubscriptionBillingCheck() {
   const now = new Date();
-  const results = { checked: 0, warned: [], suspended: [], skippedWhitelisted: 0 };
+  const results = { checked: 0, warned: [], suspended: [], advanced: [], skippedWhitelisted: 0 };
 
-  // Diagnostic: count ALL records and why each is or isn't eligible
   const allRecords = await SubBilling.find();
-  const diag = { totalRecords: allRecords.length, statusCounts: {}, whitelistedCount: 0, nullNextDate: 0, pastDueActive: 0 };
+  const diag = { totalRecords: allRecords.length, statusCounts: {}, whitelistedCount: 0, nullNextDate: 0, pastDueUnpaid: 0 };
   for (const x of allRecords) {
     diag.statusCounts[x.billingStatus || 'undefined'] = (diag.statusCounts[x.billingStatus || 'undefined'] || 0) + 1;
     if (x.whitelisted) diag.whitelistedCount++;
     if (!x.nextBillingDate) diag.nullNextDate++;
-    const dl = x.nextBillingDate ? (new Date(x.nextBillingDate).getTime() - now.getTime()) / 86400000 : null;
-    if (dl != null && dl <= 0 && ['active', 'warned'].includes(x.billingStatus) && !x.whitelisted) diag.pastDueActive++;
+    const due = x.nextBillingDate ? now.getTime() >= new Date(x.nextBillingDate).getTime() : false;
+    if (due && x.currentCycleStatus !== 'paid' && x.billingStatus !== 'suspended' && !x.whitelisted) diag.pastDueUnpaid++;
   }
   console.log('BILLING CHECK DIAGNOSTIC:', JSON.stringify(diag));
   results.diagnostic = diag;
 
-  // Exclude whitelisted accounts entirely — they're treated as renewed.
-  const records = await SubBilling.find({
-    billingStatus: { $in: ['active', 'warned'] },
-    nextBillingDate: { $ne: null },
-    whitelisted: { $ne: true },
-  });
-  const wlCount = await SubBilling.countDocuments({ whitelisted: true });
-  results.skippedWhitelisted = wlCount;
+  // Process every non-whitelisted record with a schedule.
+  const records = await SubBilling.find({ nextBillingDate: { $ne: null }, whitelisted: { $ne: true } });
+  results.skippedWhitelisted = await SubBilling.countDocuments({ whitelisted: true });
 
   for (const r of records) {
     results.checked++;
-    // Renewal date is stored in nextBillingDate (anchored to purchase day-of-month).
-    // Suspension happens 1 day BEFORE the renewal date.
-    const renewal = new Date(r.nextBillingDate);
-    const suspendOn = suspendDateFor(renewal);
-    const daysToSuspend = (suspendOn.getTime() - now.getTime()) / (24 * 60 * 60 * 1000);
+    const nextBilling = new Date(r.nextBillingDate);
+    const dueReached = now.getTime() >= nextBilling.getTime();
 
-    // Warn up to 4 days before the suspend date (still active, not yet warned)
-    if (daysToSuspend <= 4 && daysToSuspend > 0 && r.billingStatus === 'active') {
-      r.billingStatus = 'warned';
-      r.warnedAt = now;
-      await r.save();
-      results.warned.push(`${r.domain} (${r.skuId})`);
-      try { await sendRenewalWarningEmail(await emailForDomain(r.domain), r.domain, renewal); } catch (_) { }
+    // RULE 4/5: never touch an account manually unsuspended before its new next_billing_date.
+    if (r.lastManualUnsuspendAt && now.getTime() < nextBilling.getTime()) {
+      continue;
     }
 
-    // Suspend once we reach the suspend date (1 day before renewal) and still unpaid.
-    // Once suspended, it STAYS suspended until an admin reactivates (no auto-roll).
-    if (daysToSuspend <= 0 && r.billingStatus !== 'suspended') {
-      // SAFETY: never suspend if a payment for this domain succeeded recently (any product type).
-      // A renewal/payment must never trigger an auto-suspend.
-      try {
-        const recentPaid = await Payment.findOne({
-          domain: r.domain,
-          status: 'paid',
-          paidAt: { $gte: new Date(now.getTime() - 35 * 24 * 60 * 60 * 1000) },
-        }).sort({ paidAt: -1 });
-        if (recentPaid) {
-          // Roll this record's billing forward from its anchor and keep it active.
-          r.lastPaymentDate = recentPaid.paidAt || now;
-          r.nextBillingDate = recalcNextBilling(r, now);
-          r.billingStatus = 'active';
-          r.warnedAt = null;
-          await r.save();
-          console.log('SUB SUSPEND SKIPPED (recent payment found):', r.domain, r.skuId);
-          continue; // do not suspend
-        }
-      } catch (_) { }
+    if (!dueReached) {
+      // Not due yet. Optionally warn a few days before, but only if the current cycle is unpaid.
+      const daysToDue = (nextBilling.getTime() - now.getTime()) / 86400000;
+      if (r.currentCycleStatus !== 'paid' && daysToDue <= 4 && daysToDue > 0 && r.billingStatus === 'active') {
+        r.billingStatus = 'warned';
+        r.warnedAt = now;
+        await r.save();
+        results.warned.push(`${r.domain} (${r.skuId})`);
+        try { await sendRenewalWarningEmail(await emailForDomain(r.domain), r.domain, nextBilling); } catch (_) { }
+      }
+      continue;
+    }
+
+    // DUE DATE REACHED (now >= next_billing_date).
+    if (r.currentCycleStatus === 'paid') {
+      // RULE 2/3: the paid cycle has completed — advance to the NEXT fixed cycle.
+      // New start = previous next_billing_date; new next = start + 29 days. (Never uses payment date.)
+      advanceToNextCycle(r);
+      // If Google had it suspended (e.g. late payment before this roll), make sure it's active.
+      if (r.billingStatus === 'suspended') {
+        try { await setSubscriptionState(r.account, r.domain, r.skuId, 'activate', r.subscriptionId); } catch (_) { }
+      }
+      r.billingStatus = 'active';
+      r.suspendedAt = null;
+      await r.save();
+      results.advanced.push(`${r.domain} (${r.skuId}) → ${r.nextBillingDate.toISOString().slice(0, 10)}`);
+      console.log('BILLING CYCLE ADVANCED (paid):', r.domain, r.skuId, '→ next', r.nextBillingDate.toISOString().slice(0, 10));
+      continue;
+    }
+
+    // RULE 5: due reached AND current cycle unpaid → suspend (if not already).
+    if (r.billingStatus !== 'suspended') {
       try {
         await setSubscriptionState(r.account, r.domain, r.skuId, 'suspend', r.subscriptionId);
         r.billingStatus = 'suspended';
         r.suspendedAt = now;
         await r.save();
         results.suspended.push(`${r.domain} (${r.skuId})`);
-        console.log('SUB SUSPENDED (monthly cycle, non-payment):', r.domain, r.skuId, '| renewal was', renewal.toISOString().slice(0, 10));
+        console.log('SUB SUSPENDED (unpaid cycle):', r.domain, r.skuId, '| due was', nextBilling.toISOString().slice(0, 10));
         try { await sendSuspensionEmail(await emailForDomain(r.domain), r.domain); } catch (_) { }
       } catch (e) {
         const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
-        console.error('SUB SUSPEND FAILED', r.domain, 'sku=' + r.skuId, 'subId=' + r.subscriptionId, '→', detail);
+        console.error('SUB SUSPEND FAILED', r.domain, 'sku=' + r.skuId, '→', detail);
         results.suspendErrors = results.suspendErrors || [];
         results.suspendErrors.push({ domain: r.domain, skuId: r.skuId, error: detail });
       }
@@ -2844,6 +2905,41 @@ async function runSubscriptionBillingCheck() {
   }
   return results;
 }
+
+// Admin: migrate existing billing records to the fixed 29-day cycle schema.
+// Sets billingCycleStart from purchaseDate (or existing nextBillingDate - 29d), recomputes nextBillingDate.
+app.post('/api/admin/billing/migrate-cycles', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const startFromToday = req.body?.startFromToday === true; // optional: reset all to a fresh cycle now
+    const now = new Date();
+    const recs = await SubBilling.find();
+    let migrated = 0;
+    for (const r of recs) {
+      if (startFromToday) {
+        startNewBillingCycle(r, now);
+        // Preserve paid status if they had a recent payment.
+        r.currentCycleStatus = r.lastPaymentDate && (now - new Date(r.lastPaymentDate)) < BILLING_CYCLE_DAYS * 86400000 ? 'paid' : 'unpaid';
+      } else {
+        // Derive billingCycleStart if missing.
+        if (!r.billingCycleStart) {
+          if (r.purchaseDate) r.billingCycleStart = new Date(r.purchaseDate);
+          else if (r.nextBillingDate) r.billingCycleStart = addDays(new Date(r.nextBillingDate), -BILLING_CYCLE_DAYS);
+          else r.billingCycleStart = now;
+        }
+        // Recompute nextBillingDate on the fixed 29-day cycle if missing or inconsistent.
+        if (!r.nextBillingDate) r.nextBillingDate = addDays(r.billingCycleStart, BILLING_CYCLE_DAYS);
+        // Set cycle status from suspension/payment state.
+        if (!r.currentCycleStatus) {
+          r.currentCycleStatus = (r.billingStatus === 'suspended') ? 'unpaid' : 'paid';
+        }
+      }
+      r.updatedAt = now;
+      await r.save();
+      migrated++;
+    }
+    res.json({ success: true, migrated, startFromToday });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // Admin: start the 29-day cycle from TODAY for existing subs (so old purchase dates don't instantly suspend)
 app.post('/api/admin/billing/start-from-today', authenticateCustomer, requireAdmin, async (req, res) => {
@@ -2856,17 +2952,13 @@ app.post('/api/admin/billing/start-from-today', authenticateCustomer, requireAdm
     const records = await SubBilling.find(filter);
     let reset = 0;
     for (const r of records) {
-      // If it was suspended by us, reactivate it in Google
       if (r.billingStatus === 'suspended') {
-        try { await setSubscriptionState(r.account, r.domain, r.skuId, 'activate'); } catch (_) { }
+        try { await setSubscriptionState(r.account, r.domain, r.skuId, 'activate', r.subscriptionId); } catch (_) { }
       }
-      r.lastPaymentDate = now;
-      // Anchor the next renewal to the subscription's own purchase day-of-month.
-      r.nextBillingDate = recalcNextBilling(r, now);
-      r.billingStatus = 'active';
-      r.warnedAt = null;
-      r.suspendedAt = null;
-      r.updatedAt = now;
+      // Fresh 29-day cycle from today, marked paid (admin action = treat as current).
+      startNewBillingCycle(r, now);
+      r.lastManualUnsuspendAt = now;
+      r.currentCycleStatus = 'paid';
       await r.save();
       reset++;
     }
@@ -2978,6 +3070,21 @@ const SKU_CATALOG = {
 function skuName(skuId) {
   return SKU_CATALOG[String(skuId)]?.name || String(skuId);
 }
+
+// ===== SUBSCRIPTION DEPENDENCY MODEL (Rule 7: dynamic, no per-product hardcoding) =====
+// A subscription is either the PRIMARY (Google Workspace) or an ADD-ON (Voice, Gemini,
+// AI Expanded Access, and any FUTURE product). Classification is dynamic via the catalog
+// category, so new add-ons automatically follow the same rules with no code changes.
+function skuCategory(skuId) {
+  const meta = SKU_CATALOG[String(skuId)];
+  if (meta?.category) return meta.category;           // 'workspace' | 'voice' | 'addon'
+  // Unknown SKUs: treat known workspace SKUs as primary, everything else as add-on.
+  if (WORKSPACE_SKUS.includes(String(skuId))) return 'workspace';
+  return 'addon';
+}
+function isPrimarySku(skuId) { return skuCategory(skuId) === 'workspace'; }
+function isAddonSku(skuId) { return !isPrimarySku(skuId); } // voice + addon + any future product
+
 
 // ===== WORKSPACE-ANCHORED BILLING (customer-grouped) =====
 // Billing is driven by the customer's Google WORKSPACE creation date. When that 29-day cycle is
@@ -3347,16 +3454,17 @@ app.post('/api/admin/billing/unsuspend', authenticateCustomer, requireAdmin, asy
     for (const it of items) {
       try {
         await setSubscriptionState(it.account, dom, it.skuId, 'activate', it.subscriptionId);
-        // Recompute next renewal from the subscription's own purchase day-of-month.
-        const existing = await SubBilling.findOne({ domain: dom, skuId: it.skuId });
-        const nextDate = existing ? recalcNextBilling(existing, now) : nextMonthlyRenewal(now, now);
-        await SubBilling.updateOne(
-          { domain: dom, skuId: it.skuId },
-          { $set: { billingStatus: 'active', suspendedAt: null, warnedAt: null, lastPaymentDate: now, nextBillingDate: nextDate, account: it.account, updatedAt: now } },
-          { upsert: true }
-        );
-        outcomes.push({ domain: dom, skuId: it.skuId, result: 'REACTIVATED ✓' });
-        console.log('UNSUSPEND OK:', dom, it.skuId, it.account, '| next renewal', nextDate.toISOString().slice(0, 10));
+        // RULE 4: manual unsuspension = a COMPLETELY NEW billing cycle from now.
+        // billing_cycle_start = now, next_billing_date = now + 29 days. Cron ignores until new due date.
+        let rec = await SubBilling.findOne({ domain: dom, skuId: it.skuId });
+        if (!rec) rec = new SubBilling({ domain: dom, skuId: it.skuId, account: it.account, subscriptionId: it.subscriptionId });
+        startNewBillingCycle(rec, now);
+        rec.lastManualUnsuspendAt = now;
+        rec.account = it.account;
+        if (it.subscriptionId) rec.subscriptionId = it.subscriptionId;
+        await rec.save();
+        outcomes.push({ domain: dom, skuId: it.skuId, result: 'REACTIVATED ✓', nextBilling: rec.nextBillingDate.toISOString().slice(0, 10) });
+        console.log('MANUAL UNSUSPEND (new cycle):', dom, it.skuId, it.account, '| new next billing', rec.nextBillingDate.toISOString().slice(0, 10));
       } catch (e) {
         const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
         outcomes.push({ domain: dom, skuId: it.skuId, result: 'FAILED: ' + detail });
@@ -3402,13 +3510,14 @@ app.post('/api/admin/billing/unsuspend-bulk', authenticateCustomer, requireAdmin
       for (const it of items) {
         try {
           await setSubscriptionState(it.account, dom, it.skuId, 'activate', it.subscriptionId);
-          const existing = await SubBilling.findOne({ domain: dom, skuId: it.skuId });
-          const nextDate = existing ? recalcNextBilling(existing, now) : nextMonthlyRenewal(now, now);
-          await SubBilling.updateOne(
-            { domain: dom, skuId: it.skuId },
-            { $set: { billingStatus: 'active', suspendedAt: null, warnedAt: null, lastPaymentDate: now, nextBillingDate: nextDate, account: it.account, updatedAt: now } },
-            { upsert: true }
-          );
+          // Manual unsuspension → new cycle from now.
+          let rec = await SubBilling.findOne({ domain: dom, skuId: it.skuId });
+          if (!rec) rec = new SubBilling({ domain: dom, skuId: it.skuId, account: it.account, subscriptionId: it.subscriptionId });
+          startNewBillingCycle(rec, now);
+          rec.lastManualUnsuspendAt = now;
+          rec.account = it.account;
+          if (it.subscriptionId) rec.subscriptionId = it.subscriptionId;
+          await rec.save();
           okCount++;
         } catch (e) {
           const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
@@ -3455,16 +3564,16 @@ app.post('/api/admin/billing/unsuspend-bulk', authenticateCustomer, requireAdmin
       for (const it of items) {
         try {
           await setSubscriptionState(it.account, dom, it.skuId, 'activate', it.subscriptionId);
-          // Recompute next renewal from the subscription's own purchase day-of-month.
-          const existing = await SubBilling.findOne({ domain: dom, skuId: it.skuId });
-          const nextDate = existing ? recalcNextBilling(existing, now) : nextMonthlyRenewal(now, now);
-          await SubBilling.updateOne(
-            { domain: dom, skuId: it.skuId },
-            { $set: { billingStatus: 'active', suspendedAt: null, warnedAt: null, lastPaymentDate: now, nextBillingDate: nextDate, account: it.account, updatedAt: now } },
-            { upsert: true }
-          );
+          // Manual unsuspension → new cycle from now.
+          let rec = await SubBilling.findOne({ domain: dom, skuId: it.skuId });
+          if (!rec) rec = new SubBilling({ domain: dom, skuId: it.skuId, account: it.account, subscriptionId: it.subscriptionId });
+          startNewBillingCycle(rec, now);
+          rec.lastManualUnsuspendAt = now;
+          rec.account = it.account;
+          if (it.subscriptionId) rec.subscriptionId = it.subscriptionId;
+          await rec.save();
           domResult.reactivated++;
-          console.log('BULK UNSUSPEND OK:', dom, it.skuId, it.account, '| next renewal', nextDate.toISOString().slice(0, 10));
+          console.log('BULK UNSUSPEND (new cycle):', dom, it.skuId, it.account, '| next billing', rec.nextBillingDate.toISOString().slice(0, 10));
         } catch (e) {
           const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
           domResult.failed++;
@@ -5939,14 +6048,10 @@ app.post('/api/admin/workspace-orders/provision', authenticateCustomer, requireA
         const planDoc = await Plan.findOne({ planId: order.plan?.id });
         if (planDoc?.skuId) {
           const now = new Date();
-          await SubBilling.findOneAndUpdate(
-            { domain: dom, skuId: planDoc.skuId },
-            {
-              $setOnInsert: { account: order.account || 'pk', purchaseDate: now, billingStatus: 'active' },
-              $set: { lastPaymentDate: now, nextBillingDate: nextMonthlyRenewal(now, now) }
-            },
-            { upsert: true }
-          );
+          let rec = await SubBilling.findOne({ domain: dom, skuId: planDoc.skuId });
+          if (!rec) { rec = new SubBilling({ account: order.account || 'pk', domain: dom, skuId: planDoc.skuId }); startNewBillingCycle(rec, now); }
+          applyPaymentToCurrentCycle(rec, now);
+          await rec.save();
         }
       } catch (_) { }
       return res.json({ success: true, orderNumber, account: order.account || 'auto', message: result.message || 'Workspace provisioned in Google.', provisionNote: order.provisionNote || null });
