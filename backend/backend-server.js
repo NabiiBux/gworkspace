@@ -1950,37 +1950,29 @@ app.get('/api/admin/lookup-domain', authenticateCustomer, requireAdmin, async (r
       catch (e) { errors.push(`${account.toUpperCase()}: not connected (${e.message})`); continue; }
       const reseller = google.reseller({ version: 'v1', auth });
 
-      // First confirm the domain is a customer under this reseller.
-      let customerExists = false;
-      try { await reseller.customers.get({ customerId: dom }); customerExists = true; }
-      catch (e) {
-        const msg = e?.errors?.[0]?.message || e?.message || '';
-        if (!/not found|does not exist|404/i.test(msg)) errors.push(`${account.toUpperCase()} customer check: ${msg}`);
-        // not a customer on this account → try next
-      }
-      if (!customerExists) continue;
-
-      // Now list subscriptions.
+      // Try listing subscriptions directly — this is the most reliable check and returns the data we need.
       try {
         const resp = await reseller.subscriptions.list({ customerId: dom });
         const subs = resp.data.subscriptions || [];
-        return res.json({
-          found: true,
-          account,
-          domain: dom,
-          subscriptions: subs.map((s) => ({
-            skuId: String(s.skuId),
-            skuName: skuName(s.skuId),
-            planName: s.plan?.planName,
-            seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
-            status: s.status,
-          })),
-        });
+        if (subs.length > 0) {
+          return res.json({
+            found: true, account, domain: dom,
+            subscriptions: subs.map((s) => ({
+              skuId: String(s.skuId),
+              skuName: skuName(s.skuId),
+              planName: s.plan?.planName,
+              seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
+              status: s.status,
+            })),
+          });
+        }
+        // No subscriptions on this account — but maybe the customer exists with none. Check.
+        try { await reseller.customers.get({ customerId: dom }); return res.json({ found: true, account, domain: dom, subscriptions: [], note: 'Customer exists on ' + account.toUpperCase() + ' but has no subscriptions.' }); }
+        catch (_) { /* not on this account */ }
       } catch (e) {
         const msg = e?.errors?.[0]?.message || e?.message || '';
-        // Customer exists but listing failed — still report found with the account.
-        errors.push(`${account.toUpperCase()} subscription list: ${msg}`);
-        return res.json({ found: true, account, domain: dom, subscriptions: [], note: 'Customer found, but could not list subscriptions: ' + msg });
+        if (!/not found|does not exist|404/i.test(msg)) errors.push(`${account.toUpperCase()}: ${msg}`);
+        // try next account
       }
     }
     res.json({ found: false, domain: dom, note: 'No Google Workspace customer found for this domain on either account.', diagnostics: errors });
@@ -2008,11 +2000,12 @@ app.post('/api/admin/customers/:id/attach-domain', authenticateCustomer, require
       catch (e) { errors.push(`${acct.toUpperCase()}: not connected (${e.message})`); continue; }
       const reseller = google.reseller({ version: 'v1', auth });
       try {
-        await reseller.customers.get({ customerId: dom });
-        account = acct;
-        // Count subscriptions (best-effort).
-        try { const resp = await reseller.subscriptions.list({ customerId: dom }); subCount = (resp.data.subscriptions || []).length; } catch (_) { }
-        break;
+        // subscriptions.list is the most reliable existence check.
+        const resp = await reseller.subscriptions.list({ customerId: dom });
+        const subs = resp.data.subscriptions || [];
+        if (subs.length > 0) { account = acct; subCount = subs.length; break; }
+        // No subs but customer may exist:
+        try { await reseller.customers.get({ customerId: dom }); account = acct; subCount = 0; break; } catch (_) { }
       } catch (e) {
         const msg = e?.errors?.[0]?.message || e?.message || '';
         if (!/not found|does not exist|404/i.test(msg)) errors.push(`${acct.toUpperCase()}: ${msg}`);

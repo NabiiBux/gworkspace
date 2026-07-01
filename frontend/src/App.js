@@ -4374,6 +4374,7 @@ const CustomerSubscriptions = () => {
   const [renewMsg, setRenewMsg] = useState('');
   const [seatSub, setSeatSub] = useState(null);   // subscription we're adding users to
   const [seatCount, setSeatCount] = useState(1);
+  const [seatDraft, setSeatDraft] = useState({}); // per-sku draft counter in the table
   const [seatBusy, setSeatBusy] = useState(false);
   const [seatMsg, setSeatMsg] = useState('');
 
@@ -4401,9 +4402,9 @@ const CustomerSubscriptions = () => {
 
   const renew = (s) => { setRenewing(s); setRenewMsg(''); };
 
-  const openSeats = (s) => {
+  const openSeats = (s, count) => {
     setSeatSub(s);
-    setSeatCount((s.seats || 1) + 1); // default: one more than current
+    setSeatCount(count || (s.seats || 1) + 1); // from inline counter, or default one more
     setSeatMsg('');
   };
   const doSeatChange = async (method) => {
@@ -4460,7 +4461,25 @@ const CustomerSubscriptions = () => {
                 <tr key={i}>
                   <td style={{ fontWeight: 600 }}>{s.skuName}</td>
                   <td>{isPrimary ? <span style={{ fontSize: 12, background: '#e0f2f1', color: '#0F766E', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>Primary</span> : <span style={{ fontSize: 12, background: '#f3f4f6', color: '#6b7280', padding: '2px 8px', borderRadius: 99 }}>Add-on</span>}</td>
-                  <td>{s.seats ?? '—'}</td>
+                  <td>
+                    <div style={{ fontWeight: 600 }}>{s.seats ?? '—'}</div>
+                    {isPrimary && s.status === 'ACTIVE' && (
+                      <div style={{ marginTop: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <button onClick={() => setSeatDraft(d => ({ ...d, [s.skuId]: Math.max((s.seats || 1) + 1, (d[s.skuId] ?? (s.seats || 1) + 1) - 1) }))}
+                            style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid #d8dbe6', background: '#fff', cursor: 'pointer', lineHeight: 1 }}>−</button>
+                          <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 700 }}>{seatDraft[s.skuId] ?? (s.seats || 1) + 1}</span>
+                          <button onClick={() => setSeatDraft(d => ({ ...d, [s.skuId]: (d[s.skuId] ?? (s.seats || 1) + 1) + 1 }))}
+                            style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid #d8dbe6', background: '#fff', cursor: 'pointer', lineHeight: 1 }}>+</button>
+                        </div>
+                        <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>new total users</div>
+                        <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 10px', marginTop: 4 }}
+                          onClick={() => openSeats(s, seatDraft[s.skuId] ?? (s.seats || 1) + 1)}>
+                          Add & checkout
+                        </button>
+                      </div>
+                    )}
+                  </td>
                   <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
                   <td>
                     <span style={{ fontWeight: 600, color: overdue ? '#b42318' : soon ? '#b45309' : '#111827' }}>{fmtDate(s.renewalDate)}</span>
@@ -4475,9 +4494,6 @@ const CustomerSubscriptions = () => {
                     {s.cycleStatus === 'paid'
                       ? <span style={{ fontSize: 12, color: '#6b7280' }}>Paid</span>
                       : <button className="btn btn-primary" style={{ fontSize: 12, padding: '5px 14px' }} onClick={() => renew(s)}>Renew</button>}
-                    {isPrimary && s.status === 'ACTIVE' && (
-                      <button className="btn btn-secondary" style={{ fontSize: 12, padding: '5px 12px', marginTop: 4, display: 'block' }} onClick={() => openSeats(s)}>+ Add users</button>
-                    )}
                   </td>
                 </tr>
               );
