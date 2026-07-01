@@ -7722,8 +7722,8 @@ function scheduleNickyPolling() {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log('======================================================');
-  console.log('🚀 BUILD MARKER: tax-logging + order-routing + annual + branding');
-  console.log('🚀 If you can see this line, the NEW backend is deployed.');
+  console.log('🚀 BUILD MARKER: v2026-07-01 seat-counter + core-category + google-welcome + fixed-billing');
+  console.log('🚀 If you see "v2026-07-01" here, the LATEST backend with the Frontline/seat fixes is deployed.');
   console.log('======================================================');
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`📧 Email service: ${process.env.EMAIL_USER}`);
