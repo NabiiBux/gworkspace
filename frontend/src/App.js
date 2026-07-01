@@ -4463,35 +4463,29 @@ const CustomerSubscriptions = () => {
                   <td style={{ fontWeight: 600 }}>{s.skuName}</td>
                   <td>{isPrimary ? <span style={{ fontSize: 12, background: '#e0f2f1', color: '#0F766E', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>Primary</span> : <span style={{ fontSize: 12, background: '#f3f4f6', color: '#6b7280', padding: '2px 8px', borderRadius: 99 }}>Add-on</span>}</td>
                   <td>
-                    {isPrimary && s.status === 'ACTIVE' ? (
-                      seatOpen[s.skuId] ? (
+                    {isPrimary && s.status === 'ACTIVE' ? (() => {
+                      const cur = s.seats || 1;
+                      const val = seatDraft[s.skuId] ?? cur;   // live total; defaults to current, sticks after changes
+                      const added = Math.max(0, val - cur);
+                      return (
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <button onClick={() => setSeatDraft(d => ({ ...d, [s.skuId]: Math.max(1, (d[s.skuId] ?? 1) - 1) }))}
-                              style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid #d8dbe6', background: '#fff', cursor: 'pointer', lineHeight: 1 }}>−</button>
-                            <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 700 }}>{seatDraft[s.skuId] ?? 1}</span>
-                            <button onClick={() => setSeatDraft(d => ({ ...d, [s.skuId]: (d[s.skuId] ?? 1) + 1 }))}
+                            <button onClick={() => setSeatDraft(d => ({ ...d, [s.skuId]: Math.max(cur, (d[s.skuId] ?? cur) - 1) }))}
+                              disabled={val <= cur}
+                              style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid #d8dbe6', background: val <= cur ? '#f3f4f6' : '#fff', cursor: val <= cur ? 'default' : 'pointer', lineHeight: 1 }}>−</button>
+                            <span style={{ minWidth: 24, textAlign: 'center', fontWeight: 700, fontSize: 16 }}>{val}</span>
+                            <button onClick={() => setSeatDraft(d => ({ ...d, [s.skuId]: (d[s.skuId] ?? cur) + 1 }))}
                               style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid #d8dbe6', background: '#fff', cursor: 'pointer', lineHeight: 1 }}>+</button>
                           </div>
-                          <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>users to add (now {s.seats ?? 1})</div>
-                          <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                            <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 10px' }}
-                              onClick={() => openSeats(s, (s.seats || 0) + (seatDraft[s.skuId] ?? 1))}>
-                              Add &amp; checkout
+                          {added > 0 && (
+                            <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 10px', marginTop: 6 }}
+                              onClick={() => openSeats(s, val)}>
+                              Add {added} &amp; checkout
                             </button>
-                            <button style={{ fontSize: 11, padding: '4px 6px', background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}
-                              onClick={() => setSeatOpen(o => ({ ...o, [s.skuId]: false }))}>Cancel</button>
-                          </div>
+                          )}
                         </div>
-                      ) : (
-                        <span
-                          onClick={() => { setSeatOpen(o => ({ ...o, [s.skuId]: true })); setSeatDraft(d => ({ ...d, [s.skuId]: 1 })); }}
-                          style={{ fontWeight: 600, cursor: 'pointer', borderBottom: '1px dashed #0F766E', color: '#0F766E' }}
-                          title="Click to add users">
-                          {s.seats ?? '—'} ✎
-                        </span>
-                      )
-                    ) : (
+                      );
+                    })() : (
                       <span style={{ fontWeight: 600 }}>{s.seats ?? '—'}</span>
                     )}
                   </td>

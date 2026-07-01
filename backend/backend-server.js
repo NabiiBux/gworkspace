@@ -3216,8 +3216,11 @@ function skuName(skuId) {
 // category, so new add-ons automatically follow the same rules with no code changes.
 function skuCategory(skuId) {
   const meta = SKU_CATALOG[String(skuId)];
-  if (meta?.category) return meta.category;           // 'workspace' | 'voice' | 'addon'
-  // Unknown SKUs: treat known workspace SKUs as primary, everything else as add-on.
+  if (meta?.category) {
+    // 'core' in the catalog means a primary Google Workspace plan.
+    if (meta.category === 'core' || meta.category === 'workspace') return 'workspace';
+    return meta.category; // 'voice' | 'addon'
+  }
   if (WORKSPACE_SKUS.includes(String(skuId))) return 'workspace';
   return 'addon';
 }
