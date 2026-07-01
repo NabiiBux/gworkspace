@@ -213,7 +213,7 @@ const PaymentSchema = new mongoose.Schema({
   customerEmail: String,
   domain: String,
   orderId: mongoose.Schema.Types.ObjectId,
-  orderType: { type: String, enum: ['workspace', 'domain', 'domain_transfer', 'workspace_transfer', 'ssl', 'hosting', 'addon'], default: 'workspace' },
+  orderType: { type: String, enum: ['workspace', 'domain', 'domain_transfer', 'workspace_transfer', 'ssl', 'hosting', 'addon', 'seat_change'], default: 'workspace' },
   amount: Number,            // total charged (subtotal + tax)
   subtotal: Number,          // pre-tax amount
   tax: Number,               // tax portion
@@ -223,6 +223,10 @@ const PaymentSchema = new mongoose.Schema({
   addonName: String,
   isRenewal: { type: Boolean, default: false },  // true = Workspace renewal payment
   renewalSkuId: String,      // which subscription SKU is being renewed
+  seatChangeSku: String,     // for seat_change orders: the SKU to resize
+  seatChangeNewSeats: Number,
+  seatChangeFromSeats: Number,
+  seatChangeSubId: String,
   currency: { type: String, default: 'USD' },
   method: { type: String, enum: ['stripe', 'nicky'], default: 'stripe' },
   status: { type: String, enum: ['pending', 'paid', 'failed', 'cancelled'], default: 'pending' },
@@ -1292,6 +1296,11 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
     const billingBySku = {};
     billingRecs.forEach((b) => { billingBySku[String(b.skuId)] = b; });
 
+    // Pre-load plan prices by SKU for seat-increase pricing.
+    const planDocs = await Plan.find({ skuId: { $in: subs.map((s) => String(s.skuId)) } });
+    const priceBySku = {};
+    planDocs.forEach((p) => { if (p.skuId) priceBySku[String(p.skuId)] = Number(p.monthlyPrice) || 0; });
+
     const rows = subs.map((s) => {
       const created = s.creationTime ? Number(s.creationTime) : null;
       const rec = billingBySku[String(s.skuId)];
@@ -1302,13 +1311,15 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
       if (!renewalMs && created) renewalMs = addDays(new Date(created), BILLING_CYCLE_DAYS).getTime();
 
       const daysUntil = renewalMs ? Math.ceil((renewalMs - nowD.getTime()) / 86400000) : null;
+      const curSeats = s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null;
 
       return {
         domain: s.customerDomain || domain,
         skuId: s.skuId,
         skuName: s.skuName || skuName(s.skuId) || s.skuId,
         planName: s.plan?.planName,
-        seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
+        seats: curSeats,
+        seatPrice: priceBySku[String(s.skuId)] ?? null,   // monthly price per seat (if we have a Plan)
         status: s.status,
         creationTime: created,
         renewalDate: renewalMs,
@@ -1534,7 +1545,93 @@ app.post('/api/customer/domains/:domain/resend-verification', authenticateCustom
   }
 });
 
-// Customer: renew a Google Workspace subscription (pay the monthly amount; rolls billing forward).
+// Customer: increase seats (users) on an existing Workspace subscription. Pay-first.
+// Customers may only INCREASE (never decrease below current paid seats).
+app.post('/api/customer/subscriptions/change-seats', authenticateCustomer, async (req, res) => {
+  try {
+    const { skuId, domain, newSeats, method } = req.body;
+    const me = await Customer.findById(req.customerId);
+    const dom = (domain || me.domain || '').toLowerCase().trim();
+    if (!dom) return res.status(400).json({ error: 'No domain on your account.' });
+    if (!skuId) return res.status(400).json({ error: 'Missing subscription.' });
+    const wantSeats = parseInt(newSeats, 10);
+    if (!wantSeats || wantSeats < 1) return res.status(400).json({ error: 'Enter a valid number of users.' });
+
+    const account = me.account || 'pk';
+    // Read current seats from Google.
+    let currentSeats = 1, subscriptionId = null, planName = 'FLEXIBLE';
+    try {
+      const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+      const reseller = google.reseller({ version: 'v1', auth });
+      const resp = await reseller.subscriptions.list({ customerId: dom });
+      const sub = (resp.data.subscriptions || []).find((s) => String(s.skuId) === String(skuId));
+      if (!sub) return res.status(404).json({ error: 'Subscription not found for this domain.' });
+      currentSeats = sub.seats?.numberOfSeats ?? sub.seats?.licensedNumberOfSeats ?? 1;
+      subscriptionId = sub.subscriptionId;
+      planName = sub.plan?.planName || 'FLEXIBLE';
+    } catch (e) {
+      return res.status(502).json({ error: 'Could not read your current subscription: ' + (e?.errors?.[0]?.message || e.message) });
+    }
+
+    // Customers can only INCREASE seats (Rule: no decrease after checkout).
+    if (wantSeats <= currentSeats) {
+      return res.status(400).json({ error: `You currently have ${currentSeats} user${currentSeats === 1 ? '' : 's'}. You can only increase the number of users here (choose more than ${currentSeats}). To reduce users, please contact support.` });
+    }
+
+    // Price the ADDED seats for the remainder of the current cycle (charge for the extra seats now).
+    const plan = await Plan.findOne({ skuId: String(skuId) });
+    if (!plan || !plan.monthlyPrice) return res.status(400).json({ error: 'This plan has no price set up. Please contact support.' });
+    const addedSeats = wantSeats - currentSeats;
+    const subtotal = Number(plan.monthlyPrice) * addedSeats; // one month for the added seats
+    const taxed = await applyTaxAndFee(subtotal);
+    const amount = taxed.total;
+
+    const orderNumber = `SC-${Date.now()}`;
+    const payment = await Payment.create({
+      customerId: me._id, customerEmail: me.businessEmail, domain: dom,
+      orderType: 'seat_change', amount, subtotal: taxed.subtotal, tax: taxed.tax, fee: taxed.fee, currency: 'USD',
+      method: method === 'nicky' ? 'nicky' : 'stripe', status: 'pending',
+      seatChangeSku: String(skuId), seatChangeNewSeats: wantSeats, seatChangeFromSeats: currentSeats, seatChangeSubId: subscriptionId,
+    });
+
+    const orderDesc = `Add ${addedSeats} user${addedSeats === 1 ? '' : 's'} to ${skuName(skuId)} (${dom}) — ${currentSeats}→${wantSeats}`;
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
+
+    if (payment.method === 'stripe') {
+      let stripe; try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const sd = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (sd?.stripeMode || 'test') !== 'live'; await payment.save();
+      const line_items = [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(taxed.subtotal * 100) }, quantity: 1 }];
+      if (taxed.fee > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) }, quantity: 1 });
+      if (taxed.tax > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) }, quantity: 1 });
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment', line_items, success_url: successUrl, cancel_url: cancelUrl,
+        client_reference_id: String(payment._id), metadata: { paymentId: String(payment._id), orderType: 'seat_change' },
+      });
+      payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
+      return res.json({ checkoutUrl: session.url, paymentId: payment._id, addedSeats, newSeats: wantSeats });
+    }
+
+    try {
+      const nicky = await createNickyPayment({
+        amount, currency: 'USD', description: orderDesc, orderNumber,
+        reference: String(payment._id), billDescription: orderDesc,
+        customerEmail: me.businessEmail, customerName: me.firstName ? `${me.firstName} ${me.lastName || ''}`.trim() : me.businessEmail,
+        redirectUrl: successUrl, cancelUrl,
+      });
+      payment.checkoutUrl = nicky.url; payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id); payment.providerShortId = nicky.shortId || null;
+      await payment.save();
+      return res.json({ checkoutUrl: nicky.url, paymentId: payment._id, addedSeats, newSeats: wantSeats });
+    } catch (e) {
+      return res.status(500).json({ error: 'Crypto checkout not available: ' + e.message });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: renew a Google Workspace subscription (pay the monthly amount; marks current cycle paid).
 app.post('/api/customer/subscriptions/renew', authenticateCustomer, async (req, res) => {
   try {
     const { skuId, domain, method } = req.body;
@@ -2335,6 +2432,47 @@ async function markPaidAndProvision(payment) {
     } catch (e) {
       console.error('WORKSPACE TRANSFER FAILED for payment', String(payment._id), e.message);
       try { const xfer = await WorkspaceTransfer.findById(payment.orderId); if (xfer) { xfer.status = 'failed'; xfer.resultNote = e.message; await xfer.save(); } } catch (_) { }
+    }
+    return;
+  }
+
+  // SEAT CHANGE orders: apply the new (higher) seat count to the Google subscription.
+  if (payment.orderType === 'seat_change') {
+    try {
+      if (payment.isTest) { console.log('TEST PAYMENT — seat change not applied for', payment.domain); return; }
+      const me = await Customer.findById(payment.customerId);
+      const account = me?.account || 'pk';
+      const dom = (payment.domain || '').toLowerCase();
+      const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+      const reseller = google.reseller({ version: 'v1', auth });
+
+      // Find the subscription to get its current plan type (FLEXIBLE vs ANNUAL).
+      const resp = await reseller.subscriptions.list({ customerId: dom });
+      const sub = (resp.data.subscriptions || []).find((s) => String(s.skuId) === String(payment.seatChangeSku));
+      if (!sub) throw new Error('Subscription not found to change seats.');
+      const planName = sub.plan?.planName || 'FLEXIBLE';
+      const newSeats = payment.seatChangeNewSeats;
+      // FLEXIBLE uses maximumNumberOfSeats; ANNUAL uses numberOfSeats.
+      const seatsBody = /ANNUAL/i.test(planName)
+        ? { numberOfSeats: newSeats }
+        : { maximumNumberOfSeats: newSeats };
+
+      await reseller.subscriptions.changeSeats({
+        customerId: dom,
+        subscriptionId: sub.subscriptionId,
+        requestBody: { seats: seatsBody },
+      });
+      console.log(`SEAT CHANGE applied: ${dom} ${payment.seatChangeSku} → ${newSeats} seats (${planName})`);
+
+      try {
+        const html = emailShell('Users added', `
+          <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+          <p>Your Google Workspace subscription for <strong>${dom}</strong> now has <strong>${newSeats} user licenses</strong>. You can create the new users in your Google Admin console.</p>`);
+        await sendEmail(me?.businessEmail, `Users added: ${dom}`, html);
+      } catch (_) { }
+    } catch (e) {
+      const msg = e?.errors?.[0]?.message || e.message;
+      console.error('SEAT CHANGE FAILED for payment', String(payment._id), msg);
     }
     return;
   }

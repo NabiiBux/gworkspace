@@ -23,19 +23,19 @@ const ALLOWED_COUNTRIES = ['us'];
 
 // All countries for checkout (Israel intentionally excluded).
 const COUNTRIES = [
-  "Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda","Argentina","Armenia","Australia","Austria","Azerbaijan",
-  "Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei","Bulgaria","Burkina Faso","Burundi",
-  "Cabo Verde","Cambodia","Cameroon","Canada","Central African Republic","Chad","Chile","China","Colombia","Comoros","Congo","Costa Rica","Côte d'Ivoire","Croatia","Cuba","Cyprus","Czechia",
-  "Denmark","Djibouti","Dominica","Dominican Republic","Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini","Ethiopia",
-  "Fiji","Finland","France","Gabon","Gambia","Georgia","Germany","Ghana","Greece","Grenada","Guatemala","Guinea","Guinea-Bissau","Guyana",
-  "Haiti","Honduras","Hungary","Iceland","India","Indonesia","Iran","Iraq","Ireland","Italy","Jamaica","Japan","Jordan",
-  "Kazakhstan","Kenya","Kiribati","Kuwait","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania","Luxembourg",
-  "Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Marshall Islands","Mauritania","Mauritius","Mexico","Micronesia","Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Myanmar",
-  "Namibia","Nauru","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria","North Korea","North Macedonia","Norway","Oman",
-  "Pakistan","Palau","Palestine","Panama","Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal","Qatar",
-  "Romania","Russia","Rwanda","Saint Kitts and Nevis","Saint Lucia","Saint Vincent and the Grenadines","Samoa","San Marino","Sao Tome and Principe","Saudi Arabia","Senegal","Serbia","Seychelles","Sierra Leone","Singapore","Slovakia","Slovenia","Solomon Islands","Somalia","South Africa","South Korea","South Sudan","Spain","Sri Lanka","Sudan","Suriname","Sweden","Switzerland","Syria",
-  "Taiwan","Tajikistan","Tanzania","Thailand","Timor-Leste","Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Tuvalu",
-  "Uganda","Ukraine","United Arab Emirates","United Kingdom","United States","Uruguay","Uzbekistan","Vanuatu","Vatican City","Venezuela","Vietnam","Yemen","Zambia","Zimbabwe"
+  "Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Antigua and Barbuda", "Argentina", "Armenia", "Australia", "Austria", "Azerbaijan",
+  "Bahamas", "Bahrain", "Bangladesh", "Barbados", "Belarus", "Belgium", "Belize", "Benin", "Bhutan", "Bolivia", "Bosnia and Herzegovina", "Botswana", "Brazil", "Brunei", "Bulgaria", "Burkina Faso", "Burundi",
+  "Cabo Verde", "Cambodia", "Cameroon", "Canada", "Central African Republic", "Chad", "Chile", "China", "Colombia", "Comoros", "Congo", "Costa Rica", "Côte d'Ivoire", "Croatia", "Cuba", "Cyprus", "Czechia",
+  "Denmark", "Djibouti", "Dominica", "Dominican Republic", "Ecuador", "Egypt", "El Salvador", "Equatorial Guinea", "Eritrea", "Estonia", "Eswatini", "Ethiopia",
+  "Fiji", "Finland", "France", "Gabon", "Gambia", "Georgia", "Germany", "Ghana", "Greece", "Grenada", "Guatemala", "Guinea", "Guinea-Bissau", "Guyana",
+  "Haiti", "Honduras", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Italy", "Jamaica", "Japan", "Jordan",
+  "Kazakhstan", "Kenya", "Kiribati", "Kuwait", "Kyrgyzstan", "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia", "Libya", "Liechtenstein", "Lithuania", "Luxembourg",
+  "Madagascar", "Malawi", "Malaysia", "Maldives", "Mali", "Malta", "Marshall Islands", "Mauritania", "Mauritius", "Mexico", "Micronesia", "Moldova", "Monaco", "Mongolia", "Montenegro", "Morocco", "Mozambique", "Myanmar",
+  "Namibia", "Nauru", "Nepal", "Netherlands", "New Zealand", "Nicaragua", "Niger", "Nigeria", "North Korea", "North Macedonia", "Norway", "Oman",
+  "Pakistan", "Palau", "Palestine", "Panama", "Papua New Guinea", "Paraguay", "Peru", "Philippines", "Poland", "Portugal", "Qatar",
+  "Romania", "Russia", "Rwanda", "Saint Kitts and Nevis", "Saint Lucia", "Saint Vincent and the Grenadines", "Samoa", "San Marino", "Sao Tome and Principe", "Saudi Arabia", "Senegal", "Serbia", "Seychelles", "Sierra Leone", "Singapore", "Slovakia", "Slovenia", "Solomon Islands", "Somalia", "South Africa", "South Korea", "South Sudan", "Spain", "Sri Lanka", "Sudan", "Suriname", "Sweden", "Switzerland", "Syria",
+  "Taiwan", "Tajikistan", "Tanzania", "Thailand", "Timor-Leste", "Togo", "Tonga", "Trinidad and Tobago", "Tunisia", "Turkey", "Turkmenistan", "Tuvalu",
+  "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom", "United States", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela", "Vietnam", "Yemen", "Zambia", "Zimbabwe"
 ];
 
 // Reusable Google Maps Places address autocomplete.
@@ -131,7 +131,7 @@ const BrandingProvider = ({ children }) => {
     try {
       const r = await axios.get(`${API_URL}/branding`);
       if (r.data) setBranding(r.data);
-    } catch (_) {}
+    } catch (_) { }
   };
   useEffect(() => { refresh(); }, []);
   // Guarantee the viewport meta tag exists so responsive CSS works on mobile,
@@ -326,7 +326,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
   };
 
   return (
-    <div className="auth-container" style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', padding:'24px', background:'linear-gradient(135deg,#0F766E 0%,#0b5750 45%,#0a3f3a 100%)' }}>
+    <div className="auth-container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: 'linear-gradient(135deg,#0F766E 0%,#0b5750 45%,#0a3f3a 100%)' }}>
       <style>{`
         .auth-card, .auth-card * { box-sizing: border-box; }
         .auth-card .auth-form { display: flex; flex-direction: column; gap: 14px; width: 100%; }
@@ -359,13 +359,13 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
         .auth-card .error-message { background: #fde8e8; color: #b42318; padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 8px; word-break: break-word; }
         @media (max-width: 460px) { .auth-card .form-row { flex-direction: column; gap: 14px; } }
       `}</style>
-      <div className="auth-card" style={{ background:'#fff', borderRadius:20, padding:'32px', width:'100%', maxWidth:440, boxShadow:'0 20px 60px rgba(0,0,0,0.25)' }}>
-        <div className="auth-header" style={{ textAlign:'center', marginBottom:8 }}>
+      <div className="auth-card" style={{ background: '#fff', borderRadius: 20, padding: '32px', width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
+        <div className="auth-header" style={{ textAlign: 'center', marginBottom: 8 }}>
           {brand.logoDataUrl
-            ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight:54, maxWidth:200, marginBottom:8 }} />
-            : <div style={{ width:54, height:54, borderRadius:14, background:'#0F766E', color:'#fff', display:'inline-flex', alignItems:'center', justifyContent:'center', fontWeight:800, fontSize:24, marginBottom:8 }}>{(brand.brandName||'G')[0]}</div>}
-          <h1 style={{ fontSize:22, margin:'6px 0 2px', color:'#111827' }}>{adminMode ? 'Admin sign in' : (brand.brandName || 'GNB MENTOR LLC')}</h1>
-          <p style={{ color:'#6b7280', margin:0, fontSize:14 }}>{adminMode ? 'Administrator access' : 'Sign in or create your account'}</p>
+            ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 54, maxWidth: 200, marginBottom: 8 }} />
+            : <div style={{ width: 54, height: 54, borderRadius: 14, background: '#0F766E', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 24, marginBottom: 8 }}>{(brand.brandName || 'G')[0]}</div>}
+          <h1 style={{ fontSize: 22, margin: '6px 0 2px', color: '#111827' }}>{adminMode ? 'Admin sign in' : (brand.brandName || 'GNB MENTOR LLC')}</h1>
+          <p style={{ color: '#6b7280', margin: 0, fontSize: 14 }}>{adminMode ? 'Administrator access' : 'Sign in or create your account'}</p>
         </div>
 
         <div className="auth-tabs">
@@ -386,7 +386,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
         </div>
 
         {adminMode && (
-          <p style={{ textAlign:'center', color:'#6b7280', fontSize:13, margin:'8px 0 0' }}>
+          <p style={{ textAlign: 'center', color: '#6b7280', fontSize: 13, margin: '8px 0 0' }}>
             Administrator login
           </p>
         )}
@@ -417,7 +417,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
 
             <div className="form-group">
               <label>Password</label>
-              <div style={{ position:'relative' }}>
+              <div style={{ position: 'relative' }}>
                 <input
                   type={showPw ? 'text' : 'password'}
                   placeholder="••••••••"
@@ -428,8 +428,8 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
                   required
                   style={{ paddingRight: 64 }}
                 />
-                <button type="button" onClick={()=>setShowPw(v=>!v)}
-                  style={{ position:'absolute', right:8, top:'50%', transform:'translateY(-50%)', background:'transparent', border:'none', color:'#0F766E', fontSize:13, fontWeight:600, cursor:'pointer' }}>
+                <button type="button" onClick={() => setShowPw(v => !v)}
+                  style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#0F766E', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                   {showPw ? 'Hide' : 'Show'}
                 </button>
               </div>
@@ -511,12 +511,12 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
               </div>
               <div className="form-group">
                 <label>Password</label>
-                <div style={{ position:'relative' }}>
+                <div style={{ position: 'relative' }}>
                   <input type={showPwReg ? 'text' : 'password'} value={registerForm.password} required
                     onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })}
                     style={{ paddingRight: 64 }} />
-                  <button type="button" onClick={()=>setShowPwReg(v=>!v)}
-                    style={{ position:'absolute', right:8, top:'50%', transform:'translateY(-50%)', background:'transparent', border:'none', color:'#0F766E', fontSize:13, fontWeight:600, cursor:'pointer' }}>
+                  <button type="button" onClick={() => setShowPwReg(v => !v)}
+                    style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#0F766E', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                     {showPwReg ? 'Hide' : 'Show'}
                   </button>
                 </div>
@@ -738,7 +738,7 @@ const OverviewSection = ({ stats }) => {
     <div className="section">
       <h2>Dashboard Overview</h2>
 
-      {liveErr && <div style={{ background:'#fff7ed', color:'#9a3412', padding:'8px 12px', borderRadius:8, marginBottom:12, fontSize:13 }}>{liveErr}</div>}
+      {liveErr && <div style={{ background: '#fff7ed', color: '#9a3412', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{liveErr}</div>}
 
       {/* Combined summary */}
       <div className="stats-grid" style={{ marginBottom: 20 }}>
@@ -749,22 +749,22 @@ const OverviewSection = ({ stats }) => {
       </div>
 
       {/* Per-account breakdown: USA vs Pakistan */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }} className="grid-2">
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }} className="grid-2">
         {[
-          { key:'pk', label:'Pakistan reseller', sub:'gnbmentor.com · Workspace', color:'#0F766E', data: live?.pk },
-          { key:'usa', label:'USA reseller', sub:'artisandrywallaz.com · Voice', color:'#1d4ed8', data: live?.usa },
+          { key: 'pk', label: 'Pakistan reseller', sub: 'gnbmentor.com · Workspace', color: '#0F766E', data: live?.pk },
+          { key: 'usa', label: 'USA reseller', sub: 'artisandrywallaz.com · Voice', color: '#1d4ed8', data: live?.usa },
         ].map(acc => (
-          <div key={acc.key} style={{ background:'#fff', borderRadius:14, padding:20, border:'1px solid #e5e7eb', borderTop:`4px solid ${acc.color}` }}>
-            <div style={{ fontWeight:700, fontSize:16 }}>{acc.label}</div>
-            <div style={{ color:'#6b7280', fontSize:13, marginBottom:14 }}>{acc.sub}</div>
-            {!live ? <p style={{ color:'#9ca3af' }}>Loading…</p> : acc.data?.error ? (
-              <div style={{ color:'#b45309', fontSize:13 }}>⚠️ {acc.data.error}</div>
+          <div key={acc.key} style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #e5e7eb', borderTop: `4px solid ${acc.color}` }}>
+            <div style={{ fontWeight: 700, fontSize: 16 }}>{acc.label}</div>
+            <div style={{ color: '#6b7280', fontSize: 13, marginBottom: 14 }}>{acc.sub}</div>
+            {!live ? <p style={{ color: '#9ca3af' }}>Loading…</p> : acc.data?.error ? (
+              <div style={{ color: '#b45309', fontSize: 13 }}>⚠️ {acc.data.error}</div>
             ) : (
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
-                <div><div style={{ fontSize:24, fontWeight:800, color:acc.color }}>{acc.data?.totalCustomers ?? 0}</div><div style={{ fontSize:12, color:'#6b7280' }}>Customers</div></div>
-                <div><div style={{ fontSize:24, fontWeight:800, color:acc.color }}>{acc.data?.activeSubscriptions ?? 0}</div><div style={{ fontSize:12, color:'#6b7280' }}>Active subs</div></div>
-                <div><div style={{ fontSize:24, fontWeight:800, color:acc.color }}>{acc.data?.totalSeats ?? 0}</div><div style={{ fontSize:12, color:'#6b7280' }}>Seats</div></div>
-                <div><div style={{ fontSize:24, fontWeight:800, color: (acc.data?.suspendedSubscriptions ? '#b42318' : acc.color) }}>{acc.data?.suspendedSubscriptions ?? 0}</div><div style={{ fontSize:12, color:'#6b7280' }}>Suspended</div></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div><div style={{ fontSize: 24, fontWeight: 800, color: acc.color }}>{acc.data?.totalCustomers ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Customers</div></div>
+                <div><div style={{ fontSize: 24, fontWeight: 800, color: acc.color }}>{acc.data?.activeSubscriptions ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Active subs</div></div>
+                <div><div style={{ fontSize: 24, fontWeight: 800, color: acc.color }}>{acc.data?.totalSeats ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Seats</div></div>
+                <div><div style={{ fontSize: 24, fontWeight: 800, color: (acc.data?.suspendedSubscriptions ? '#b42318' : acc.color) }}>{acc.data?.suspendedSubscriptions ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Suspended</div></div>
               </div>
             )}
           </div>
@@ -880,18 +880,18 @@ const AdminAddonPricing = () => {
 const ProductsSection = () => {
   const [plans, setPlans] = useState(null);
   const [editing, setEditing] = useState(null); // plan being edited (or 'new')
-  const [form, setForm] = useState({ planId:'', category:'workspace', name:'', monthlyPrice:0, skuId:'', features:'', active:true, sortOrder:0 });
+  const [form, setForm] = useState({ planId: '', category: 'workspace', name: '', monthlyPrice: 0, skuId: '', features: '', active: true, sortOrder: 0 });
   const [msg, setMsg] = useState('');
 
   // Order routing + plan availability
   const [os, setOs] = useState(null);
   const [osMsg, setOsMsg] = useState('');
-  const loadOs = async () => { try { const r = await axios.get(`${API_URL}/admin/order-settings`); setOs(r.data); } catch(_){} };
+  const loadOs = async () => { try { const r = await axios.get(`${API_URL}/admin/order-settings`); setOs(r.data); } catch (_) { } };
   useEffect(() => { loadOs(); }, []);
   const saveOs = async (patch) => {
     const next = { ...os, ...patch };
     setOs(next); setOsMsg('');
-    try { await axios.post(`${API_URL}/admin/order-settings`, next); setOsMsg('✓ Saved.'); setTimeout(()=>setOsMsg(''), 1500); }
+    try { await axios.post(`${API_URL}/admin/order-settings`, next); setOsMsg('✓ Saved.'); setTimeout(() => setOsMsg(''), 1500); }
     catch (e) { setOsMsg(e?.response?.data?.error || 'Could not save.'); }
   };
 
@@ -899,26 +899,26 @@ const ProductsSection = () => {
   const [hosting, setHosting] = useState([]);
   const [hForm, setHForm] = useState(null); // editing hosting plan or null
   const [hMsg, setHMsg] = useState('');
-  const loadHosting = async () => { try { const r = await axios.get(`${API_URL}/admin/nc/hosting`); setHosting(r.data.plans || []); } catch(_){} };
+  const loadHosting = async () => { try { const r = await axios.get(`${API_URL}/admin/nc/hosting`); setHosting(r.data.plans || []); } catch (_) { } };
   useEffect(() => { loadHosting(); }, []);
   const saveHosting = async () => {
     setHMsg('');
     try {
-      const body = { ...hForm, price: Number(hForm.price), cost: Number(hForm.cost||0), features: typeof hForm.features === 'string' ? hForm.features.split('\n').map(s=>s.trim()).filter(Boolean) : (hForm.features||[]) };
+      const body = { ...hForm, price: Number(hForm.price), cost: Number(hForm.cost || 0), features: typeof hForm.features === 'string' ? hForm.features.split('\n').map(s => s.trim()).filter(Boolean) : (hForm.features || []) };
       await axios.post(`${API_URL}/admin/nc/hosting`, body);
       setHMsg('✓ Saved.'); setHForm(null); loadHosting();
     } catch (e) { setHMsg(e?.response?.data?.error || 'Could not save.'); }
   };
-  const deleteHosting = async (planId) => { if (!window.confirm('Delete this hosting plan?')) return; try { await axios.delete(`${API_URL}/admin/nc/hosting/${planId}`); loadHosting(); } catch(_){} };
+  const deleteHosting = async (planId) => { if (!window.confirm('Delete this hosting plan?')) return; try { await axios.delete(`${API_URL}/admin/nc/hosting/${planId}`); loadHosting(); } catch (_) { } };
 
   const load = async () => {
     try { const res = await axios.get(`${API_URL}/admin/plans`); setPlans(res.data); }
-    catch (_) { try { const r = await axios.get(`${API_URL}/products`); setPlans([...(r.data.workspace||[]),...(r.data.voice||[]),...(r.data.addon||[])]); } catch(__) { setPlans([]); } }
+    catch (_) { try { const r = await axios.get(`${API_URL}/products`); setPlans([...(r.data.workspace || []), ...(r.data.voice || []), ...(r.data.addon || [])]); } catch (__) { setPlans([]); } }
   };
   useEffect(() => { load(); }, []);
 
   const startNew = () => {
-    setForm({ planId:'', category:'workspace', name:'', monthlyPrice:0, skuId:'', features:'', active:true, sortOrder:0 });
+    setForm({ planId: '', category: 'workspace', name: '', monthlyPrice: 0, skuId: '', features: '', active: true, sortOrder: 0 });
     setEditing('new');
   };
   const startEdit = (p) => {
@@ -956,63 +956,63 @@ const ProductsSection = () => {
     catch (e) { setMsg(e?.response?.data?.error || 'Could not delete.'); }
   };
 
-  const inp = { width:'100%', height:38, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 10px', marginBottom:10 };
+  const inp = { width: '100%', height: 38, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 10 };
   if (!plans) return <div className="loading">Loading plans…</div>;
 
   return (
     <div className="section">
       <h2>📦 Products & Pricing</h2>
-      <p style={{ color:'#5b6075' }}>Set the prices customers see. Changes apply immediately to the customer portal and landing page.</p>
-      {msg && <div style={{ background: msg.startsWith('✓')?'#dcfce7':'#fde8e8', color: msg.startsWith('✓')?'#166534':'#b42318', padding:'10px 14px', borderRadius:8, marginBottom:14 }}>{msg}</div>}
+      <p style={{ color: '#5b6075' }}>Set the prices customers see. Changes apply immediately to the customer portal and landing page.</p>
+      {msg && <div style={{ background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 14 }}>{msg}</div>}
 
       {/* Order routing + payment plans */}
-      <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:14, padding:20, marginBottom:20 }}>
-        <h3 style={{ marginTop:0 }}>⚙ Order routing & payment plans</h3>
-        {osMsg && <div style={{ color: osMsg.startsWith('✓')?'#166534':'#b42318', fontSize:13, marginBottom:8 }}>{osMsg}</div>}
-        {!os ? <p style={{ color:'#9ca3af' }}>Loading…</p> : (
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: 20, marginBottom: 20 }}>
+        <h3 style={{ marginTop: 0 }}>⚙ Order routing & payment plans</h3>
+        {osMsg && <div style={{ color: osMsg.startsWith('✓') ? '#166534' : '#b42318', fontSize: 13, marginBottom: 8 }}>{osMsg}</div>}
+        {!os ? <p style={{ color: '#9ca3af' }}>Loading…</p> : (
           <>
-            <div style={{ fontWeight:700, fontSize:13, marginBottom:8 }}>Which reseller account takes new Workspace orders?</div>
-            <div style={{ display:'flex', gap:20, flexWrap:'wrap', marginBottom:16 }}>
-              <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer' }}>
-                <input type="checkbox" checked={!!os.pkOrdersEnabled} onChange={e=>saveOs({ pkOrdersEnabled: e.target.checked })} />
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Which reseller account takes new Workspace orders?</div>
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 16 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!os.pkOrdersEnabled} onChange={e => saveOs({ pkOrdersEnabled: e.target.checked })} />
                 Pakistan reseller (gnbmentor.com)
               </label>
-              <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer' }}>
-                <input type="checkbox" checked={!!os.usaOrdersEnabled} onChange={e=>saveOs({ usaOrdersEnabled: e.target.checked })} />
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!os.usaOrdersEnabled} onChange={e => saveOs({ usaOrdersEnabled: e.target.checked })} />
                 USA reseller (artisandrywallaz.com)
               </label>
             </div>
-            <div style={{ fontSize:12, color:'#6b7280', marginBottom:16 }}>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
               New orders go to USA if it's the only one on; otherwise to Pakistan. Turn an account off to stop it taking orders.
             </div>
 
-            <div style={{ fontWeight:700, fontSize:13, marginBottom:8 }}>Payment plans customers can choose</div>
-            <div style={{ display:'flex', gap:20, flexWrap:'wrap' }}>
-              <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer' }}>
-                <input type="checkbox" checked={!!os.flexibleEnabled} onChange={e=>saveOs({ flexibleEnabled: e.target.checked })} />
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Payment plans customers can choose</div>
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!os.flexibleEnabled} onChange={e => saveOs({ flexibleEnabled: e.target.checked })} />
                 Flexible (monthly, pay-as-you-go)
               </label>
-              <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer' }}>
-                <input type="checkbox" checked={!!os.annualEnabled} onChange={e=>saveOs({ annualEnabled: e.target.checked })} />
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!os.annualEnabled} onChange={e => saveOs({ annualEnabled: e.target.checked })} />
                 Annual (12-month commitment, monthly pay)
               </label>
             </div>
 
-            <div style={{ borderTop:'1px solid #eee', marginTop:16, paddingTop:16 }}>
-              <div style={{ fontWeight:700, fontSize:13, marginBottom:4 }}>Workspace transfer tokens</div>
-              <p style={{ color:'#6b7280', fontSize:12, marginTop:0 }}>Your reseller transfer tokens — customers paste these in their Google Admin to authorize transferring their Workspace to you. Set the one for whichever account takes orders.</p>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }} className="grid-2">
+            <div style={{ borderTop: '1px solid #eee', marginTop: 16, paddingTop: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Workspace transfer tokens</div>
+              <p style={{ color: '#6b7280', fontSize: 12, marginTop: 0 }}>Your reseller transfer tokens — customers paste these in their Google Admin to authorize transferring their Workspace to you. Set the one for whichever account takes orders.</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }} className="grid-2">
                 <div>
-                  <label style={{ fontSize:12, fontWeight:600 }}>Pakistan transfer token</label>
-                  <input style={inp} value={os.pkTransferToken||''} onChange={e=>setOs({...os, pkTransferToken:e.target.value})} onBlur={()=>saveOs({})} placeholder="e.g. C02qvoufl" />
-                  <label style={{ fontSize:12, fontWeight:600, marginTop:8, display:'block' }}>Pakistan Partner ID (optional)</label>
-                  <input style={inp} value={os.pkPartnerId||''} onChange={e=>setOs({...os, pkPartnerId:e.target.value})} onBlur={()=>saveOs({})} placeholder="Partner/Reseller ID" />
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>Pakistan transfer token</label>
+                  <input style={inp} value={os.pkTransferToken || ''} onChange={e => setOs({ ...os, pkTransferToken: e.target.value })} onBlur={() => saveOs({})} placeholder="e.g. C02qvoufl" />
+                  <label style={{ fontSize: 12, fontWeight: 600, marginTop: 8, display: 'block' }}>Pakistan Partner ID (optional)</label>
+                  <input style={inp} value={os.pkPartnerId || ''} onChange={e => setOs({ ...os, pkPartnerId: e.target.value })} onBlur={() => saveOs({})} placeholder="Partner/Reseller ID" />
                 </div>
                 <div>
-                  <label style={{ fontSize:12, fontWeight:600 }}>USA transfer token</label>
-                  <input style={inp} value={os.usaTransferToken||''} onChange={e=>setOs({...os, usaTransferToken:e.target.value})} onBlur={()=>saveOs({})} placeholder="e.g. C0xxxxxxx" />
-                  <label style={{ fontSize:12, fontWeight:600, marginTop:8, display:'block' }}>USA Partner ID (optional)</label>
-                  <input style={inp} value={os.usaPartnerId||''} onChange={e=>setOs({...os, usaPartnerId:e.target.value})} onBlur={()=>saveOs({})} placeholder="Partner/Reseller ID" />
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>USA transfer token</label>
+                  <input style={inp} value={os.usaTransferToken || ''} onChange={e => setOs({ ...os, usaTransferToken: e.target.value })} onBlur={() => saveOs({})} placeholder="e.g. C0xxxxxxx" />
+                  <label style={{ fontSize: 12, fontWeight: 600, marginTop: 8, display: 'block' }}>USA Partner ID (optional)</label>
+                  <input style={inp} value={os.usaPartnerId || ''} onChange={e => setOs({ ...os, usaPartnerId: e.target.value })} onBlur={() => saveOs({})} placeholder="Partner/Reseller ID" />
                 </div>
               </div>
             </div>
@@ -1020,50 +1020,50 @@ const ProductsSection = () => {
         )}
       </div>
 
-      <button className="btn btn-primary" onClick={startNew} style={{ marginBottom:16 }}>+ Add product</button>
+      <button className="btn btn-primary" onClick={startNew} style={{ marginBottom: 16 }}>+ Add product</button>
 
       {/* Hosting plans management */}
-      <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:14, padding:20, marginBottom:20 }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <h3 style={{ margin:0 }}>🖥 Hosting plans</h3>
-          <button className="btn btn-secondary" onClick={()=>setHForm({ name:'', description:'', price:'', cost:'', billingCycle:'yearly', features:'', active:true, sortOrder:0 })}>+ Add hosting plan</button>
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: 20, marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ margin: 0 }}>🖥 Hosting plans</h3>
+          <button className="btn btn-secondary" onClick={() => setHForm({ name: '', description: '', price: '', cost: '', billingCycle: 'yearly', features: '', active: true, sortOrder: 0 })}>+ Add hosting plan</button>
         </div>
-        {hMsg && <div style={{ color: hMsg.startsWith('✓')?'#166534':'#b42318', fontSize:13, marginTop:8 }}>{hMsg}</div>}
+        {hMsg && <div style={{ color: hMsg.startsWith('✓') ? '#166534' : '#b42318', fontSize: 13, marginTop: 8 }}>{hMsg}</div>}
 
         {hForm && (
-          <div style={{ background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:10, padding:16, marginTop:12 }}>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-              <div><label style={{ fontSize:12, fontWeight:600 }}>Plan name</label><input style={inp} value={hForm.name} onChange={e=>setHForm({...hForm, name:e.target.value})} placeholder="Starter Hosting" /></div>
-              <div><label style={{ fontSize:12, fontWeight:600 }}>Selling price ($)</label><input type="number" step="0.01" style={inp} value={hForm.price} onChange={e=>setHForm({...hForm, price:e.target.value})} /></div>
-              <div><label style={{ fontSize:12, fontWeight:600 }}>Your cost ($, optional)</label><input type="number" step="0.01" style={inp} value={hForm.cost} onChange={e=>setHForm({...hForm, cost:e.target.value})} /></div>
-              <div><label style={{ fontSize:12, fontWeight:600 }}>Billing cycle</label>
-                <select style={inp} value={hForm.billingCycle} onChange={e=>setHForm({...hForm, billingCycle:e.target.value})}>
+          <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 10, padding: 16, marginTop: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div><label style={{ fontSize: 12, fontWeight: 600 }}>Plan name</label><input style={inp} value={hForm.name} onChange={e => setHForm({ ...hForm, name: e.target.value })} placeholder="Starter Hosting" /></div>
+              <div><label style={{ fontSize: 12, fontWeight: 600 }}>Selling price ($)</label><input type="number" step="0.01" style={inp} value={hForm.price} onChange={e => setHForm({ ...hForm, price: e.target.value })} /></div>
+              <div><label style={{ fontSize: 12, fontWeight: 600 }}>Your cost ($, optional)</label><input type="number" step="0.01" style={inp} value={hForm.cost} onChange={e => setHForm({ ...hForm, cost: e.target.value })} /></div>
+              <div><label style={{ fontSize: 12, fontWeight: 600 }}>Billing cycle</label>
+                <select style={inp} value={hForm.billingCycle} onChange={e => setHForm({ ...hForm, billingCycle: e.target.value })}>
                   <option value="yearly">Yearly</option><option value="monthly">Monthly</option>
                 </select>
               </div>
             </div>
-            <div style={{ marginTop:10 }}><label style={{ fontSize:12, fontWeight:600 }}>Description</label><input style={inp} value={hForm.description} onChange={e=>setHForm({...hForm, description:e.target.value})} placeholder="Great for small sites" /></div>
-            <div style={{ marginTop:10 }}><label style={{ fontSize:12, fontWeight:600 }}>Features (one per line)</label><textarea style={{ ...inp, height:80, padding:'8px 12px' }} value={typeof hForm.features==='string'?hForm.features:(hForm.features||[]).join('\n')} onChange={e=>setHForm({...hForm, features:e.target.value})} placeholder={"10 GB storage\nFree SSL\n24/7 support"} /></div>
-            <div style={{ display:'flex', gap:10, marginTop:12 }}>
+            <div style={{ marginTop: 10 }}><label style={{ fontSize: 12, fontWeight: 600 }}>Description</label><input style={inp} value={hForm.description} onChange={e => setHForm({ ...hForm, description: e.target.value })} placeholder="Great for small sites" /></div>
+            <div style={{ marginTop: 10 }}><label style={{ fontSize: 12, fontWeight: 600 }}>Features (one per line)</label><textarea style={{ ...inp, height: 80, padding: '8px 12px' }} value={typeof hForm.features === 'string' ? hForm.features : (hForm.features || []).join('\n')} onChange={e => setHForm({ ...hForm, features: e.target.value })} placeholder={"10 GB storage\nFree SSL\n24/7 support"} /></div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
               <button className="btn btn-primary" onClick={saveHosting}>Save plan</button>
-              <button className="btn btn-secondary" onClick={()=>setHForm(null)}>Cancel</button>
+              <button className="btn btn-secondary" onClick={() => setHForm(null)}>Cancel</button>
             </div>
           </div>
         )}
 
         {hosting.length > 0 && (
-          <table style={{ width:'100%', fontSize:14, borderCollapse:'collapse', marginTop:12 }}>
-            <thead><tr style={{ textAlign:'left', color:'#6b7280' }}><th style={{ padding:'8px 0' }}>Name</th><th>Price</th><th>Cycle</th><th>Active</th><th></th></tr></thead>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse', marginTop: 12 }}>
+            <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}><th style={{ padding: '8px 0' }}>Name</th><th>Price</th><th>Cycle</th><th>Active</th><th></th></tr></thead>
             <tbody>
-              {hosting.map(p=>(
-                <tr key={p.planId} style={{ borderTop:'1px solid #f0f0f0' }}>
-                  <td style={{ padding:'8px 0', fontWeight:600 }}>{p.name}</td>
+              {hosting.map(p => (
+                <tr key={p.planId} style={{ borderTop: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '8px 0', fontWeight: 600 }}>{p.name}</td>
                   <td>${Number(p.price).toFixed(2)}</td>
                   <td>{p.billingCycle}</td>
-                  <td>{p.active?'✓':'—'}</td>
-                  <td style={{ textAlign:'right' }}>
-                    <button className="btn btn-secondary" style={{ fontSize:12, padding:'4px 10px', marginRight:6 }} onClick={()=>setHForm({ ...p, features:(p.features||[]).join('\n') })}>Edit</button>
-                    <button className="btn btn-secondary" style={{ fontSize:12, padding:'4px 10px', color:'#b42318', borderColor:'#f5b5b5' }} onClick={()=>deleteHosting(p.planId)}>Delete</button>
+                  <td>{p.active ? '✓' : '—'}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px', marginRight: 6 }} onClick={() => setHForm({ ...p, features: (p.features || []).join('\n') })}>Edit</button>
+                    <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px', color: '#b42318', borderColor: '#f5b5b5' }} onClick={() => deleteHosting(p.planId)}>Delete</button>
                   </td>
                 </tr>
               ))}
@@ -1073,46 +1073,46 @@ const ProductsSection = () => {
       </div>
 
       {editing && (
-        <div style={{ background:'#f5f8ff', border:'1px solid #dbe4ff', borderRadius:12, padding:18, marginBottom:20 }}>
-          <h3 style={{ marginTop:0 }}>{editing === 'new' ? 'New product' : 'Edit product'}</h3>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+        <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 18, marginBottom: 20 }}>
+          <h3 style={{ marginTop: 0 }}>{editing === 'new' ? 'New product' : 'Edit product'}</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
-              <label style={{ fontSize:13 }}>Plan ID (unique, e.g. "starter")</label>
-              <input style={inp} value={form.planId} onChange={e=>setForm({...form, planId:e.target.value})} disabled={editing!=='new'} />
+              <label style={{ fontSize: 13 }}>Plan ID (unique, e.g. "starter")</label>
+              <input style={inp} value={form.planId} onChange={e => setForm({ ...form, planId: e.target.value })} disabled={editing !== 'new'} />
             </div>
             <div>
-              <label style={{ fontSize:13 }}>Category</label>
-              <select style={inp} value={form.category} onChange={e=>setForm({...form, category:e.target.value})}>
+              <label style={{ fontSize: 13 }}>Category</label>
+              <select style={inp} value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
                 <option value="workspace">Workspace</option>
                 <option value="voice">Voice</option>
                 <option value="addon">Add-on</option>
               </select>
             </div>
             <div>
-              <label style={{ fontSize:13 }}>Display name</label>
-              <input style={inp} value={form.name} onChange={e=>setForm({...form, name:e.target.value})} />
+              <label style={{ fontSize: 13 }}>Display name</label>
+              <input style={inp} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
             </div>
             <div>
-              <label style={{ fontSize:13 }}>Price (USD / user / month)</label>
-              <input type="number" step="0.01" style={inp} value={form.monthlyPrice} onChange={e=>setForm({...form, monthlyPrice:e.target.value})} />
+              <label style={{ fontSize: 13 }}>Price (USD / user / month)</label>
+              <input type="number" step="0.01" style={inp} value={form.monthlyPrice} onChange={e => setForm({ ...form, monthlyPrice: e.target.value })} />
             </div>
             <div>
-              <label style={{ fontSize:13 }}>Google SKU ID</label>
-              <input style={inp} value={form.skuId} onChange={e=>setForm({...form, skuId:e.target.value})} placeholder="e.g. 1010020027" />
+              <label style={{ fontSize: 13 }}>Google SKU ID</label>
+              <input style={inp} value={form.skuId} onChange={e => setForm({ ...form, skuId: e.target.value })} placeholder="e.g. 1010020027" />
             </div>
             <div>
-              <label style={{ fontSize:13 }}>Sort order</label>
-              <input type="number" style={inp} value={form.sortOrder} onChange={e=>setForm({...form, sortOrder:e.target.value})} />
+              <label style={{ fontSize: 13 }}>Sort order</label>
+              <input type="number" style={inp} value={form.sortOrder} onChange={e => setForm({ ...form, sortOrder: e.target.value })} />
             </div>
           </div>
-          <label style={{ fontSize:13 }}>Features (comma-separated)</label>
-          <input style={inp} value={form.features} onChange={e=>setForm({...form, features:e.target.value})} placeholder="30 GB storage, Custom email, Video meetings" />
-          <label style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
-            <input type="checkbox" checked={form.active} onChange={e=>setForm({...form, active:e.target.checked})} /> Active (visible to customers)
+          <label style={{ fontSize: 13 }}>Features (comma-separated)</label>
+          <input style={inp} value={form.features} onChange={e => setForm({ ...form, features: e.target.value })} placeholder="30 GB storage, Custom email, Video meetings" />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Active (visible to customers)
           </label>
-          <div style={{ display:'flex', gap:10 }}>
+          <div style={{ display: 'flex', gap: 10 }}>
             <button className="btn btn-primary" onClick={save}>Save</button>
-            <button className="btn btn-secondary" onClick={()=>setEditing(null)}>Cancel</button>
+            <button className="btn btn-secondary" onClick={() => setEditing(null)}>Cancel</button>
           </div>
         </div>
       )}
@@ -1126,12 +1126,12 @@ const ProductsSection = () => {
                 <td>{p.name}</td>
                 <td>{p.category}</td>
                 <td>${Number(p.monthlyPrice ?? 0).toFixed(2)}</td>
-                <td style={{ fontSize:12 }}>{p.skuId || '—'}</td>
+                <td style={{ fontSize: 12 }}>{p.skuId || '—'}</td>
                 <td>{p.active === false ? 'No' : 'Yes'}</td>
                 <td>
-                  <button className="btn btn-secondary" onClick={()=>startEdit(p)}>Edit</button>
+                  <button className="btn btn-secondary" onClick={() => startEdit(p)}>Edit</button>
                   {' '}
-                  <button className="btn btn-secondary" onClick={()=>remove(p._id || p.id)} style={{ color:'#b42318' }}>Delete</button>
+                  <button className="btn btn-secondary" onClick={() => remove(p._id || p.id)} style={{ color: '#b42318' }}>Delete</button>
                 </td>
               </tr>
             ))}
@@ -1318,7 +1318,7 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
       const v = res.data.voice || [];
       setVoicePlans(v);
       if (v.length) setVForm((f) => ({ ...f, voicePlanId: v[0].id }));
-    } catch (_) {}
+    } catch (_) { }
   };
 
   const fetchSubs = async () => {
@@ -1355,7 +1355,7 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
   };
 
   // USA Voice eligibility: USA-account domains without a Voice sub yet
-  const voiceSkus = ['1010330003','1010330004','1010330002','1010330005','1010330006'];
+  const voiceSkus = ['1010330003', '1010330004', '1010330002', '1010330005', '1010330006'];
   const domainsWithVoice = new Set(rows.filter(r => voiceSkus.includes(String(r.skuId))).map(r => r.domain));
   const eligibleDomains = [...new Set(rows.map(r => r.domain))].filter(d => !domainsWithVoice.has(d));
 
@@ -1375,7 +1375,7 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
     return (
       <div className="section">
         <h2>{title}</h2>
-        <div style={{ background:'#fff7ed', color:'#9a3412', padding:'14px 16px', borderRadius:10 }}>
+        <div style={{ background: '#fff7ed', color: '#9a3412', padding: '14px 16px', borderRadius: 10 }}>
           {isUSA
             ? 'USA reseller is not connected. Connect it by visiting /api/google/usa/connect on the backend.'
             : 'Pakistan reseller is not connected.'}
@@ -1388,7 +1388,7 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
     <div className="section">
       <h2>{title}</h2>
 
-      {error && <div className="error-banner" style={{ background:'#fde8e8', color:'#b42318', padding:'10px 14px', borderRadius:8, marginBottom:16 }}>{error}</div>}
+      {error && <div className="error-banner" style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
 
       {summary && (
         <div className="stats-grid" style={{ marginBottom: 20 }}>
@@ -1400,41 +1400,41 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
       )}
 
       {isUSA && (
-        <div className="add-voice-card" style={{ background:'#f5f8ff', border:'1px solid #dbe4ff', borderRadius:12, padding:16, marginBottom:20 }}>
-          <h3 style={{ margin:'0 0 4px' }}>📞 Add Google Voice (USA only)</h3>
-          <p style={{ margin:'0 0 12px', color:'#5b6075', fontSize:14 }}>
+        <div className="add-voice-card" style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <h3 style={{ margin: '0 0 4px' }}>📞 Add Google Voice (USA only)</h3>
+          <p style={{ margin: '0 0 12px', color: '#5b6075', fontSize: 14 }}>
             Voice is available only in supported countries (US, Canada, UK, and parts of Europe). One Voice subscription per domain.
           </p>
-          <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'flex-end' }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div>
-              <label style={{ display:'block', fontSize:13, marginBottom:4 }}>Domain (type to search)</label>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Domain (type to search)</label>
               <input list="usa-domains-list" value={vForm.domain}
-                onChange={(e)=>setVForm({...vForm, domain:e.target.value})}
+                onChange={(e) => setVForm({ ...vForm, domain: e.target.value })}
                 placeholder="Search USA domains…"
-                style={{ height:40, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 10px', minWidth:240 }} />
+                style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', minWidth: 240 }} />
               <datalist id="usa-domains-list">
                 {eligibleDomains.map(d => <option key={d} value={d} />)}
               </datalist>
-              <div style={{ fontSize:12, color:'#7a809a', marginTop:4 }}>{eligibleDomains.length} eligible domains</div>
+              <div style={{ fontSize: 12, color: '#7a809a', marginTop: 4 }}>{eligibleDomains.length} eligible domains</div>
             </div>
             <div>
-              <label style={{ display:'block', fontSize:13, marginBottom:4 }}>Voice plan</label>
-              <select value={vForm.voicePlanId} onChange={(e)=>setVForm({...vForm, voicePlanId:e.target.value})}
-                style={{ height:40, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 10px', minWidth:160 }}>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Voice plan</label>
+              <select value={vForm.voicePlanId} onChange={(e) => setVForm({ ...vForm, voicePlanId: e.target.value })}
+                style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', minWidth: 160 }}>
                 {voicePlans.map(p => <option key={p.id} value={p.id}>{p.name} (${p.monthlyPrice}/mo)</option>)}
               </select>
             </div>
             <div>
-              <label style={{ display:'block', fontSize:13, marginBottom:4 }}>Seats</label>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Seats</label>
               <input type="number" min="1" value={vForm.seats}
-                onChange={(e)=>setVForm({...vForm, seats:Math.max(1, parseInt(e.target.value)||1)})}
-                style={{ height:40, width:80, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 10px' }} />
+                onChange={(e) => setVForm({ ...vForm, seats: Math.max(1, parseInt(e.target.value) || 1) })}
+                style={{ height: 40, width: 80, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }} />
             </div>
-            <button className="btn btn-primary" onClick={addVoice} disabled={vBusy} style={{ height:40 }}>
+            <button className="btn btn-primary" onClick={addVoice} disabled={vBusy} style={{ height: 40 }}>
               {vBusy ? 'Adding…' : 'Add Voice'}
             </button>
           </div>
-          {vMsg && <div style={{ marginTop:12, fontSize:14, color: vMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{vMsg}</div>}
+          {vMsg && <div style={{ marginTop: 12, fontSize: 14, color: vMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{vMsg}</div>}
         </div>
       )}
 
@@ -1462,10 +1462,10 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
             </tbody>
           </table>
 
-          <div style={{ display:'flex', gap:12, alignItems:'center', justifyContent:'center', marginTop:16 }}>
-            <button className="btn btn-secondary" onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page<=1}>← Previous</button>
-            <span style={{ fontSize:14, color:'#5b6075' }}>Page {page} of {totalPages}</span>
-            <button className="btn btn-secondary" onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={page>=totalPages}>Next →</button>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center', marginTop: 16 }}>
+            <button className="btn btn-secondary" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}>← Previous</button>
+            <span style={{ fontSize: 14, color: '#5b6075' }}>Page {page} of {totalPages}</span>
+            <button className="btn btn-secondary" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>Next →</button>
           </div>
         </>
       )}
@@ -1872,11 +1872,11 @@ const AdminCustomersSection = () => {
 
   const load = async () => {
     setLoading(true); setError('');
-    try { const res = await axios.get(`${API_URL}/admin/customers`); setCustomers(res.data.customers||[]); }
+    try { const res = await axios.get(`${API_URL}/admin/customers`); setCustomers(res.data.customers || []); }
     catch (e) { setError(e?.response?.data?.error || 'Could not load customers.'); }
     finally { setLoading(false); }
   };
-  useEffect(()=>{ load(); }, []);
+  useEffect(() => { load(); }, []);
 
   const resetPassword = async (id) => {
     try {
@@ -1943,96 +1943,96 @@ const AdminCustomersSection = () => {
   return (
     <div className="section">
       <h2>👥 Customers</h2>
-      {error && <div style={{ background:'#fde8e8', color:'#b42318', padding:'10px 14px', borderRadius:8, marginBottom:16 }}>{error}</div>}
-      <p style={{ color:'#5b6075' }}>{customers.length} registered customer{customers.length===1?'':'s'}</p>
-      {customers.length===0 ? <p>No customers have registered yet.</p> : (
-        <div style={{ overflowX:'auto' }}>
-        <table className="data-table">
-          <thead><tr><th>Username</th><th>Email</th><th>Domain</th><th>Account</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody>
-            {customers.map(c=>(
-              <tr key={c.id}>
-                <td>{c.username || '—'}</td>
-                <td>{c.email}</td>
-                <td>{c.domain || <span style={{ color:'#b45309' }}>none</span>}</td>
-                <td>{c.account ? c.account.toUpperCase() : '—'}</td>
-                <td><span className={`status ${c.status}`}>{c.status}</span></td>
-                <td>
-                  <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                    <button className="btn btn-secondary" style={{ fontSize:12, padding:'4px 10px' }} onClick={()=>resetPassword(c.id)}>Reset pwd</button>
-                    <button className="btn btn-secondary" style={{ fontSize:12, padding:'4px 10px' }} onClick={()=>openAttach(c)}>Attach subscription</button>
-                  </div>
-                  {resetMsg[c.id] && <div style={{ fontSize:12, color:'#166534', marginTop:4 }}>{resetMsg[c.id]}</div>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {error && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
+      <p style={{ color: '#5b6075' }}>{customers.length} registered customer{customers.length === 1 ? '' : 's'}</p>
+      {customers.length === 0 ? <p>No customers have registered yet.</p> : (
+        <div style={{ overflowX: 'auto' }}>
+          <table className="data-table">
+            <thead><tr><th>Username</th><th>Email</th><th>Domain</th><th>Account</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+              {customers.map(c => (
+                <tr key={c.id}>
+                  <td>{c.username || '—'}</td>
+                  <td>{c.email}</td>
+                  <td>{c.domain || <span style={{ color: '#b45309' }}>none</span>}</td>
+                  <td>{c.account ? c.account.toUpperCase() : '—'}</td>
+                  <td><span className={`status ${c.status}`}>{c.status}</span></td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => resetPassword(c.id)}>Reset pwd</button>
+                      <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openAttach(c)}>Attach subscription</button>
+                    </div>
+                    {resetMsg[c.id] && <div style={{ fontSize: 12, color: '#166534', marginTop: 4 }}>{resetMsg[c.id]}</div>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
       {/* Attach subscription modal */}
       {attaching && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', display:'flex', alignItems:'center', justifyContent:'center', padding:20, zIndex:1000 }} onClick={()=>!attachBusy && setAttaching(null)}>
-          <div style={{ background:'#fff', borderRadius:16, padding:24, maxWidth:520, width:'100%' }} onClick={e=>e.stopPropagation()}>
-            <h3 style={{ marginTop:0 }}>Attach Workspace subscription</h3>
-            <p style={{ color:'#374151', marginTop:0, fontSize:14 }}>Linking to customer: <strong>{attaching.email}</strong></p>
-            <p style={{ color:'#6b7280', marginTop:0, fontSize:13 }}>Enter or confirm the domain of the Google Workspace you manage for this customer. We'll find it on your reseller accounts and detect PK/USA automatically.</p>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 1000 }} onClick={() => !attachBusy && setAttaching(null)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 520, width: '100%' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Attach Workspace subscription</h3>
+            <p style={{ color: '#374151', marginTop: 0, fontSize: 14 }}>Linking to customer: <strong>{attaching.email}</strong></p>
+            <p style={{ color: '#6b7280', marginTop: 0, fontSize: 13 }}>Enter or confirm the domain of the Google Workspace you manage for this customer. We'll find it on your reseller accounts and detect PK/USA automatically.</p>
 
-            <label style={{ fontSize:13, fontWeight:600, display:'block', marginBottom:4 }}>Workspace domain</label>
-            <div style={{ display:'flex', gap:8, marginBottom:12 }}>
-              <input value={attachDom} onChange={e=>{ setAttachDom(e.target.value); setLookup(null); }} placeholder="customerdomain.com"
-                style={{ flex:1, height:42, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 12px' }} />
+            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Workspace domain</label>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <input value={attachDom} onChange={e => { setAttachDom(e.target.value); setLookup(null); }} placeholder="customerdomain.com"
+                style={{ flex: 1, height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }} />
               <button onClick={doLookup} disabled={lookupBusy} className="btn btn-secondary">{lookupBusy ? 'Looking…' : 'Look up'}</button>
             </div>
 
             {lookup?.found && (
-              <div style={{ background:'#f0f7f5', borderRadius:10, padding:14, marginBottom:14 }}>
-                <div style={{ fontWeight:700, marginBottom:6 }}>
+              <div style={{ background: '#f0f7f5', borderRadius: 10, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>
                   Found on the {lookup.account === 'usa' ? 'USA' : 'Pakistan'} account ({lookup.account.toUpperCase()}) ✓
                 </div>
                 {lookup.subscriptions && lookup.subscriptions.length > 0 ? (
                   <>
-                    <div style={{ fontSize:13, color:'#374151' }}>Subscriptions that will be attached:</div>
-                    <ul style={{ margin:'6px 0 0', paddingLeft:18, fontSize:13 }}>
-                      {lookup.subscriptions.map((s,i)=>(
-                        <li key={i}>{s.skuName} — {s.planName || '—'} · {s.seats ?? '?'} seats · <span style={{ color: s.status==='ACTIVE'?'#166534':'#b45309' }}>{s.status}</span></li>
+                    <div style={{ fontSize: 13, color: '#374151' }}>Subscriptions that will be attached:</div>
+                    <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 13 }}>
+                      {lookup.subscriptions.map((s, i) => (
+                        <li key={i}>{s.skuName} — {s.planName || '—'} · {s.seats ?? '?'} seats · <span style={{ color: s.status === 'ACTIVE' ? '#166534' : '#b45309' }}>{s.status}</span></li>
                       ))}
                     </ul>
                   </>
                 ) : (
-                  <div style={{ fontSize:13, color:'#6b7280' }}>{lookup.note || 'Customer found. No subscriptions listed.'}</div>
+                  <div style={{ fontSize: 13, color: '#6b7280' }}>{lookup.note || 'Customer found. No subscriptions listed.'}</div>
                 )}
               </div>
             )}
 
             {lookup && !lookup.found && lookup.diagnostics && lookup.diagnostics.length > 0 && (
-              <div style={{ background:'#fff7ed', borderRadius:10, padding:12, marginBottom:12, fontSize:12, color:'#9a3412' }}>
-                <div style={{ fontWeight:600, marginBottom:4 }}>Why it wasn't found:</div>
-                <ul style={{ margin:0, paddingLeft:16 }}>{lookup.diagnostics.map((d,i)=><li key={i}>{d}</li>)}</ul>
+              <div style={{ background: '#fff7ed', borderRadius: 10, padding: 12, marginBottom: 12, fontSize: 12, color: '#9a3412' }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Why it wasn't found:</div>
+                <ul style={{ margin: 0, paddingLeft: 16 }}>{lookup.diagnostics.map((d, i) => <li key={i}>{d}</li>)}</ul>
               </div>
             )}
 
-            {attachMsg && <div style={{ padding:'10px 14px', borderRadius:8, marginBottom:12, background: attachMsg.startsWith('✓')?'#dcfce7':'#fde8e8', color: attachMsg.startsWith('✓')?'#166534':'#b42318', fontSize:14 }}>{attachMsg}</div>}
+            {attachMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: attachMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: attachMsg.startsWith('✓') ? '#166534' : '#b42318', fontSize: 14 }}>{attachMsg}</div>}
 
-            <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button onClick={confirmAttach} disabled={attachBusy || !lookup?.found} className="btn btn-primary">
                 {attachBusy ? 'Attaching…' : 'Attach to this customer'}
               </button>
-              <button onClick={()=>setAttaching(null)} disabled={attachBusy} className="btn btn-secondary">Cancel</button>
+              <button onClick={() => setAttaching(null)} disabled={attachBusy} className="btn btn-secondary">Cancel</button>
             </div>
             {lookup && !lookup.found && (
-              <div style={{ marginTop:12, borderTop:'1px solid #eee', paddingTop:12 }}>
-                <p style={{ fontSize:12, color:'#6b7280', margin:'0 0 8px' }}>Manage this domain manually (not in your reseller console)? Link it anyway:</p>
-                <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
-                  <select value={forceAcct} onChange={e=>setForceAcct(e.target.value)} style={{ height:36, borderRadius:6, border:'1px solid #d8dbe6', fontSize:13 }}>
+              <div style={{ marginTop: 12, borderTop: '1px solid #eee', paddingTop: 12 }}>
+                <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 8px' }}>Manage this domain manually (not in your reseller console)? Link it anyway:</p>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select value={forceAcct} onChange={e => setForceAcct(e.target.value)} style={{ height: 36, borderRadius: 6, border: '1px solid #d8dbe6', fontSize: 13 }}>
                     <option value="pk">Pakistan</option><option value="usa">USA</option>
                   </select>
-                  <button onClick={forceLink} disabled={attachBusy} className="btn btn-secondary" style={{ fontSize:13 }}>Force link to {forceAcct.toUpperCase()}</button>
+                  <button onClick={forceLink} disabled={attachBusy} className="btn btn-secondary" style={{ fontSize: 13 }}>Force link to {forceAcct.toUpperCase()}</button>
                 </div>
               </div>
             )}
-            <p style={{ fontSize:12, color:'#9ca3af', marginTop:10, marginBottom:0 }}>The account (Pakistan/USA) is detected automatically from where the subscription lives.</p>
+            <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 10, marginBottom: 0 }}>The account (Pakistan/USA) is detected automatically from where the subscription lives.</p>
           </div>
         </div>
       )}
@@ -2054,66 +2054,68 @@ const AdminTicketsSection = () => {
     try {
       const q = filter ? `?status=${filter}` : '';
       const res = await axios.get(`${API_URL}/admin/tickets${q}`);
-      setTickets(res.data.tickets||[]); setCounts(res.data.counts||{});
-    } catch (_) {} finally { setLoading(false); }
+      setTickets(res.data.tickets || []); setCounts(res.data.counts || {});
+    } catch (_) { } finally { setLoading(false); }
   };
-  useEffect(()=>{ load(); }, [filter]);
+  useEffect(() => { load(); }, [filter]);
 
   const sendReply = async (id) => {
     if (!reply) return;
     try { await axios.post(`${API_URL}/admin/tickets/${id}/reply`, { message: reply }); setReply(''); load(); }
-    catch (_) {}
+    catch (_) { }
   };
   const setStatus = async (id, status) => {
     try { await axios.patch(`${API_URL}/admin/tickets/${id}/status`, { status }); load(); }
-    catch (_) {}
+    catch (_) { }
   };
 
   return (
     <div className="section">
       <h2>🎫 Support Tickets</h2>
-      <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
-        {['','open','in_progress','resolved','closed'].map(s=>(
-          <button key={s||'all'} className={`btn ${filter===s?'btn-primary':'btn-secondary'}`} onClick={()=>setFilter(s)}>
-            {s===''?'All':s.replace('_',' ')} {s && counts[s]!==undefined ? `(${counts[s]})` : ''}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        {['', 'open', 'in_progress', 'resolved', 'closed'].map(s => (
+          <button key={s || 'all'} className={`btn ${filter === s ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFilter(s)}>
+            {s === '' ? 'All' : s.replace('_', ' ')} {s && counts[s] !== undefined ? `(${counts[s]})` : ''}
           </button>
         ))}
       </div>
 
-      {loading ? <p>Loading…</p> : tickets.length===0 ? <p>No tickets.</p> : (
-        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-          {tickets.map(t=>(
-            <div key={t._id} style={{ border:'1px solid #e5e7eb', borderRadius:10, padding:14 }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8 }}>
+      {loading ? <p>Loading…</p> : tickets.length === 0 ? <p>No tickets.</p> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {tickets.map(t => (
+            <div key={t._id} style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                 <div>
                   <strong>{t.subject}</strong>
-                  <div style={{ fontSize:12, color:'#6b7280' }}>{t.customerEmail} {t.customerDomain?`• ${t.customerDomain}`:''} • {t.priority}</div>
+                  <div style={{ fontSize: 12, color: '#6b7280' }}>{t.customerEmail} {t.customerDomain ? `• ${t.customerDomain}` : ''} • {t.priority}</div>
                 </div>
-                <span className={`status ${t.status}`}>{t.status.replace('_',' ')}</span>
+                <span className={`status ${t.status}`}>{t.status.replace('_', ' ')}</span>
               </div>
-              <div style={{ display:'flex', gap:6, marginTop:8, flexWrap:'wrap' }}>
-                <button className="btn btn-secondary" onClick={()=>setOpenId(openId===t._id?null:t._id)}>
-                  {openId===t._id?'Hide':'View'}
+              <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                <button className="btn btn-secondary" onClick={() => setOpenId(openId === t._id ? null : t._id)}>
+                  {openId === t._id ? 'Hide' : 'View'}
                 </button>
-                <button className="btn btn-secondary" onClick={()=>setStatus(t._id,'resolved')}>Mark resolved</button>
-                <button className="btn btn-secondary" onClick={()=>setStatus(t._id,'closed')}>Close</button>
-                <button className="btn btn-secondary" onClick={()=>setStatus(t._id,'open')}>Reopen</button>
+                <button className="btn btn-secondary" onClick={() => setStatus(t._id, 'resolved')}>Mark resolved</button>
+                <button className="btn btn-secondary" onClick={() => setStatus(t._id, 'closed')}>Close</button>
+                <button className="btn btn-secondary" onClick={() => setStatus(t._id, 'open')}>Reopen</button>
               </div>
-              {openId===t._id && (
-                <div style={{ marginTop:12 }}>
-                  {t.messages.map((m,i)=>(
-                    <div key={i} style={{ marginBottom:8, padding:'8px 12px', borderRadius:8,
-                      background: m.fromRole==='admin'?'#eef2ff':'#f3f4f6' }}>
-                      <div style={{ fontSize:12, color:'#6b7280', marginBottom:2 }}>
-                        {m.fromRole==='admin'?'Support':'Customer'} • {new Date(m.createdAt).toLocaleString()}
+              {openId === t._id && (
+                <div style={{ marginTop: 12 }}>
+                  {t.messages.map((m, i) => (
+                    <div key={i} style={{
+                      marginBottom: 8, padding: '8px 12px', borderRadius: 8,
+                      background: m.fromRole === 'admin' ? '#eef2ff' : '#f3f4f6'
+                    }}>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>
+                        {m.fromRole === 'admin' ? 'Support' : 'Customer'} • {new Date(m.createdAt).toLocaleString()}
                       </div>
                       <div>{m.body}</div>
                     </div>
                   ))}
-                  <div style={{ display:'flex', gap:8, marginTop:8 }}>
-                    <input placeholder="Type a reply…" value={reply} onChange={e=>setReply(e.target.value)}
-                      style={{ flex:1, height:38, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 10px' }} />
-                    <button className="btn btn-primary" onClick={()=>sendReply(t._id)}>Reply</button>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <input placeholder="Type a reply…" value={reply} onChange={e => setReply(e.target.value)}
+                      style={{ flex: 1, height: 38, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }} />
+                    <button className="btn btn-primary" onClick={() => sendReply(t._id)}>Reply</button>
                   </div>
                 </div>
               )}
@@ -2147,11 +2149,11 @@ const AdminDomainsSslSection = () => {
     setLoading(true); setMsg('');
     try {
       const [b, t, s, so, dd] = await Promise.all([
-        axios.get(`${API_URL}/admin/nc/balance`).catch(()=>({ data:null })),
-        axios.get(`${API_URL}/admin/nc/tld-pricing`).catch(()=>({ data:{ tlds:[] } })),
-        axios.get(`${API_URL}/admin/nc/ssl-pricing`).catch(()=>({ data:{ products:[] } })),
-        axios.get(`${API_URL}/admin/nc/ssl-orders`).catch(()=>({ data:{ orders:[] } })),
-        axios.get(`${API_URL}/admin/nc/domain-diagnostic`).catch(()=>({ data:{ orders:[] } })),
+        axios.get(`${API_URL}/admin/nc/balance`).catch(() => ({ data: null })),
+        axios.get(`${API_URL}/admin/nc/tld-pricing`).catch(() => ({ data: { tlds: [] } })),
+        axios.get(`${API_URL}/admin/nc/ssl-pricing`).catch(() => ({ data: { products: [] } })),
+        axios.get(`${API_URL}/admin/nc/ssl-orders`).catch(() => ({ data: { orders: [] } })),
+        axios.get(`${API_URL}/admin/nc/domain-diagnostic`).catch(() => ({ data: { orders: [] } })),
       ]);
       setBalance(b.data);
       setTlds(t.data.tlds || []); setDefaultMarkup(t.data.defaultMarkup ?? 20);
@@ -2172,70 +2174,70 @@ const AdminDomainsSslSection = () => {
     } catch (e) { setMsg(e?.response?.data?.error || 'Could not save price.'); }
   };
 
-  const card = { background:'#fff', borderRadius:14, padding:20, marginBottom:18, border:'1px solid #e5e7eb' };
+  const card = { background: '#fff', borderRadius: 14, padding: 20, marginBottom: 18, border: '1px solid #e5e7eb' };
   const tabBtn = (k, label) => (
-    <button onClick={()=>setTab(k)} style={{ background: tab===k?'#0F766E':'#fff', color: tab===k?'#fff':'#111', border:'1px solid '+(tab===k?'#0F766E':'#d8dbe6'), borderRadius:8, padding:'8px 16px', cursor:'pointer', fontWeight:600 }}>{label}</button>
+    <button onClick={() => setTab(k)} style={{ background: tab === k ? '#0F766E' : '#fff', color: tab === k ? '#fff' : '#111', border: '1px solid ' + (tab === k ? '#0F766E' : '#d8dbe6'), borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}>{label}</button>
   );
-  const inp = { borderRadius:8, border:'1px solid #d8dbe6', padding:'6px 8px', fontSize:14, width:90 };
+  const inp = { borderRadius: 8, border: '1px solid #d8dbe6', padding: '6px 8px', fontSize: 14, width: 90 };
 
   return (
     <div>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:10 }}>
-        <h1 style={{ margin:0 }}>Domains & SSL</h1>
-        {balance && <div style={{ background:'#f0fdfa', border:'1px solid #99f6e4', borderRadius:10, padding:'8px 16px', fontWeight:600, color:'#0F766E' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <h1 style={{ margin: 0 }}>Domains & SSL</h1>
+        {balance && <div style={{ background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 10, padding: '8px 16px', fontWeight: 600, color: '#0F766E' }}>
           Namecheap balance: {balance.currency || '$'} {Number(balance.availableBalance ?? balance.balance ?? 0).toFixed(2)}
         </div>}
       </div>
-      <p style={{ color:'#6b7280', marginTop:6 }}>Set your selling prices (markup % or fixed), and manage SSL & domain orders. Default markup: {defaultMarkup}%.</p>
+      <p style={{ color: '#6b7280', marginTop: 6 }}>Set your selling prices (markup % or fixed), and manage SSL & domain orders. Default markup: {defaultMarkup}%.</p>
 
-      <div style={{ display:'flex', gap:8, margin:'14px 0', flexWrap:'wrap' }}>
-        {tabBtn('tld','TLD pricing')}
-        {tabBtn('ssl','SSL pricing')}
-        {tabBtn('sslorders','SSL orders')}
-        {tabBtn('domainorders','Domain orders')}
+      <div style={{ display: 'flex', gap: 8, margin: '14px 0', flexWrap: 'wrap' }}>
+        {tabBtn('tld', 'TLD pricing')}
+        {tabBtn('ssl', 'SSL pricing')}
+        {tabBtn('sslorders', 'SSL orders')}
+        {tabBtn('domainorders', 'Domain orders')}
       </div>
 
-      {msg && <div style={{ padding:'10px 14px', borderRadius:8, marginBottom:14, background: msg.startsWith('✓')?'#dcfce7':'#fef3c7', color: msg.startsWith('✓')?'#166534':'#92600a' }}>{msg}</div>}
+      {msg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a' }}>{msg}</div>}
       {loading && <p>Loading…</p>}
 
-      {tab==='tld' && (
+      {tab === 'tld' && (
         <div style={card}>
-          <h3 style={{ marginTop:0 }}>Domain TLD pricing</h3>
-          <p style={{ color:'#6b7280', fontSize:13 }}>Your cost is from Namecheap. Set a markup % or a fixed price (fixed wins). Leave both blank to use the default {defaultMarkup}% markup.</p>
-          <table style={{ width:'100%', fontSize:14, borderCollapse:'collapse' }}>
-            <thead><tr style={{ textAlign:'left', color:'#6b7280' }}><th style={{ padding:'6px 0' }}>TLD</th><th>Cost</th><th>Markup %</th><th>Fixed $</th><th>Your price</th><th></th></tr></thead>
+          <h3 style={{ marginTop: 0 }}>Domain TLD pricing</h3>
+          <p style={{ color: '#6b7280', fontSize: 13 }}>Your cost is from Namecheap. Set a markup % or a fixed price (fixed wins). Leave both blank to use the default {defaultMarkup}% markup.</p>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}><th style={{ padding: '6px 0' }}>TLD</th><th>Cost</th><th>Markup %</th><th>Fixed $</th><th>Your price</th><th></th></tr></thead>
             <tbody>
-              {tlds.map((t,i)=><TldPriceRow key={t.tld} row={t} inp={inp} onSave={savePricing} />)}
+              {tlds.map((t, i) => <TldPriceRow key={t.tld} row={t} inp={inp} onSave={savePricing} />)}
             </tbody>
           </table>
         </div>
       )}
 
-      {tab==='ssl' && (
+      {tab === 'ssl' && (
         <div style={card}>
-          <h3 style={{ marginTop:0 }}>SSL certificate pricing</h3>
-          <p style={{ color:'#6b7280', fontSize:13 }}>Same pricing model as domains. These products appear in the customer SSL page only if a price is set (or default markup applies).</p>
-          <table style={{ width:'100%', fontSize:14, borderCollapse:'collapse' }}>
-            <thead><tr style={{ textAlign:'left', color:'#6b7280' }}><th style={{ padding:'6px 0' }}>Product</th><th>Cost</th><th>Markup %</th><th>Fixed $</th><th>Your price</th><th></th></tr></thead>
+          <h3 style={{ marginTop: 0 }}>SSL certificate pricing</h3>
+          <p style={{ color: '#6b7280', fontSize: 13 }}>Same pricing model as domains. These products appear in the customer SSL page only if a price is set (or default markup applies).</p>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}><th style={{ padding: '6px 0' }}>Product</th><th>Cost</th><th>Markup %</th><th>Fixed $</th><th>Your price</th><th></th></tr></thead>
             <tbody>
-              {sslPricing.map((p)=><SslPriceRow key={p.name} row={p} inp={inp} onSave={savePricing} />)}
+              {sslPricing.map((p) => <SslPriceRow key={p.name} row={p} inp={inp} onSave={savePricing} />)}
             </tbody>
           </table>
         </div>
       )}
 
-      {tab==='sslorders' && (
+      {tab === 'sslorders' && (
         <div style={card}>
-          <h3 style={{ marginTop:0 }}>SSL orders</h3>
-          {sslOrders.length===0 ? <p style={{ color:'#6b7280' }}>No SSL orders yet.</p> : (
-            <table style={{ width:'100%', fontSize:14, borderCollapse:'collapse' }}>
-              <thead><tr style={{ textAlign:'left', color:'#6b7280' }}><th style={{ padding:'6px 0' }}>Order</th><th>Product</th><th>Domain</th><th>Customer</th><th>Status</th></tr></thead>
+          <h3 style={{ marginTop: 0 }}>SSL orders</h3>
+          {sslOrders.length === 0 ? <p style={{ color: '#6b7280' }}>No SSL orders yet.</p> : (
+            <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+              <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}><th style={{ padding: '6px 0' }}>Order</th><th>Product</th><th>Domain</th><th>Customer</th><th>Status</th></tr></thead>
               <tbody>
-                {sslOrders.map(o=>(
-                  <tr key={o._id||o.id} style={{ borderTop:'1px solid #f0f0f0' }}>
-                    <td style={{ padding:'8px 0' }}>{o.orderNumber}</td>
-                    <td>{o.productType}</td><td>{o.forDomain||'—'}</td><td>{o.customer||'—'}</td>
-                    <td><span style={{ color:(o.status==='purchased'||o.status==='active')?'#166534':o.status==='failed'?'#b42318':'#b45309', fontWeight:600 }}>{o.status}</span></td>
+                {sslOrders.map(o => (
+                  <tr key={o._id || o.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '8px 0' }}>{o.orderNumber}</td>
+                    <td>{o.productType}</td><td>{o.forDomain || '—'}</td><td>{o.customer || '—'}</td>
+                    <td><span style={{ color: (o.status === 'purchased' || o.status === 'active') ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{o.status}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -2244,19 +2246,19 @@ const AdminDomainsSslSection = () => {
         </div>
       )}
 
-      {tab==='domainorders' && (
+      {tab === 'domainorders' && (
         <div style={card}>
-          <h3 style={{ marginTop:0 }}>Domain orders</h3>
-          {domainOrders.length===0 ? <p style={{ color:'#6b7280' }}>No domain orders yet.</p> : (
-            <table style={{ width:'100%', fontSize:14, borderCollapse:'collapse' }}>
-              <thead><tr style={{ textAlign:'left', color:'#6b7280' }}><th style={{ padding:'6px 0' }}>Domain</th><th>Order status</th><th>Payment</th><th>Test?</th><th>Note</th></tr></thead>
+          <h3 style={{ marginTop: 0 }}>Domain orders</h3>
+          {domainOrders.length === 0 ? <p style={{ color: '#6b7280' }}>No domain orders yet.</p> : (
+            <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+              <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}><th style={{ padding: '6px 0' }}>Domain</th><th>Order status</th><th>Payment</th><th>Test?</th><th>Note</th></tr></thead>
               <tbody>
-                {domainOrders.map((o,i)=>(
-                  <tr key={i} style={{ borderTop:'1px solid #f0f0f0' }}>
-                    <td style={{ padding:'8px 0', fontWeight:600 }}>{o.domain}</td>
-                    <td><span style={{ color:o.orderStatus==='registered'?'#166534':o.orderStatus==='failed'?'#b42318':'#b45309', fontWeight:600 }}>{o.orderStatus}</span></td>
-                    <td>{o.paymentStatus}</td><td>{o.isTest?'Yes':'No'}</td>
-                    <td style={{ color:'#6b7280', fontSize:12, maxWidth:240, overflow:'hidden', textOverflow:'ellipsis' }}>{o.result||'—'}</td>
+                {domainOrders.map((o, i) => (
+                  <tr key={i} style={{ borderTop: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '8px 0', fontWeight: 600 }}>{o.domain}</td>
+                    <td><span style={{ color: o.orderStatus === 'registered' ? '#166534' : o.orderStatus === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{o.orderStatus}</span></td>
+                    <td>{o.paymentStatus}</td><td>{o.isTest ? 'Yes' : 'No'}</td>
+                    <td style={{ color: '#6b7280', fontSize: 12, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.result || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -2273,13 +2275,13 @@ const TldPriceRow = ({ row, inp, onSave }) => {
   const [mk, setMk] = useState(row.markupPercent ?? '');
   const [fx, setFx] = useState(row.fixedPrice ?? '');
   return (
-    <tr style={{ borderTop:'1px solid #f0f0f0' }}>
-      <td style={{ padding:'8px 0', fontWeight:600 }}>.{row.tld}</td>
-      <td>{row.cost!=null ? `$${Number(row.cost).toFixed(2)}` : (row.error?'—':'…')}</td>
-      <td><input style={inp} value={mk} onChange={e=>setMk(e.target.value)} placeholder="e.g. 20" /></td>
-      <td><input style={inp} value={fx} onChange={e=>setFx(e.target.value)} placeholder="e.g. 14.99" /></td>
-      <td style={{ fontWeight:600, color:'#0F766E' }}>{row.price!=null?`$${Number(row.price).toFixed(2)}`:'—'}</td>
-      <td><button onClick={()=>onSave('tld', row.tld, mk, fx, row.cost)} style={{ background:'#0F766E', color:'#fff', border:'none', borderRadius:6, padding:'6px 12px', cursor:'pointer', fontSize:13 }}>Save</button></td>
+    <tr style={{ borderTop: '1px solid #f0f0f0' }}>
+      <td style={{ padding: '8px 0', fontWeight: 600 }}>.{row.tld}</td>
+      <td>{row.cost != null ? `$${Number(row.cost).toFixed(2)}` : (row.error ? '—' : '…')}</td>
+      <td><input style={inp} value={mk} onChange={e => setMk(e.target.value)} placeholder="e.g. 20" /></td>
+      <td><input style={inp} value={fx} onChange={e => setFx(e.target.value)} placeholder="e.g. 14.99" /></td>
+      <td style={{ fontWeight: 600, color: '#0F766E' }}>{row.price != null ? `$${Number(row.price).toFixed(2)}` : '—'}</td>
+      <td><button onClick={() => onSave('tld', row.tld, mk, fx, row.cost)} style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Save</button></td>
     </tr>
   );
 };
@@ -2289,13 +2291,13 @@ const SslPriceRow = ({ row, inp, onSave }) => {
   const [mk, setMk] = useState(row.markupPercent ?? '');
   const [fx, setFx] = useState(row.fixedPrice ?? '');
   return (
-    <tr style={{ borderTop:'1px solid #f0f0f0' }}>
-      <td style={{ padding:'8px 0', fontWeight:600 }}>{row.name}</td>
-      <td>{row.cost!=null ? `$${Number(row.cost).toFixed(2)}` : '…'}</td>
-      <td><input style={inp} value={mk} onChange={e=>setMk(e.target.value)} placeholder="e.g. 20" /></td>
-      <td><input style={inp} value={fx} onChange={e=>setFx(e.target.value)} placeholder="e.g. 29.99" /></td>
-      <td style={{ fontWeight:600, color:'#0F766E' }}>{row.price!=null?`$${Number(row.price).toFixed(2)}`:'—'}</td>
-      <td><button onClick={()=>onSave('ssl', row.name, mk, fx, row.cost)} style={{ background:'#0F766E', color:'#fff', border:'none', borderRadius:6, padding:'6px 12px', cursor:'pointer', fontSize:13 }}>Save</button></td>
+    <tr style={{ borderTop: '1px solid #f0f0f0' }}>
+      <td style={{ padding: '8px 0', fontWeight: 600 }}>{row.name}</td>
+      <td>{row.cost != null ? `$${Number(row.cost).toFixed(2)}` : '…'}</td>
+      <td><input style={inp} value={mk} onChange={e => setMk(e.target.value)} placeholder="e.g. 20" /></td>
+      <td><input style={inp} value={fx} onChange={e => setFx(e.target.value)} placeholder="e.g. 29.99" /></td>
+      <td style={{ fontWeight: 600, color: '#0F766E' }}>{row.price != null ? `$${Number(row.price).toFixed(2)}` : '—'}</td>
+      <td><button onClick={() => onSave('ssl', row.name, mk, fx, row.cost)} style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Save</button></td>
     </tr>
   );
 };
@@ -2340,7 +2342,7 @@ const AdminVoiceMonitorSection = () => {
   };
 
   const setStatus = async (id, status) => {
-    try { await axios.patch(`${API_URL}/admin/abuse-reports/${id}`, { status }); load(); } catch (_) {}
+    try { await axios.patch(`${API_URL}/admin/abuse-reports/${id}`, { status }); load(); } catch (_) { }
   };
 
   const suspendCustomer = async (domain) => {
@@ -2560,14 +2562,14 @@ const AdminEmailsSection = () => {
   const [mMsg, setMMsg] = useState('');
 
   const TEAL = '#0F766E';
-  const card = { background:'#fff', borderRadius:14, padding:20, boxShadow:'0 1px 3px rgba(0,0,0,0.06)', marginBottom:16 };
-  const inp = { width:'100%', borderRadius:8, border:'1px solid #d8dbe6', padding:'10px 12px', marginBottom:12, fontSize:14, fontFamily:'inherit' };
+  const card = { background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 16 };
+  const inp = { width: '100%', borderRadius: 8, border: '1px solid #d8dbe6', padding: '10px 12px', marginBottom: 12, fontSize: 14, fontFamily: 'inherit' };
 
   const labels = { warning: 'Renewal warning', suspension: 'Suspension notice', payment: 'Payment confirmation' };
 
   const load = async () => {
     try { const r = await axios.get(`${API_URL}/admin/email/templates`); setData(r.data); pick('warning', r.data); }
-    catch (_) {}
+    catch (_) { }
   };
   useEffect(() => { load(); }, []);
 
@@ -2611,78 +2613,78 @@ const AdminEmailsSection = () => {
       <h2>✉️ Emails</h2>
 
       {!data.emailConfigured && (
-        <div style={{ background:'#fef3c7', color:'#92600a', padding:'12px 16px', borderRadius:8, marginBottom:16 }}>
+        <div style={{ background: '#fef3c7', color: '#92600a', padding: '12px 16px', borderRadius: 8, marginBottom: 16 }}>
           ⚠️ Email isn't configured yet. Set <code>EMAIL_USER</code> and <code>EMAIL_PASSWORD</code> (Gmail/Workspace app password) in Railway to send emails.
         </div>
       )}
       {data.emailConfigured && (
-        <div style={{ color:'#166534', fontSize:14, marginBottom:16 }}>
+        <div style={{ color: '#166534', fontSize: 14, marginBottom: 16 }}>
           Sending from: <strong>{data.fromName} &lt;{data.fromAddress}&gt;</strong>
         </div>
       )}
 
-      <div style={{ display:'flex', gap:8, marginBottom:18 }}>
-        <button className={`btn ${tab==='templates'?'btn-primary':'btn-secondary'}`} onClick={()=>setTab('templates')}>Templates</button>
-        <button className={`btn ${tab==='send'?'btn-primary':'btn-secondary'}`} onClick={()=>setTab('send')}>Send a message</button>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+        <button className={`btn ${tab === 'templates' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('templates')}>Templates</button>
+        <button className={`btn ${tab === 'send' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('send')}>Send a message</button>
       </div>
 
-      {tab==='templates' && (
+      {tab === 'templates' && (
         <>
-          <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
-            {['warning','suspension','payment'].map(k => (
-              <button key={k} className={`btn ${editing===k?'btn-primary':'btn-secondary'}`} onClick={()=>pick(k)}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+            {['warning', 'suspension', 'payment'].map(k => (
+              <button key={k} className={`btn ${editing === k ? 'btn-primary' : 'btn-secondary'}`} onClick={() => pick(k)}>
                 {labels[k]}{data.templates[k].customized ? ' •' : ''}
               </button>
             ))}
           </div>
 
           <div style={card}>
-            <p style={{ color:'#6b7280', fontSize:13, marginTop:0 }}>
+            <p style={{ color: '#6b7280', fontSize: 13, marginTop: 0 }}>
               Use variables: <code>{'{{domain}}'}</code>, <code>{'{{dueDate}}'}</code>, <code>{'{{amount}}'}</code>, <code>{'{{brand}}'}</code>. They're filled automatically when sent.
             </p>
-            <label style={{ fontSize:13, fontWeight:600 }}>Subject</label>
-            <input style={inp} value={draft.subject} onChange={e=>setDraft({...draft, subject:e.target.value})} />
-            <label style={{ fontSize:13, fontWeight:600 }}>Heading</label>
-            <input style={inp} value={draft.heading} onChange={e=>setDraft({...draft, heading:e.target.value})} />
-            <label style={{ fontSize:13, fontWeight:600 }}>Body (one paragraph per line)</label>
-            <textarea style={{ ...inp, minHeight:140 }} value={draft.body} onChange={e=>setDraft({...draft, body:e.target.value})} />
-            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Subject</label>
+            <input style={inp} value={draft.subject} onChange={e => setDraft({ ...draft, subject: e.target.value })} />
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Heading</label>
+            <input style={inp} value={draft.heading} onChange={e => setDraft({ ...draft, heading: e.target.value })} />
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Body (one paragraph per line)</label>
+            <textarea style={{ ...inp, minHeight: 140 }} value={draft.body} onChange={e => setDraft({ ...draft, body: e.target.value })} />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="btn btn-primary" onClick={save}>Save template</button>
               <button className="btn btn-secondary" onClick={preview}>Preview</button>
               <button className="btn btn-secondary" onClick={resetDefault}>Reset to default</button>
             </div>
-            {msg && <div style={{ marginTop:10, color: msg.startsWith('✓')?'#166534':'#b42318' }}>{msg}</div>}
+            {msg && <div style={{ marginTop: 10, color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</div>}
           </div>
 
           {previewHtml && (
             <div style={card}>
-              <h3 style={{ marginTop:0 }}>Preview</h3>
+              <h3 style={{ marginTop: 0 }}>Preview</h3>
               <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
             </div>
           )}
 
           <div style={card}>
-            <h3 style={{ marginTop:0 }}>Send a test</h3>
-            <p style={{ color:'#6b7280', fontSize:13 }}>Sends the <strong>{labels[editing]}</strong> template (with sample data) to an address.</p>
-            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-              <input style={{ ...inp, flex:1, marginBottom:0, minWidth:220 }} placeholder={data.fromAddress || 'you@example.com'} value={testTo} onChange={e=>setTestTo(e.target.value)} />
+            <h3 style={{ marginTop: 0 }}>Send a test</h3>
+            <p style={{ color: '#6b7280', fontSize: 13 }}>Sends the <strong>{labels[editing]}</strong> template (with sample data) to an address.</p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <input style={{ ...inp, flex: 1, marginBottom: 0, minWidth: 220 }} placeholder={data.fromAddress || 'you@example.com'} value={testTo} onChange={e => setTestTo(e.target.value)} />
               <button className="btn btn-primary" onClick={sendTest}>Send test</button>
             </div>
           </div>
         </>
       )}
 
-      {tab==='send' && (
+      {tab === 'send' && (
         <div style={card}>
-          <h3 style={{ marginTop:0 }}>Send a message to a customer</h3>
-          <label style={{ fontSize:13, fontWeight:600 }}>To (email)</label>
-          <input style={inp} value={mTo} onChange={e=>setMTo(e.target.value)} placeholder="customer@example.com" />
-          <label style={{ fontSize:13, fontWeight:600 }}>Subject</label>
-          <input style={inp} value={mSubject} onChange={e=>setMSubject(e.target.value)} />
-          <label style={{ fontSize:13, fontWeight:600 }}>Message (one paragraph per line)</label>
-          <textarea style={{ ...inp, minHeight:160 }} value={mBody} onChange={e=>setMBody(e.target.value)} />
+          <h3 style={{ marginTop: 0 }}>Send a message to a customer</h3>
+          <label style={{ fontSize: 13, fontWeight: 600 }}>To (email)</label>
+          <input style={inp} value={mTo} onChange={e => setMTo(e.target.value)} placeholder="customer@example.com" />
+          <label style={{ fontSize: 13, fontWeight: 600 }}>Subject</label>
+          <input style={inp} value={mSubject} onChange={e => setMSubject(e.target.value)} />
+          <label style={{ fontSize: 13, fontWeight: 600 }}>Message (one paragraph per line)</label>
+          <textarea style={{ ...inp, minHeight: 160 }} value={mBody} onChange={e => setMBody(e.target.value)} />
           <button className="btn btn-primary" onClick={sendManual}>Send email</button>
-          {mMsg && <div style={{ marginTop:10, color: mMsg.startsWith('✓')?'#166534':'#b42318' }}>{mMsg}</div>}
+          {mMsg && <div style={{ marginTop: 10, color: mMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{mMsg}</div>}
         </div>
       )}
     </div>
@@ -2716,7 +2718,7 @@ const AdminPaymentsSection = () => {
   const [bulkUnsuspendBusy, setBulkUnsuspendBusy] = useState(false);
 
   const runBulkUnsuspend = async () => {
-    const domains = bulkUnsuspendDomains.split(/[\s,]+/).map(d=>d.trim().toLowerCase()).filter(Boolean);
+    const domains = bulkUnsuspendDomains.split(/[\s,]+/).map(d => d.trim().toLowerCase()).filter(Boolean);
     if (!domains.length) { setSubBillingMsg('Paste at least one domain.'); return; }
     if (!window.confirm(`Reactivate ALL suspended subscriptions for ${domains.length} domain(s)?`)) return;
     setBulkUnsuspendBusy(true); setBulkUnsuspendResult(null); setSubBillingMsg('');
@@ -2796,14 +2798,14 @@ const AdminPaymentsSection = () => {
 
   const loadSubBilling = async () => {
     try { const r = await axios.get(`${API_URL}/admin/billing/subscriptions`); setSubBilling(r.data.subscriptions || []); }
-    catch (_) {}
+    catch (_) { }
   };
   const syncSubBilling = async () => {
     setSubBillingMsg('Syncing from Google…');
     try {
       const r = await axios.post(`${API_URL}/admin/billing/sync`, {});
       const pk = r.data.pk || {}, usa = r.data.usa || {};
-      setSubBillingMsg(`✓ Synced. PK: ${pk.total||0} found (${pk.seeded||0} new)${pk.error?' ['+pk.error+']':''} · USA: ${usa.total||0} found (${usa.seeded||0} new)${usa.error?' ['+usa.error+']':''}`);
+      setSubBillingMsg(`✓ Synced. PK: ${pk.total || 0} found (${pk.seeded || 0} new)${pk.error ? ' [' + pk.error + ']' : ''} · USA: ${usa.total || 0} found (${usa.seeded || 0} new)${usa.error ? ' [' + usa.error + ']' : ''}`);
       loadSubBilling();
     }
     catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Sync failed.'); }
@@ -2812,7 +2814,7 @@ const AdminPaymentsSection = () => {
     setSubBillingMsg('Running check…');
     try {
       const r = await axios.post(`${API_URL}/admin/billing/run`, {});
-      let m = `✓ ${r.data.checked} customers checked · warned ${r.data.warned.length} · suspended ${r.data.suspended.length} · overdue ${r.data.overdue.length} · whitelisted skipped ${r.data.skippedWhitelisted||0}`;
+      let m = `✓ ${r.data.checked} customers checked · warned ${r.data.warned.length} · suspended ${r.data.suspended.length} · overdue ${r.data.overdue.length} · whitelisted skipped ${r.data.skippedWhitelisted || 0}`;
       if (r.data.suspendErrors && r.data.suspendErrors.length) {
         m += ` | ⚠️ ${r.data.suspendErrors.length} FAILED: ` + r.data.suspendErrors.map(e => `${e.domain} (${e.error})`).join('; ');
       }
@@ -2841,7 +2843,7 @@ const AdminPaymentsSection = () => {
 
   const loadDomainOrders = async () => {
     try { const r = await axios.get(`${API_URL}/admin/domain-orders`); setDomainOrders(r.data.orders || []); }
-    catch (_) {}
+    catch (_) { }
   };
 
   const retryDomain = async (id) => {
@@ -2871,7 +2873,7 @@ const AdminPaymentsSection = () => {
       setS(st.data);
       setPayments(p.data.payments || []);
       setTotalPaid(p.data.totalPaid || 0);
-    } catch (_) {} finally { setLoading(false); }
+    } catch (_) { } finally { setLoading(false); }
     loadBalance();
   };
   useEffect(() => { load(); }, []);
@@ -2901,9 +2903,9 @@ const AdminPaymentsSection = () => {
     finally { setSaving(false); }
   };
 
-  const card = { background:'#fff', borderRadius:14, padding:20, boxShadow:'0 1px 3px rgba(0,0,0,0.06)', marginBottom:18 };
-  const inp = { width:'100%', height:38, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 10px', marginBottom:12, fontFamily:'monospace', fontSize:13 };
-  const chip = (ok) => ({ fontSize:12, fontWeight:600, color: ok?'#166534':'#b45309' });
+  const card = { background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 18 };
+  const inp = { width: '100%', height: 38, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12, fontFamily: 'monospace', fontSize: 13 };
+  const chip = (ok) => ({ fontSize: 12, fontWeight: 600, color: ok ? '#166534' : '#b45309' });
 
   if (loading || !s) return <div className="loading">Loading payment settings…</div>;
 
@@ -2911,194 +2913,194 @@ const AdminPaymentsSection = () => {
     <div className="section">
       <h2>💳 Payments</h2>
 
-      <div style={{ display:'flex', gap:8, marginBottom:18 }}>
-        <button className={`btn ${tab==='settings'?'btn-primary':'btn-secondary'}`} onClick={()=>setTab('settings')}>Settings</button>
-        <button className={`btn ${tab==='transactions'?'btn-primary':'btn-secondary'}`} onClick={()=>setTab('transactions')}>Transactions</button>
-        <button className={`btn ${tab==='domains'?'btn-primary':'btn-secondary'}`} onClick={()=>{ setTab('domains'); loadDomainOrders(); }}>Domain Orders</button>
-        <button className={`btn ${tab==='subbilling'?'btn-primary':'btn-secondary'}`} onClick={()=>{ setTab('subbilling'); loadSubBilling(); }}>Subscription Billing</button>
-        <button className={`btn ${tab==='renewed'?'btn-primary':'btn-secondary'}`} onClick={()=>{ setTab('renewed'); loadSubBilling(); }}>Whitelist</button>
-        <button className={`btn ${tab==='suspended'?'btn-primary':'btn-secondary'}`} onClick={()=>{ setTab('suspended'); loadSuspended(); }}>Suspended Accounts</button>
-        <button className={`btn ${tab==='unsuspend'?'btn-primary':'btn-secondary'}`} onClick={()=>{ setTab('unsuspend'); loadSuspended(); }}>Unsuspend</button>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+        <button className={`btn ${tab === 'settings' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('settings')}>Settings</button>
+        <button className={`btn ${tab === 'transactions' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('transactions')}>Transactions</button>
+        <button className={`btn ${tab === 'domains' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('domains'); loadDomainOrders(); }}>Domain Orders</button>
+        <button className={`btn ${tab === 'subbilling' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('subbilling'); loadSubBilling(); }}>Subscription Billing</button>
+        <button className={`btn ${tab === 'renewed' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('renewed'); loadSubBilling(); }}>Whitelist</button>
+        <button className={`btn ${tab === 'suspended' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('suspended'); loadSuspended(); }}>Suspended Accounts</button>
+        <button className={`btn ${tab === 'unsuspend' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTab('unsuspend'); loadSuspended(); }}>Unsuspend</button>
       </div>
 
-      {tab==='settings' && (
+      {tab === 'settings' && (
         <>
-          {msg && <div style={{ background: msg.startsWith('✓')?'#dcfce7':'#fde8e8', color: msg.startsWith('✓')?'#166534':'#b42318', padding:'10px 14px', borderRadius:8, marginBottom:14 }}>{msg}</div>}
+          {msg && <div style={{ background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 14 }}>{msg}</div>}
 
           {/* STRIPE */}
           <div style={card}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <h3 style={{ margin:0 }}>💳 Stripe Checkout</h3>
-              <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14 }}>
-                <input type="checkbox" checked={!!s.stripeEnabled} onChange={e=>set('stripeEnabled', e.target.checked)} /> Enabled
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>💳 Stripe Checkout</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                <input type="checkbox" checked={!!s.stripeEnabled} onChange={e => set('stripeEnabled', e.target.checked)} /> Enabled
               </label>
             </div>
-            <p style={{ color:'#6b7280', fontSize:14 }}>Hosted Stripe Checkout. Customers are redirected to Stripe, then returned to your site. Currently active mode: <strong style={{ color: s.stripeMode==='live'?'#166534':'#b45309' }}>{(s.stripeMode||'test').toUpperCase()}</strong></p>
+            <p style={{ color: '#6b7280', fontSize: 14 }}>Hosted Stripe Checkout. Customers are redirected to Stripe, then returned to your site. Currently active mode: <strong style={{ color: s.stripeMode === 'live' ? '#166534' : '#b45309' }}>{(s.stripeMode || 'test').toUpperCase()}</strong></p>
 
-            <label style={{ fontSize:13, fontWeight:600 }}>Payment environment</label>
-            <div style={{ display:'flex', gap:16, margin:'8px 0 16px' }}>
-              <label style={{ display:'flex', alignItems:'center', gap:6 }}>
-                <input type="radio" name="mode" checked={s.stripeMode!=='live'} onChange={()=>set('stripeMode','test')} /> Test (sandbox)
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Payment environment</label>
+            <div style={{ display: 'flex', gap: 16, margin: '8px 0 16px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="radio" name="mode" checked={s.stripeMode !== 'live'} onChange={() => set('stripeMode', 'test')} /> Test (sandbox)
               </label>
-              <label style={{ display:'flex', alignItems:'center', gap:6 }}>
-                <input type="radio" name="mode" checked={s.stripeMode==='live'} onChange={()=>set('stripeMode','live')} /> Live (real charges)
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="radio" name="mode" checked={s.stripeMode === 'live'} onChange={() => set('stripeMode', 'live')} /> Live (real charges)
               </label>
             </div>
 
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <div>
-                <h4 style={{ margin:'0 0 8px' }}>Test keys</h4>
-                <label style={{ fontSize:13 }}>Publishable key (pk_test_…)</label>
-                <input style={inp} value={s.stripePublishableTest||''} onChange={e=>set('stripePublishableTest', e.target.value)} placeholder="pk_test_..." />
-                <div style={chip(s.stripeTestSecretConfigured)}>Secret key (test): {s.stripeTestSecretConfigured?'configured in Railway ✓':'set STRIPE_SECRET_KEY_TEST in Railway'}</div>
+                <h4 style={{ margin: '0 0 8px' }}>Test keys</h4>
+                <label style={{ fontSize: 13 }}>Publishable key (pk_test_…)</label>
+                <input style={inp} value={s.stripePublishableTest || ''} onChange={e => set('stripePublishableTest', e.target.value)} placeholder="pk_test_..." />
+                <div style={chip(s.stripeTestSecretConfigured)}>Secret key (test): {s.stripeTestSecretConfigured ? 'configured in Railway ✓' : 'set STRIPE_SECRET_KEY_TEST in Railway'}</div>
               </div>
               <div>
-                <h4 style={{ margin:'0 0 8px' }}>Live keys</h4>
-                <label style={{ fontSize:13 }}>Publishable key (pk_live_…)</label>
-                <input style={inp} value={s.stripePublishableLive||''} onChange={e=>set('stripePublishableLive', e.target.value)} placeholder="pk_live_..." />
-                <div style={chip(s.stripeLiveSecretConfigured)}>Secret key (live): {s.stripeLiveSecretConfigured?'configured in Railway ✓':'set STRIPE_SECRET_KEY in Railway'}</div>
+                <h4 style={{ margin: '0 0 8px' }}>Live keys</h4>
+                <label style={{ fontSize: 13 }}>Publishable key (pk_live_…)</label>
+                <input style={inp} value={s.stripePublishableLive || ''} onChange={e => set('stripePublishableLive', e.target.value)} placeholder="pk_live_..." />
+                <div style={chip(s.stripeLiveSecretConfigured)}>Secret key (live): {s.stripeLiveSecretConfigured ? 'configured in Railway ✓' : 'set STRIPE_SECRET_KEY in Railway'}</div>
               </div>
             </div>
-            <div style={{ marginTop:10, fontSize:12, color:'#6b7280' }}>
-              🔒 Secret keys are stored securely in Railway environment variables, never in the database. Webhook: {s.stripeWebhookConfigured?'configured ✓':'set STRIPE_WEBHOOK_SECRET'}
+            <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
+              🔒 Secret keys are stored securely in Railway environment variables, never in the database. Webhook: {s.stripeWebhookConfigured ? 'configured ✓' : 'set STRIPE_WEBHOOK_SECRET'}
             </div>
           </div>
 
-          <div style={{ background:'#fff', borderRadius:14, padding:20, marginBottom:18, border:'1px solid #e5e7eb' }}>
-            <h3 style={{ marginTop:0 }}>🌐 Namecheap (Domains, SSL, Hosting)</h3>
-            <p style={{ color:'#6b7280', fontSize:14 }}>
-              Controls domain registration. <strong>Sandbox</strong> = test mode (no real charges, registers on Namecheap's test system). <strong>Live</strong> = real domains, real charges. Currently: <strong style={{ color: s.namecheapMode==='live'?'#166534':'#b45309' }}>{(s.namecheapMode||'sandbox').toUpperCase()}</strong>
+          <div style={{ background: '#fff', borderRadius: 14, padding: 20, marginBottom: 18, border: '1px solid #e5e7eb' }}>
+            <h3 style={{ marginTop: 0 }}>🌐 Namecheap (Domains, SSL, Hosting)</h3>
+            <p style={{ color: '#6b7280', fontSize: 14 }}>
+              Controls domain registration. <strong>Sandbox</strong> = test mode (no real charges, registers on Namecheap's test system). <strong>Live</strong> = real domains, real charges. Currently: <strong style={{ color: s.namecheapMode === 'live' ? '#166534' : '#b45309' }}>{(s.namecheapMode || 'sandbox').toUpperCase()}</strong>
             </p>
-            <label style={{ fontSize:13, fontWeight:600 }}>Namecheap environment</label>
-            <div style={{ display:'flex', gap:16, margin:'8px 0 12px' }}>
-              <label style={{ display:'flex', alignItems:'center', gap:6 }}>
-                <input type="radio" name="ncmode" checked={s.namecheapMode!=='live'} onChange={()=>set('namecheapMode','sandbox')} /> Sandbox (test)
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Namecheap environment</label>
+            <div style={{ display: 'flex', gap: 16, margin: '8px 0 12px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="radio" name="ncmode" checked={s.namecheapMode !== 'live'} onChange={() => set('namecheapMode', 'sandbox')} /> Sandbox (test)
               </label>
-              <label style={{ display:'flex', alignItems:'center', gap:6 }}>
-                <input type="radio" name="ncmode" checked={s.namecheapMode==='live'} onChange={()=>set('namecheapMode','live')} /> Live (real domains)
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="radio" name="ncmode" checked={s.namecheapMode === 'live'} onChange={() => set('namecheapMode', 'live')} /> Live (real domains)
               </label>
             </div>
-            <div style={chip(s.namecheapConfigured)}>API credentials: {s.namecheapConfigured?'configured in Railway ✓':'set NAMECHEAP_API_KEY, NAMECHEAP_API_USER, NAMECHEAP_CLIENT_IP in Railway'}</div>
-            <div style={{ marginTop:8, fontSize:12, color:'#92600a', background:'#fffbeb', padding:'8px 12px', borderRadius:8 }}>
+            <div style={chip(s.namecheapConfigured)}>API credentials: {s.namecheapConfigured ? 'configured in Railway ✓' : 'set NAMECHEAP_API_KEY, NAMECHEAP_API_USER, NAMECHEAP_CLIENT_IP in Railway'}</div>
+            <div style={{ marginTop: 8, fontSize: 12, color: '#92600a', background: '#fffbeb', padding: '8px 12px', borderRadius: 8 }}>
               ⚠️ For sandbox testing, sign up at sandbox.namecheap.com and use that account's API key. The whitelisted IP must be your Railway server's outbound IP.
             </div>
           </div>
 
           {/* PROCESSING FEE */}
           <div style={card}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <h3 style={{ margin:0 }}>Processing fee (customer-paid)</h3>
-              <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14 }}>
-                <input type="checkbox" checked={!!s.feeEnabled} onChange={e=>set('feeEnabled', e.target.checked)} /> Enable
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>Processing fee (customer-paid)</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                <input type="checkbox" checked={!!s.feeEnabled} onChange={e => set('feeEnabled', e.target.checked)} /> Enable
               </label>
             </div>
-            <p style={{ color:'#6b7280', fontSize:14 }}>Added as a separate line item on top of the order subtotal. Fee = fixed (USD) + percentage × subtotal.</p>
-            <div style={{ display:'flex', gap:16 }}>
-              <div style={{ flex:1 }}>
-                <label style={{ fontSize:13 }}>Fixed amount (USD)</label>
-                <input type="number" step="0.01" style={{ ...inp, fontFamily:'inherit' }} value={s.feeFixed} onChange={e=>set('feeFixed', e.target.value)} />
+            <p style={{ color: '#6b7280', fontSize: 14 }}>Added as a separate line item on top of the order subtotal. Fee = fixed (USD) + percentage × subtotal.</p>
+            <div style={{ display: 'flex', gap: 16 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 13 }}>Fixed amount (USD)</label>
+                <input type="number" step="0.01" style={{ ...inp, fontFamily: 'inherit' }} value={s.feeFixed} onChange={e => set('feeFixed', e.target.value)} />
               </div>
-              <div style={{ flex:1 }}>
-                <label style={{ fontSize:13 }}>Percentage of subtotal (%)</label>
-                <input type="number" step="0.1" style={{ ...inp, fontFamily:'inherit' }} value={s.feePercent} onChange={e=>set('feePercent', e.target.value)} />
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 13 }}>Percentage of subtotal (%)</label>
+                <input type="number" step="0.1" style={{ ...inp, fontFamily: 'inherit' }} value={s.feePercent} onChange={e => set('feePercent', e.target.value)} />
               </div>
             </div>
           </div>
 
           {/* TAX */}
           <div style={card}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <h3 style={{ margin:0 }}>Tax (customer-paid)</h3>
-              <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14 }}>
-                <input type="checkbox" checked={!!s.taxEnabled} onChange={e=>set('taxEnabled', e.target.checked)} /> Enable
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>Tax (customer-paid)</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                <input type="checkbox" checked={!!s.taxEnabled} onChange={e => set('taxEnabled', e.target.checked)} /> Enable
               </label>
             </div>
-            <p style={{ color:'#6b7280', fontSize:14 }}>Applied as a separate line item to <strong>every</strong> order (Workspace, domains, SSL) for both card and crypto. This is the portal's own tax — Stripe/Nicky dashboard tax settings do not apply to hosted checkouts.</p>
-            <div style={{ display:'flex', gap:16 }}>
-              <div style={{ flex:1 }}>
-                <label style={{ fontSize:13 }}>Tax rate (%)</label>
-                <input type="number" step="0.1" style={{ ...inp, fontFamily:'inherit' }} value={s.taxPercent} onChange={e=>set('taxPercent', e.target.value)} />
+            <p style={{ color: '#6b7280', fontSize: 14 }}>Applied as a separate line item to <strong>every</strong> order (Workspace, domains, SSL) for both card and crypto. This is the portal's own tax — Stripe/Nicky dashboard tax settings do not apply to hosted checkouts.</p>
+            <div style={{ display: 'flex', gap: 16 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 13 }}>Tax rate (%)</label>
+                <input type="number" step="0.1" style={{ ...inp, fontFamily: 'inherit' }} value={s.taxPercent} onChange={e => set('taxPercent', e.target.value)} />
               </div>
-              <div style={{ flex:1 }}>
-                <label style={{ fontSize:13 }}>Label (e.g. VAT, GST, Sales Tax)</label>
-                <input type="text" style={{ ...inp, fontFamily:'inherit' }} value={s.taxLabel||'Tax'} onChange={e=>set('taxLabel', e.target.value)} />
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 13 }}>Label (e.g. VAT, GST, Sales Tax)</label>
+                <input type="text" style={{ ...inp, fontFamily: 'inherit' }} value={s.taxLabel || 'Tax'} onChange={e => set('taxLabel', e.target.value)} />
               </div>
             </div>
           </div>
 
           {/* NICKY */}
           <div style={card}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <h3 style={{ margin:0 }}>🪙 Crypto (Nicky)</h3>
-              <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14 }}>
-                <input type="checkbox" checked={!!s.nickyEnabled} onChange={e=>set('nickyEnabled', e.target.checked)} /> Enabled
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>🪙 Crypto (Nicky)</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                <input type="checkbox" checked={!!s.nickyEnabled} onChange={e => set('nickyEnabled', e.target.checked)} /> Enabled
               </label>
             </div>
-            <p style={{ color:'#6b7280', fontSize:14 }}>Customers pay in crypto via Nicky's hosted checkout, settled to your account.</p>
-            <div style={chip(s.nickyConfigured)}>API key: {s.nickyConfigured?'configured in Railway ✓':'set NICKY_API_TOKEN in Railway'}</div>
+            <p style={{ color: '#6b7280', fontSize: 14 }}>Customers pay in crypto via Nicky's hosted checkout, settled to your account.</p>
+            <div style={chip(s.nickyConfigured)}>API key: {s.nickyConfigured ? 'configured in Railway ✓' : 'set NICKY_API_TOKEN in Railway'}</div>
           </div>
 
-          <button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'Saving…':'Save payment settings'}</button>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save payment settings'}</button>
 
           {/* Reseller domain balance */}
-          <div style={{ ...card, marginTop:18 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <h3 style={{ margin:0 }}>🌐 Domain reseller balance</h3>
+          <div style={{ ...card, marginTop: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>🌐 Domain reseller balance</h3>
               <button className="btn btn-secondary" onClick={loadBalance}>Refresh</button>
             </div>
-            <p style={{ color:'#6b7280', fontSize:14 }}>Your DomainNameAPI deposit balance — domains are charged from here when customers buy.</p>
-            {balErr && <div style={{ color:'#b42318', fontSize:14 }}>{balErr}</div>}
+            <p style={{ color: '#6b7280', fontSize: 14 }}>Your DomainNameAPI deposit balance — domains are charged from here when customers buy.</p>
+            {balErr && <div style={{ color: '#b42318', fontSize: 14 }}>{balErr}</div>}
             {balance ? (
-              <div style={{ fontSize:32, fontWeight:800, color:'#0F766E' }}>
+              <div style={{ fontSize: 32, fontWeight: 800, color: '#0F766E' }}>
                 {balance.balance != null ? `${balance.currency || ''} ${Number(balance.balance).toFixed(2)}` : 'See details'}
               </div>
-            ) : !balErr ? <div style={{ color:'#6b7280' }}>Loading…</div> : null}
+            ) : !balErr ? <div style={{ color: '#6b7280' }}>Loading…</div> : null}
           </div>
 
           {/* Billing automation */}
-          <div style={{ ...card, marginTop:18 }}>
-            <h3 style={{ marginTop:0 }}>🔄 Renewal & billing automation</h3>
-            <p style={{ color:'#6b7280', fontSize:14 }}>
+          <div style={{ ...card, marginTop: 18 }}>
+            <h3 style={{ marginTop: 0 }}>🔄 Renewal & billing automation</h3>
+            <p style={{ color: '#6b7280', fontSize: 14 }}>
               Subscriptions renew every 29 days from last payment. Customers are warned ~4 days before, and suspended if unpaid past day 29. Paying reactivates automatically.
             </p>
-            <p style={{ color:'#6b7280', fontSize:13 }}>
+            <p style={{ color: '#6b7280', fontSize: 13 }}>
               A daily check must ping: <code>/api/cron/billing-check?secret=YOUR_JWT_SECRET</code> — set up a free daily cron (e.g. cron-job.org) pointing here.
             </p>
-            <button className="btn btn-secondary" onClick={async()=>{
+            <button className="btn btn-secondary" onClick={async () => {
               setMsg('');
               try { const r = await axios.post(`${API_URL}/admin/run-billing-check`, {}); setMsg(`✓ Checked ${r.data.checked} subs · warned ${r.data.warned.length} · suspended ${r.data.suspended.length}`); }
-              catch(e){ setMsg(e?.response?.data?.error || 'Check failed.'); }
+              catch (e) { setMsg(e?.response?.data?.error || 'Check failed.'); }
             }}>Run billing check now</button>
           </div>
         </>
       )}
 
-      {tab==='transactions' && (
+      {tab === 'transactions' && (
         <>
-          <div className="stats-grid" style={{ marginBottom:18 }}>
+          <div className="stats-grid" style={{ marginBottom: 18 }}>
             <div className="stat-card"><h3>Total received</h3><p className="stat-value">${Number(totalPaid).toFixed(2)}</p></div>
             <div className="stat-card"><h3>Payments</h3><p className="stat-value">{payments.length}</p></div>
-            <div className="stat-card"><h3>Paid</h3><p className="stat-value">{payments.filter(p=>p.status==='paid').length}</p></div>
+            <div className="stat-card"><h3>Paid</h3><p className="stat-value">{payments.filter(p => p.status === 'paid').length}</p></div>
           </div>
-          {payments.length===0 ? <p>No payments yet.</p> : (
+          {payments.length === 0 ? <p>No payments yet.</p> : (
             <table className="data-table">
               <thead><tr><th>Date</th><th>Customer</th><th>Domain</th><th>Amount</th><th>Method</th><th>Status</th><th>Action</th></tr></thead>
               <tbody>
-                {payments.map(p=>(
+                {payments.map(p => (
                   <tr key={p._id}>
                     <td>{new Date(p.createdAt).toLocaleDateString()}</td>
                     <td>{p.customerEmail}</td>
-                    <td>{p.domain||'—'}</td>
-                    <td>${Number(p.amount||0).toFixed(2)}</td>
-                    <td>{p.method==='nicky'?'Crypto':'Card'}</td>
+                    <td>{p.domain || '—'}</td>
+                    <td>${Number(p.amount || 0).toFixed(2)}</td>
+                    <td>{p.method === 'nicky' ? 'Crypto' : 'Card'}</td>
                     <td><span className={`status ${p.status}`}>{p.status}</span></td>
                     <td>
-                      {p.status!=='paid' && (
-                        <button className="btn btn-secondary" style={{ fontSize:12, padding:'4px 10px' }}
-                          onClick={async()=>{
-                            if(!window.confirm('Mark this payment as PAID and provision the order? Only do this if you confirmed the payment succeeded on the provider side.')) return;
-                            try { const r = await axios.post(`${API_URL}/admin/payments/mark-paid`, { paymentId: p._id }); alert(r.data.message||'Done'); load(); }
-                            catch(e){ alert(e?.response?.data?.error||'Failed'); }
+                      {p.status !== 'paid' && (
+                        <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}
+                          onClick={async () => {
+                            if (!window.confirm('Mark this payment as PAID and provision the order? Only do this if you confirmed the payment succeeded on the provider side.')) return;
+                            try { const r = await axios.post(`${API_URL}/admin/payments/mark-paid`, { paymentId: p._id }); alert(r.data.message || 'Done'); load(); }
+                            catch (e) { alert(e?.response?.data?.error || 'Failed'); }
                           }}>
                           Mark paid
                         </button>
@@ -3112,30 +3114,30 @@ const AdminPaymentsSection = () => {
         </>
       )}
 
-      {tab==='domains' && (
+      {tab === 'domains' && (
         <>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
-            <h3 style={{ margin:0 }}>Domain orders</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <h3 style={{ margin: 0 }}>Domain orders</h3>
             <button className="btn btn-secondary" onClick={loadDomainOrders}>Refresh</button>
           </div>
-          <p style={{ color:'#6b7280', fontSize:14 }}>Paid domains register automatically. If one shows <strong>failed</strong>, click Retry to re-register it (charges your reseller balance).</p>
-          {domainOrders.length===0 ? <p>No domain orders yet.</p> : (
+          <p style={{ color: '#6b7280', fontSize: 14 }}>Paid domains register automatically. If one shows <strong>failed</strong>, click Retry to re-register it (charges your reseller balance).</p>
+          {domainOrders.length === 0 ? <p>No domain orders yet.</p> : (
             <table className="data-table">
               <thead><tr><th>Date</th><th>Domain</th><th>Years</th><th>Price</th><th>Status</th><th>Action</th></tr></thead>
               <tbody>
-                {domainOrders.map(o=>(
+                {domainOrders.map(o => (
                   <tr key={o._id}>
                     <td>{new Date(o.createdAt).toLocaleDateString()}</td>
                     <td>{o.domainName}</td>
                     <td>{o.period}</td>
-                    <td>${Number(o.price||0).toFixed(2)}</td>
-                    <td><span className={`status ${o.status==='registered'?'active':o.status==='failed'?'suspended':'pending'}`}>{o.status}</span></td>
+                    <td>${Number(o.price || 0).toFixed(2)}</td>
+                    <td><span className={`status ${o.status === 'registered' ? 'active' : o.status === 'failed' ? 'suspended' : 'pending'}`}>{o.status}</span></td>
                     <td>
-                      {o.status!=='registered' && o.status!=='test_paid' && (
-                        <button className="btn btn-secondary" onClick={()=>retryDomain(o._id)}>Retry register</button>
+                      {o.status !== 'registered' && o.status !== 'test_paid' && (
+                        <button className="btn btn-secondary" onClick={() => retryDomain(o._id)}>Retry register</button>
                       )}
-                      {retryMsg[o._id] && <div style={{ fontSize:12, marginTop:4, color: retryMsg[o._id].startsWith('✓')?'#166534':'#b42318' }}>{retryMsg[o._id]}</div>}
-                      {o.status==='failed' && o.registrationResult && <div style={{ fontSize:11, color:'#b42318', marginTop:4 }}>{o.registrationResult.slice(0,80)}</div>}
+                      {retryMsg[o._id] && <div style={{ fontSize: 12, marginTop: 4, color: retryMsg[o._id].startsWith('✓') ? '#166534' : '#b42318' }}>{retryMsg[o._id]}</div>}
+                      {o.status === 'failed' && o.registrationResult && <div style={{ fontSize: 11, color: '#b42318', marginTop: 4 }}>{o.registrationResult.slice(0, 80)}</div>}
                     </td>
                   </tr>
                 ))}
@@ -3145,63 +3147,63 @@ const AdminPaymentsSection = () => {
         </>
       )}
 
-      {tab==='subbilling' && (
+      {tab === 'subbilling' && (
         <>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
-            <h3 style={{ margin:0 }}>Subscription billing (30-day cycle)</h3>
-            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <h3 style={{ margin: 0 }}>Subscription billing (30-day cycle)</h3>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="btn btn-secondary" onClick={syncSubBilling}>Sync from Google</button>
               <button className="btn btn-secondary" onClick={recalcDates}>Recalculate dates</button>
-              <button className="btn btn-secondary" style={{ color:'#166534', borderColor:'#166534' }} onClick={()=>setShowBulk(!showBulk)}>Bulk whitelist paid</button>
+              <button className="btn btn-secondary" style={{ color: '#166534', borderColor: '#166534' }} onClick={() => setShowBulk(!showBulk)}>Bulk whitelist paid</button>
               <button className="btn btn-primary" onClick={runSubBilling}>Run check now</button>
             </div>
           </div>
 
           {showBulk && (
-            <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:10, padding:16, marginBottom:14 }}>
-              <h4 style={{ margin:'0 0 8px' }}>Bulk whitelist paid customers</h4>
-              <p style={{ color:'#166534', fontSize:13, margin:'0 0 10px' }}>
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 16, marginBottom: 14 }}>
+              <h4 style={{ margin: '0 0 8px' }}>Bulk whitelist paid customers</h4>
+              <p style={{ color: '#166534', fontSize: 13, margin: '0 0 10px' }}>
                 Paste the domains to whitelist (one per line, or comma-separated). They'll be permanently protected from the billing cycle — never auto-suspended until you remove them.
               </p>
-              <textarea value={bulkDomains} onChange={e=>setBulkDomains(e.target.value)} placeholder={"customer1.com\ncustomer2.com\ncustomer3.com"} style={{ width:'100%', minHeight:120, borderRadius:8, border:'1px solid #bbf7d0', padding:'10px 12px', fontSize:14, fontFamily:'monospace', marginBottom:10 }} />
+              <textarea value={bulkDomains} onChange={e => setBulkDomains(e.target.value)} placeholder={"customer1.com\ncustomer2.com\ncustomer3.com"} style={{ width: '100%', minHeight: 120, borderRadius: 8, border: '1px solid #bbf7d0', padding: '10px 12px', fontSize: 14, fontFamily: 'monospace', marginBottom: 10 }} />
               <button className="btn btn-primary" onClick={bulkWhitelist}>Whitelist these domains</button>
             </div>
           )}
-          <p style={{ color:'#6b7280', fontSize:14 }}>
+          <p style={{ color: '#6b7280', fontSize: 14 }}>
             Billing cycles are anchored to <strong>January 1, 2026</strong>, counted in 30-day periods (warn day 25, suspend day 29). Paid customers' cycles count from their last payment instead. The daily background check runs automatically at midnight. Whitelisted accounts are permanently skipped (never suspended).
           </p>
-          {subBillingMsg && <div style={{ padding:'10px 14px', borderRadius:8, marginBottom:12, background: subBillingMsg.startsWith('✓')?'#dcfce7':'#fef3c7', color: subBillingMsg.startsWith('✓')?'#166534':'#92600a' }}>{subBillingMsg}</div>}
+          {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
 
-          <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:10, padding:16, marginBottom:14 }}>
-            <h4 style={{ margin:'0 0 8px' }}>🧪 Test suspension on one domain</h4>
-            <p style={{ color:'#1e40af', fontSize:13, margin:'0 0 10px' }}>
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: 16, marginBottom: 14 }}>
+            <h4 style={{ margin: '0 0 8px' }}>🧪 Test suspension on one domain</h4>
+            <p style={{ color: '#1e40af', fontSize: 13, margin: '0 0 10px' }}>
               Enter a domain you own to confirm the suspend works against Google right now. This affects only that one domain — you can reactivate it immediately after.
             </p>
-            <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
-              <input value={testDomain} onChange={e=>setTestDomain(e.target.value)} placeholder="yourtestdomain.com" style={{ flex:1, minWidth:220, borderRadius:8, border:'1px solid #bfdbfe', padding:'10px 12px', fontSize:14 }} />
-              <button className="btn btn-secondary" style={{ color:'#b42318', borderColor:'#b42318' }} onClick={testSuspend}>Test suspend</button>
-              <button className="btn btn-secondary" style={{ color:'#166534', borderColor:'#166534' }} onClick={testActivate}>Reactivate</button>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input value={testDomain} onChange={e => setTestDomain(e.target.value)} placeholder="yourtestdomain.com" style={{ flex: 1, minWidth: 220, borderRadius: 8, border: '1px solid #bfdbfe', padding: '10px 12px', fontSize: 14 }} />
+              <button className="btn btn-secondary" style={{ color: '#b42318', borderColor: '#b42318' }} onClick={testSuspend}>Test suspend</button>
+              <button className="btn btn-secondary" style={{ color: '#166534', borderColor: '#166534' }} onClick={testActivate}>Reactivate</button>
             </div>
           </div>
-          {subBilling.length===0 ? <p>No subscriptions tracked yet. Click "Sync from Google" to load them.</p> : (
+          {subBilling.length === 0 ? <p>No subscriptions tracked yet. Click "Sync from Google" to load them.</p> : (
             <table className="data-table">
               <thead><tr><th>Domain</th><th>SKU</th><th>Acct</th><th>Purchased</th><th>Next bill (29d)</th><th>Status</th><th>Whitelist</th></tr></thead>
               <tbody>
-                {subBilling.map(r=>(
-                  <tr key={r._id} style={r.whitelisted ? { background:'#f0fdf4' } : undefined}>
+                {subBilling.map(r => (
+                  <tr key={r._id} style={r.whitelisted ? { background: '#f0fdf4' } : undefined}>
                     <td>{r.domain}</td>
                     <td>{r.skuId}</td>
-                    <td>{(r.account||'pk').toUpperCase()}</td>
+                    <td>{(r.account || 'pk').toUpperCase()}</td>
                     <td>{r.purchaseDate ? new Date(r.purchaseDate).toLocaleDateString() : '—'}</td>
                     <td>{r.nextBillingDate ? new Date(r.nextBillingDate).toLocaleDateString() : '—'}</td>
-                    <td><span className={`status ${r.billingStatus==='active'?'active':r.billingStatus==='suspended'?'suspended':'pending'}`}>{r.billingStatus}</span></td>
+                    <td><span className={`status ${r.billingStatus === 'active' ? 'active' : r.billingStatus === 'suspended' ? 'suspended' : 'pending'}`}>{r.billingStatus}</span></td>
                     <td>
                       {r.whitelisted ? (
-                        <button className="btn btn-secondary" style={{ fontSize:12, padding:'4px 10px' }} onClick={()=>toggleWhitelist(r._id, false)}>
+                        <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => toggleWhitelist(r._id, false)}>
                           ✓ Whitelisted — remove
                         </button>
                       ) : (
-                        <button className="btn btn-secondary" style={{ fontSize:12, padding:'4px 10px', color:'#166534', borderColor:'#166534' }} onClick={()=>toggleWhitelist(r._id, true)}>
+                        <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px', color: '#166534', borderColor: '#166534' }} onClick={() => toggleWhitelist(r._id, true)}>
                           Whitelist (renew)
                         </button>
                       )}
@@ -3214,23 +3216,23 @@ const AdminPaymentsSection = () => {
         </>
       )}
 
-      {tab==='renewed' && (
+      {tab === 'renewed' && (
         <>
-          <h3 style={{ marginTop:0 }}>✓ Whitelist</h3>
-          <p style={{ color:'#6b7280', fontSize:14 }}>Whitelisted accounts are <strong>permanently protected</strong> from the billing cycle — they are never auto-suspended, with no time limit. Only an admin can remove an account from the whitelist.</p>
+          <h3 style={{ marginTop: 0 }}>✓ Whitelist</h3>
+          <p style={{ color: '#6b7280', fontSize: 14 }}>Whitelisted accounts are <strong>permanently protected</strong> from the billing cycle — they are never auto-suspended, with no time limit. Only an admin can remove an account from the whitelist.</p>
           {(() => {
             const renewed = subBilling.filter(r => r.whitelisted);
             return renewed.length === 0 ? <p>No whitelisted accounts yet. Whitelist an account to add it here.</p> : (
               <table className="data-table">
                 <thead><tr><th>Domain</th><th>SKU</th><th>Acct</th><th>Whitelisted on</th><th></th></tr></thead>
                 <tbody>
-                  {renewed.map(r=>(
-                    <tr key={r._id} style={{ background:'#f0fdf4' }}>
+                  {renewed.map(r => (
+                    <tr key={r._id} style={{ background: '#f0fdf4' }}>
                       <td>{r.domain}</td>
                       <td>{r.skuId}</td>
-                      <td>{(r.account||'pk').toUpperCase()}</td>
+                      <td>{(r.account || 'pk').toUpperCase()}</td>
                       <td>{r.whitelistedAt ? new Date(r.whitelistedAt).toLocaleDateString() : '—'}</td>
-                      <td><button className="btn btn-secondary" style={{ fontSize:12, padding:'4px 10px' }} onClick={()=>toggleWhitelist(r._id, false)}>Remove from whitelist</button></td>
+                      <td><button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => toggleWhitelist(r._id, false)}>Remove from whitelist</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -3240,23 +3242,23 @@ const AdminPaymentsSection = () => {
         </>
       )}
 
-      {tab==='suspended' && (
+      {tab === 'suspended' && (
         <>
-          <h3 style={{ marginTop:0 }}>⛔ Suspended Accounts</h3>
-          <p style={{ color:'#6b7280', fontSize:14 }}>Live list of suspended subscriptions fetched directly from Google. Click Reactivate to restore a customer's service.</p>
-          {subBillingMsg && <div style={{ padding:'10px 14px', borderRadius:8, marginBottom:12, background: subBillingMsg.startsWith('✓')?'#dcfce7':'#fef3c7', color: subBillingMsg.startsWith('✓')?'#166534':'#92600a' }}>{subBillingMsg}</div>}
-          <button className="btn btn-secondary" style={{ marginBottom:12 }} onClick={loadSuspended}>Refresh from Google</button>
+          <h3 style={{ marginTop: 0 }}>⛔ Suspended Accounts</h3>
+          <p style={{ color: '#6b7280', fontSize: 14 }}>Live list of suspended subscriptions fetched directly from Google. Click Reactivate to restore a customer's service.</p>
+          {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
+          <button className="btn btn-secondary" style={{ marginBottom: 12 }} onClick={loadSuspended}>Refresh from Google</button>
           {suspendedList.length === 0 ? <p>No suspended accounts found in Google.</p> : (
             <table className="data-table">
               <thead><tr><th>Domain</th><th>Subscriptions</th><th>Accounts</th><th>Action</th></tr></thead>
               <tbody>
-                {suspendedList.map(s=>(
-                  <tr key={s.domain} style={{ background:'#fef2f2' }}>
+                {suspendedList.map(s => (
+                  <tr key={s.domain} style={{ background: '#fef2f2' }}>
                     <td>{s.domain}</td>
-                    <td>{s.subscriptions.map(x=>x.skuName||x.skuId).join(', ')}</td>
-                    <td>{[...new Set(s.subscriptions.map(x=>(x.account||'pk').toUpperCase()))].join(', ')}</td>
+                    <td>{s.subscriptions.map(x => x.skuName || x.skuId).join(', ')}</td>
+                    <td>{[...new Set(s.subscriptions.map(x => (x.account || 'pk').toUpperCase()))].join(', ')}</td>
                     <td>
-                      <button className="btn btn-secondary" style={{ color:'#166534', borderColor:'#166534', fontSize:12, padding:'4px 12px' }} onClick={()=>reactivateDomain(s)}>
+                      <button className="btn btn-secondary" style={{ color: '#166534', borderColor: '#166534', fontSize: 12, padding: '4px 12px' }} onClick={() => reactivateDomain(s)}>
                         Reactivate
                       </button>
                     </td>
@@ -3268,50 +3270,50 @@ const AdminPaymentsSection = () => {
         </>
       )}
 
-      {tab==='unsuspend' && (
+      {tab === 'unsuspend' && (
         <>
-          <h3 style={{ marginTop:0 }}>Unsuspend a paid customer</h3>
-          <p style={{ color:'#6b7280', fontSize:14 }}>Search and select a suspended domain, then reactivate all of their subscriptions or pick specific ones.</p>
-          {subBillingMsg && <div style={{ padding:'10px 14px', borderRadius:8, marginBottom:12, background: subBillingMsg.startsWith('✓')?'#dcfce7':'#fef3c7', color: subBillingMsg.startsWith('✓')?'#166534':'#92600a' }}>{subBillingMsg}</div>}
-          <div style={{ display:'flex', gap:8, marginBottom:12 }}>
+          <h3 style={{ marginTop: 0 }}>Unsuspend a paid customer</h3>
+          <p style={{ color: '#6b7280', fontSize: 14 }}>Search and select a suspended domain, then reactivate all of their subscriptions or pick specific ones.</p>
+          {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
             <button className="btn btn-secondary" onClick={loadSuspended}>Refresh list</button>
-            <button className="btn btn-secondary" style={{ color:'#166534', borderColor:'#166534' }} onClick={()=>setShowBulkUnsuspend(!showBulkUnsuspend)}>Bulk unsuspend</button>
+            <button className="btn btn-secondary" style={{ color: '#166534', borderColor: '#166534' }} onClick={() => setShowBulkUnsuspend(!showBulkUnsuspend)}>Bulk unsuspend</button>
           </div>
 
           {showBulkUnsuspend && (
-            <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:10, padding:16, marginBottom:16 }}>
-              <h4 style={{ margin:'0 0 8px' }}>Bulk unsuspend by domain</h4>
-              <p style={{ color:'#166534', fontSize:13, margin:'0 0 10px' }}>
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+              <h4 style={{ margin: '0 0 8px' }}>Bulk unsuspend by domain</h4>
+              <p style={{ color: '#166534', fontSize: 13, margin: '0 0 10px' }}>
                 Paste domains (one per line or comma-separated). This reactivates ALL suspended subscriptions for each. Any that fail are listed so you can fix and retry.
               </p>
-              <textarea value={bulkUnsuspendDomains} onChange={e=>setBulkUnsuspendDomains(e.target.value)} placeholder={"customer1.com\ncustomer2.com"} style={{ width:'100%', minHeight:110, borderRadius:8, border:'1px solid #bbf7d0', padding:'10px 12px', fontSize:14, fontFamily:'monospace', marginBottom:10 }} />
-              <button className="btn btn-primary" onClick={runBulkUnsuspend} disabled={bulkUnsuspendBusy}>{bulkUnsuspendBusy?'Reactivating…':'Reactivate all'}</button>
+              <textarea value={bulkUnsuspendDomains} onChange={e => setBulkUnsuspendDomains(e.target.value)} placeholder={"customer1.com\ncustomer2.com"} style={{ width: '100%', minHeight: 110, borderRadius: 8, border: '1px solid #bbf7d0', padding: '10px 12px', fontSize: 14, fontFamily: 'monospace', marginBottom: 10 }} />
+              <button className="btn btn-primary" onClick={runBulkUnsuspend} disabled={bulkUnsuspendBusy}>{bulkUnsuspendBusy ? 'Reactivating…' : 'Reactivate all'}</button>
 
               {bulkUnsuspendResult && bulkUnsuspendResult.summary && (
-                <div style={{ marginTop:14 }}>
+                <div style={{ marginTop: 14 }}>
                   {bulkUnsuspendResult.summary.reactivated.length > 0 && (
-                    <div style={{ fontWeight:600, color:'#166534', marginBottom:6 }}>
-                      ✓ Fully reactivated {bulkUnsuspendResult.summary.reactivated.length} domain(s): {bulkUnsuspendResult.summary.reactivated.map(d=>`${d.domain} (${d.count})`).join(', ')}
+                    <div style={{ fontWeight: 600, color: '#166534', marginBottom: 6 }}>
+                      ✓ Fully reactivated {bulkUnsuspendResult.summary.reactivated.length} domain(s): {bulkUnsuspendResult.summary.reactivated.map(d => `${d.domain} (${d.count})`).join(', ')}
                     </div>
                   )}
                   {bulkUnsuspendResult.summary.notFound.length > 0 && (
-                    <div style={{ color:'#6b7280', fontSize:13, marginBottom:6 }}>
+                    <div style={{ color: '#6b7280', fontSize: 13, marginBottom: 6 }}>
                       No suspended subscriptions found for: {bulkUnsuspendResult.summary.notFound.join(', ')}
                     </div>
                   )}
                   {(bulkUnsuspendResult.summary.partial.length > 0 || bulkUnsuspendResult.summary.failed.length > 0) && (
-                    <div style={{ background:'#fef2f2', border:'1px solid #fecaca', borderRadius:8, padding:12, marginTop:8 }}>
-                      <strong style={{ color:'#b42318' }}>⚠️ These domains had failures — fix and retry:</strong>
-                      <ul style={{ margin:'8px 0 0', paddingLeft:18, fontSize:13, color:'#b42318' }}>
-                        {bulkUnsuspendResult.summary.partial.map((f,i)=>(
-                          <li key={'p'+i}><strong>{f.domain}</strong> — {f.reactivated} ok, {f.failures.length} failed ({f.failures.map(x=>x.error).join('; ')})</li>
+                    <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: 12, marginTop: 8 }}>
+                      <strong style={{ color: '#b42318' }}>⚠️ These domains had failures — fix and retry:</strong>
+                      <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13, color: '#b42318' }}>
+                        {bulkUnsuspendResult.summary.partial.map((f, i) => (
+                          <li key={'p' + i}><strong>{f.domain}</strong> — {f.reactivated} ok, {f.failures.length} failed ({f.failures.map(x => x.error).join('; ')})</li>
                         ))}
-                        {bulkUnsuspendResult.summary.failed.map((f,i)=>(
-                          <li key={'f'+i}><strong>{f.domain}</strong> — all failed ({f.failures.map(x=>x.error).join('; ')})</li>
+                        {bulkUnsuspendResult.summary.failed.map((f, i) => (
+                          <li key={'f' + i}><strong>{f.domain}</strong> — all failed ({f.failures.map(x => x.error).join('; ')})</li>
                         ))}
                       </ul>
-                      <button className="btn btn-secondary" style={{ marginTop:10, fontSize:12 }}
-                        onClick={()=>setBulkUnsuspendDomains([...bulkUnsuspendResult.summary.partial, ...bulkUnsuspendResult.summary.failed].map(f=>f.domain).join('\n'))}>
+                      <button className="btn btn-secondary" style={{ marginTop: 10, fontSize: 12 }}
+                        onClick={() => setBulkUnsuspendDomains([...bulkUnsuspendResult.summary.partial, ...bulkUnsuspendResult.summary.failed].map(f => f.domain).join('\n'))}>
                         Load failed domains into box to retry
                       </button>
                     </div>
@@ -3323,44 +3325,44 @@ const AdminPaymentsSection = () => {
 
           <input
             value={unsuspendSearch}
-            onChange={e=>setUnsuspendSearch(e.target.value)}
+            onChange={e => setUnsuspendSearch(e.target.value)}
             placeholder="🔍 Search suspended domain…"
-            style={{ width:'100%', borderRadius:8, border:'1px solid #d8dbe6', padding:'10px 12px', fontSize:14, marginBottom:12 }}
+            style={{ width: '100%', borderRadius: 8, border: '1px solid #d8dbe6', padding: '10px 12px', fontSize: 14, marginBottom: 12 }}
           />
 
           {suspendedList.length === 0 ? <p>No suspended domains found.</p> : (
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               {/* Domain list (filtered) */}
-              <div style={{ maxHeight:360, overflowY:'auto', border:'1px solid #e5e7eb', borderRadius:10 }}>
+              <div style={{ maxHeight: 360, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 10 }}>
                 {suspendedList.filter(s => s.domain.toLowerCase().includes(unsuspendSearch.trim().toLowerCase())).length === 0 ? (
-                  <div style={{ padding:'14px', color:'#6b7280', fontSize:13 }}>No domains match "{unsuspendSearch}".</div>
+                  <div style={{ padding: '14px', color: '#6b7280', fontSize: 13 }}>No domains match "{unsuspendSearch}".</div>
                 ) : suspendedList
                   .filter(s => s.domain.toLowerCase().includes(unsuspendSearch.trim().toLowerCase()))
                   .map(s => (
                     <div key={s.domain}
-                      onClick={()=>{ setSelectedDomain(s); setSelectedSubs([]); }}
-                      style={{ padding:'10px 14px', cursor:'pointer', borderBottom:'1px solid #f1f5f9', background: selectedDomain?.domain===s.domain ? '#eff6ff' : '#fff' }}>
+                      onClick={() => { setSelectedDomain(s); setSelectedSubs([]); }}
+                      style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', background: selectedDomain?.domain === s.domain ? '#eff6ff' : '#fff' }}>
                       <strong>{s.domain}</strong>
-                      <span style={{ color:'#6b7280', fontSize:12, marginLeft:8 }}>{s.subscriptions.length} sub(s)</span>
+                      <span style={{ color: '#6b7280', fontSize: 12, marginLeft: 8 }}>{s.subscriptions.length} sub(s)</span>
                     </div>
                   ))}
               </div>
 
               {/* Selected domain's subscriptions */}
-              <div style={{ border:'1px solid #e5e7eb', borderRadius:10, padding:16 }}>
-                {!selectedDomain ? <p style={{ color:'#6b7280' }}>Select a domain to see its suspended subscriptions.</p> : (
+              <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 16 }}>
+                {!selectedDomain ? <p style={{ color: '#6b7280' }}>Select a domain to see its suspended subscriptions.</p> : (
                   <>
-                    <h4 style={{ marginTop:0 }}>{selectedDomain.domain}</h4>
+                    <h4 style={{ marginTop: 0 }}>{selectedDomain.domain}</h4>
                     {selectedDomain.subscriptions.map(sub => (
-                      <label key={sub.subscriptionId || sub.skuId} style={{ display:'flex', gap:8, alignItems:'center', padding:'6px 0', fontSize:14 }}>
-                        <input type="checkbox" checked={selectedSubs.some(x=>x.skuId===sub.skuId && x.account===sub.account)}
-                          onChange={e=>{ if (e.target.checked) setSelectedSubs([...selectedSubs, sub]); else setSelectedSubs(selectedSubs.filter(x=>!(x.skuId===sub.skuId && x.account===sub.account))); }} />
-                        <span>{sub.skuName || sub.skuId} <span style={{ color:'#6b7280', fontSize:12 }}>({(sub.account||'pk').toUpperCase()})</span></span>
+                      <label key={sub.subscriptionId || sub.skuId} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', fontSize: 14 }}>
+                        <input type="checkbox" checked={selectedSubs.some(x => x.skuId === sub.skuId && x.account === sub.account)}
+                          onChange={e => { if (e.target.checked) setSelectedSubs([...selectedSubs, sub]); else setSelectedSubs(selectedSubs.filter(x => !(x.skuId === sub.skuId && x.account === sub.account))); }} />
+                        <span>{sub.skuName || sub.skuId} <span style={{ color: '#6b7280', fontSize: 12 }}>({(sub.account || 'pk').toUpperCase()})</span></span>
                       </label>
                     ))}
-                    <div style={{ display:'flex', gap:8, marginTop:14, flexWrap:'wrap' }}>
-                      <button className="btn btn-primary" onClick={()=>doUnsuspend(false)}>Unsuspend selected</button>
-                      <button className="btn btn-secondary" style={{ color:'#166534', borderColor:'#166534' }} onClick={()=>doUnsuspend(true)}>Unsuspend ALL for this domain</button>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+                      <button className="btn btn-primary" onClick={() => doUnsuspend(false)}>Unsuspend selected</button>
+                      <button className="btn btn-secondary" style={{ color: '#166534', borderColor: '#166534' }} onClick={() => doUnsuspend(true)}>Unsuspend ALL for this domain</button>
                     </div>
                   </>
                 )}
@@ -3469,9 +3471,9 @@ const CustomerPortal = () => {
           {brand.logoDataUrl
             ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 38, maxWidth: 180 }} />
             : <>
-                <div style={{ width: 36, height: 36, borderRadius: 8, background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>{(brand.brandName||'G')[0]}</div>
-                <strong style={{ fontSize: 18, color: TEAL }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
-              </>}
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>{(brand.brandName || 'G')[0]}</div>
+              <strong style={{ fontSize: 18, color: TEAL }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
+            </>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <span style={{ color: MUTE }}>Welcome, <strong style={{ color: INK }}>{name}</strong></span>
@@ -3535,21 +3537,23 @@ const CustomerOverview = ({ onNavigate }) => {
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState(null);
 
-  useEffect(() => { (async () => {
-    try { const res = await axios.get(`${API_URL}/customer/my-subscriptions`); setData(res.data); }
-    catch (_) { setData({ subscriptions: [] }); }
-    try { const dr2 = await axios.get(`${API_URL}/customer/my-domains`); setDomains(dr2.data?.domains || []); }
-    catch (_) {}
-    try { const h = await axios.get(`${API_URL}/customer/nc/hosting/orders`); setHosting(h.data?.orders || []); }
-    catch (_) {}
-    finally { setLoading(false); }
-    try { const dr = await axios.get(`${API_URL}/workspace-orders/draft`); setDraft(dr.data.draft || null); }
-    catch (_) {}
-  })(); }, []);
+  useEffect(() => {
+    (async () => {
+      try { const res = await axios.get(`${API_URL}/customer/my-subscriptions`); setData(res.data); }
+      catch (_) { setData({ subscriptions: [] }); }
+      try { const dr2 = await axios.get(`${API_URL}/customer/my-domains`); setDomains(dr2.data?.domains || []); }
+      catch (_) { }
+      try { const h = await axios.get(`${API_URL}/customer/nc/hosting/orders`); setHosting(h.data?.orders || []); }
+      catch (_) { }
+      finally { setLoading(false); }
+      try { const dr = await axios.get(`${API_URL}/workspace-orders/draft`); setDraft(dr.data.draft || null); }
+      catch (_) { }
+    })();
+  }, []);
 
   const discardDraft = async () => {
     if (!window.confirm('Discard your saved order in progress?')) return;
-    try { await axios.delete(`${API_URL}/workspace-orders/draft`); setDraft(null); } catch (_) {}
+    try { await axios.delete(`${API_URL}/workspace-orders/draft`); setDraft(null); } catch (_) { }
   };
 
   const name = user?.username || (user?.businessEmail || '').split('@')[0];
@@ -3619,10 +3623,10 @@ const CustomerOverview = ({ onNavigate }) => {
         {loading ? <div style={{ padding: 24 }}>Loading…</div> : subs.length === 0 ? (
           <div style={{ padding: 24, color: MUTE }}>No subscriptions yet. Click <strong>New subscription</strong> to order Workspace.</div>
         ) : subs.map((s, i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', borderBottom: i < subs.length-1 ? '1px solid #f5f5f5' : 'none' }}>
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', borderBottom: i < subs.length - 1 ? '1px solid #f5f5f5' : 'none' }}>
             <div>
               <div style={{ fontWeight: 700, color: INK }}>{s.domain}</div>
-              <div style={{ color: MUTE, fontSize: 14 }}>{s.skuName} · {s.seats ?? 1} seat{(s.seats??1)===1?'':'s'}</div>
+              <div style={{ color: MUTE, fontSize: 14 }}>{s.skuName} · {s.seats ?? 1} seat{(s.seats ?? 1) === 1 ? '' : 's'}</div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
               <span style={(s.status === 'ACTIVE') ? pill('#166534', '#dcfce7') : (s.status === 'SUSPENDED') ? pill('#b42318', '#fde8e8') : pill('#92600a', '#fef3c7')}>
@@ -3655,7 +3659,7 @@ const CustomerPayments = () => {
       ]);
       setOrders(o.data || []);
       setPayments(p.data.payments || []);
-    } catch (_) {} finally { setLoading(false); }
+    } catch (_) { } finally { setLoading(false); }
   };
   useEffect(() => {
     load();
@@ -3722,17 +3726,17 @@ const CustomerPayments = () => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <div>
               <div style={{ fontWeight: 700 }}>{o.organization?.domain}</div>
-              <div style={{ color: MUTE, fontSize: 14 }}>Order {o.orderNumber} · {o.plan?.name} · {o.seats} seat{o.seats===1?'':'s'}</div>
+              <div style={{ color: MUTE, fontSize: 14 }}>Order {o.orderNumber} · {o.plan?.name} · {o.seats} seat{o.seats === 1 ? '' : 's'}</div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <strong style={{ fontSize: 20 }}>${Number(o.monthlyTotal||0).toFixed(2)}</strong>
+              <strong style={{ fontSize: 20 }}>${Number(o.monthlyTotal || 0).toFixed(2)}</strong>
               <button onClick={() => pay(o._id, 'stripe')} disabled={!!busy}
                 style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: 'pointer' }}>
-                {busy === o._id+'stripe' ? '…' : '💳 Pay by card'}
+                {busy === o._id + 'stripe' ? '…' : '💳 Pay by card'}
               </button>
               <button onClick={() => pay(o._id, 'nicky')} disabled={!!busy}
                 style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: 'pointer' }}>
-                {busy === o._id+'nicky' ? '…' : '🪙 Pay with crypto'}
+                {busy === o._id + 'nicky' ? '…' : '🪙 Pay with crypto'}
               </button>
             </div>
           </div>
@@ -3750,7 +3754,7 @@ const CustomerPayments = () => {
               {payments.map(p => (
                 <tr key={p._id}>
                   <td>{new Date(p.createdAt).toLocaleDateString()}</td>
-                  <td>${Number(p.amount||0).toFixed(2)}</td>
+                  <td>${Number(p.amount || 0).toFixed(2)}</td>
                   <td>{p.method === 'nicky' ? 'Crypto' : 'Card'}</td>
                   <td><span className={`status ${p.status}`}>{p.status}</span></td>
                 </tr>
@@ -3811,7 +3815,7 @@ const CustomerDomains = () => {
       ]);
       if (p?.data?.products) { setSslProducts(p.data.products); if (!sslPick && p.data.products[0]) setSslPick(p.data.products[0].name); }
       if (o?.data?.orders) setSslOrders(o.data.orders);
-    } catch (_) {}
+    } catch (_) { }
   };
   useEffect(() => { loadSsl(); }, []);
 
@@ -3828,7 +3832,7 @@ const CustomerDomains = () => {
 
   const loadTransfers = async () => {
     try { const r = await axios.get(`${API_URL}/customer/domains/transfers`); setTransfers(r.data.transfers || []); }
-    catch (_) {}
+    catch (_) { }
   };
   useEffect(() => { loadTransfers(); }, []);
 
@@ -3848,7 +3852,7 @@ const CustomerDomains = () => {
   useEffect(() => {
     (async () => {
       try { const r = await axios.get(`${API_URL}/customer/my-domains`); setMyDomains(r.data.domains || []); }
-      catch (_) {}
+      catch (_) { }
     })();
   }, []);
 
@@ -3882,7 +3886,7 @@ const CustomerDomains = () => {
     finally { setRegBusy(false); setBuyingDomain(''); }
   };
 
-  const card = { background:'#fff', borderRadius:16, padding:24, boxShadow:'0 1px 3px rgba(0,0,0,0.06)' };
+  const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
 
   const search = async () => {
     setError(''); setResult(null);
@@ -3899,7 +3903,7 @@ const CustomerDomains = () => {
   };
 
   const checkVerify = async () => {
-    setVMsg(''); 
+    setVMsg('');
     const dom = vDomain.toLowerCase().trim();
     if (!/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) { setVMsg('Enter a full domain like example.com'); return; }
     setVLoading(true);
@@ -3913,44 +3917,44 @@ const CustomerDomains = () => {
 
   return (
     <div>
-      <h1 style={{ fontSize:28, margin:'0 0 6px' }}>🌐 Domains</h1>
-      <p style={{ color:MUTE, margin:'0 0 20px' }}>Search for a domain, or verify a domain you already own.</p>
+      <h1 style={{ fontSize: 28, margin: '0 0 6px' }}>🌐 Domains</h1>
+      <p style={{ color: MUTE, margin: '0 0 20px' }}>Search for a domain, or verify a domain you already own.</p>
 
-      <div style={{ ...card, marginBottom:18 }}>
-        <h3 style={{ marginTop:0 }}>Find a domain</h3>
-        <div style={{ display:'flex', gap:10 }}>
+      <div style={{ ...card, marginBottom: 18 }}>
+        <h3 style={{ marginTop: 0 }}>Find a domain</h3>
+        <div style={{ display: 'flex', gap: 10 }}>
           <input
             value={query}
-            onChange={e=>setQuery(e.target.value)}
-            onKeyDown={e=>{ if(e.key==='Enter') search(); }}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') search(); }}
             placeholder="Type a name (e.g. mybusiness) or a full domain"
-            style={{ flex:1, height:46, borderRadius:10, border:'1px solid #d8dbe6', padding:'0 14px', fontSize:16 }}
+            style={{ flex: 1, height: 46, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px', fontSize: 16 }}
           />
           <button onClick={search} disabled={loading}
-            style={{ background:TEAL, color:'#fff', border:'none', borderRadius:10, padding:'0 24px', fontWeight:700, cursor:'pointer' }}>
+            style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '0 24px', fontWeight: 700, cursor: 'pointer' }}>
             {loading ? 'Searching…' : 'Search'}
           </button>
         </div>
-        {error && <div style={{ color:'#b42318', marginTop:10, fontSize:14 }}>{error}</div>}
+        {error && <div style={{ color: '#b42318', marginTop: 10, fontSize: 14 }}>{error}</div>}
 
         {result && result.results && (
-          <div style={{ marginTop:16 }}>
+          <div style={{ marginTop: 16 }}>
             {result.results.map((r, i) => (
-              <div key={i} style={{ background: r.available ? '#f0f7f5' : '#fafafa', borderRadius:12, padding:'12px 16px', marginBottom:8, display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12, opacity: r.available ? 1 : 0.7 }}>
+              <div key={i} style={{ background: r.available ? '#f0f7f5' : '#fafafa', borderRadius: 12, padding: '12px 16px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, opacity: r.available ? 1 : 0.7 }}>
                 <div>
-                  <span style={{ fontSize:16, fontWeight:700 }}>{r.domain}</span>
-                  {r.isPremium && <span style={{ marginLeft:8, fontSize:11, background:'#fde68a', color:'#92600a', padding:'2px 8px', borderRadius:999 }}>Premium</span>}
-                  <div style={{ color: r.available ? '#166534':'#b45309', fontWeight:600, fontSize:13 }}>{r.available ? '✓ Available':'✗ Taken'}</div>
+                  <span style={{ fontSize: 16, fontWeight: 700 }}>{r.domain}</span>
+                  {r.isPremium && <span style={{ marginLeft: 8, fontSize: 11, background: '#fde68a', color: '#92600a', padding: '2px 8px', borderRadius: 999 }}>Premium</span>}
+                  <div style={{ color: r.available ? '#166534' : '#b45309', fontWeight: 600, fontSize: 13 }}>{r.available ? '✓ Available' : '✗ Taken'}</div>
                 </div>
                 {r.available && (
-                  <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
-                    <strong style={{ fontSize:18, color:TEAL }}>{r.price != null ? `$${Number(r.price).toFixed(2)}/yr` : ''}</strong>
-                    <button onClick={()=>buyDomain('stripe', r)} disabled={regBusy}
-                      style={{ background:TEAL, color:'#fff', border:'none', borderRadius:8, padding:'8px 14px', fontWeight:700, cursor:'pointer', fontSize:13 }}>
-                      {regBusy && buyingDomain===r.domain ? '…' : '💳 Buy'}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <strong style={{ fontSize: 18, color: TEAL }}>{r.price != null ? `$${Number(r.price).toFixed(2)}/yr` : ''}</strong>
+                    <button onClick={() => buyDomain('stripe', r)} disabled={regBusy}
+                      style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
+                      {regBusy && buyingDomain === r.domain ? '…' : '💳 Buy'}
                     </button>
-                    <button onClick={()=>buyDomain('nicky', r)} disabled={regBusy}
-                      style={{ background:'#fff', color:TEAL, border:`1px solid ${TEAL}`, borderRadius:8, padding:'8px 12px', fontWeight:700, cursor:'pointer', fontSize:13 }}>
+                    <button onClick={() => buyDomain('nicky', r)} disabled={regBusy}
+                      style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '8px 12px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
                       🪙
                     </button>
                   </div>
@@ -3959,42 +3963,42 @@ const CustomerDomains = () => {
             ))}
           </div>
         )}
-        {regMsg && <div style={{ marginTop:12, padding:'10px 14px', borderRadius:8, background: regMsg.startsWith('✓')?'#dcfce7':'#fde8e8', color: regMsg.startsWith('✓')?'#166534':'#b42318' }}>{regMsg}</div>}
+        {regMsg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: regMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: regMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{regMsg}</div>}
       </div>
 
       <div style={{ ...card }}>
-        <h3 style={{ marginTop:0 }}>My domains</h3>
+        <h3 style={{ marginTop: 0 }}>My domains</h3>
         {myDomains.length === 0 ? (
-          <p style={{ color:MUTE }}>You haven't registered any domains yet. Search above to get one.</p>
+          <p style={{ color: MUTE }}>You haven't registered any domains yet. Search above to get one.</p>
         ) : (
-          <table style={{ width:'100%', fontSize:14, borderCollapse:'collapse' }}>
-            <thead><tr style={{ textAlign:'left', color:MUTE }}>
-              <th style={{ padding:'8px 0' }}>Domain</th><th>Status</th><th>Expires</th><th></th>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: MUTE }}>
+              <th style={{ padding: '8px 0' }}>Domain</th><th>Status</th><th>Expires</th><th></th>
             </tr></thead>
             <tbody>
               {myDomains.map(d => (
-                <tr key={d.id} style={{ borderTop:'1px solid #f0f0f0' }}>
-                  <td style={{ padding:'10px 0', fontWeight:600 }}>{d.domainName}</td>
+                <tr key={d.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '10px 0', fontWeight: 600 }}>{d.domainName}</td>
                   <td>
-                    <span style={{ color: d.status==='registered'?'#166534' : d.status==='failed'?'#b42318' : '#b45309', fontWeight:600 }}>
-                      {d.status==='registered'?'✓ Active' : d.status==='failed'?'Failed' : d.status==='pending'?'Processing' : d.status}
+                    <span style={{ color: d.status === 'registered' ? '#166534' : d.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>
+                      {d.status === 'registered' ? '✓ Active' : d.status === 'failed' ? 'Failed' : d.status === 'pending' ? 'Processing' : d.status}
                     </span>
-                    {d.status==='failed' && d.error && <div style={{ fontSize:12, color:'#b42318' }}>{d.error}</div>}
+                    {d.status === 'failed' && d.error && <div style={{ fontSize: 12, color: '#b42318' }}>{d.error}</div>}
                   </td>
                   <td>{d.expiresAt ? new Date(d.expiresAt).toLocaleDateString() : '—'}</td>
-                  <td style={{ textAlign:'right' }}>
-                    {d.status==='registered' && (
-                      <div style={{ display:'flex', gap:6, justifyContent:'flex-end', flexWrap:'wrap' }}>
-                        <button onClick={()=>setManageDomain(d.domainName)}
-                          style={{ background:'#fff', color:INK, border:'1px solid #d8dbe6', borderRadius:8, padding:'6px 12px', fontWeight:600, cursor:'pointer', fontSize:13 }}>
+                  <td style={{ textAlign: 'right' }}>
+                    {d.status === 'registered' && (
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                        <button onClick={() => setManageDomain(d.domainName)}
+                          style={{ background: '#fff', color: INK, border: '1px solid #d8dbe6', borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
                           ⚙ Manage
                         </button>
-                        <button onClick={()=>renewDomain(d,'stripe')} disabled={renewBusy===d.id}
-                          style={{ background:TEAL, color:'#fff', border:'none', borderRadius:8, padding:'6px 12px', fontWeight:600, cursor:'pointer', fontSize:13 }}>
-                          {renewBusy===d.id?'…':'Renew (card)'}
+                        <button onClick={() => renewDomain(d, 'stripe')} disabled={renewBusy === d.id}
+                          style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+                          {renewBusy === d.id ? '…' : 'Renew (card)'}
                         </button>
-                        <button onClick={()=>renewDomain(d,'nicky')} disabled={renewBusy===d.id}
-                          style={{ background:'#fff', color:TEAL, border:`1px solid ${TEAL}`, borderRadius:8, padding:'6px 12px', fontWeight:600, cursor:'pointer', fontSize:13 }}>
+                        <button onClick={() => renewDomain(d, 'nicky')} disabled={renewBusy === d.id}
+                          style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
                           🪙
                         </button>
                       </div>
@@ -4007,41 +4011,41 @@ const CustomerDomains = () => {
         )}
       </div>
 
-      {manageDomain && <DomainManagePanel domain={manageDomain} onClose={()=>setManageDomain(null)} />}
+      {manageDomain && <DomainManagePanel domain={manageDomain} onClose={() => setManageDomain(null)} />}
 
-      <div style={{ ...card, marginTop:18 }}>
-        <h3 style={{ marginTop:0 }}>Transfer a domain in</h3>
-        <p style={{ color:MUTE, fontSize:14 }}>Move a domain you own at another registrar into your account here. You'll need to <strong>unlock</strong> the domain at your current registrar and get its <strong>EPP / Auth code</strong>. Transfers include 1 year and usually take 5–7 days.</p>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
-          <input value={xferDomain} onChange={e=>setXferDomain(e.target.value)} placeholder="yourdomain.com"
-            style={{ height:44, borderRadius:10, border:'1px solid #d8dbe6', padding:'0 14px' }} />
-          <input value={xferEpp} onChange={e=>setXferEpp(e.target.value)} placeholder="EPP / Auth code"
-            style={{ height:44, borderRadius:10, border:'1px solid #d8dbe6', padding:'0 14px' }} />
+      <div style={{ ...card, marginTop: 18 }}>
+        <h3 style={{ marginTop: 0 }}>Transfer a domain in</h3>
+        <p style={{ color: MUTE, fontSize: 14 }}>Move a domain you own at another registrar into your account here. You'll need to <strong>unlock</strong> the domain at your current registrar and get its <strong>EPP / Auth code</strong>. Transfers include 1 year and usually take 5–7 days.</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+          <input value={xferDomain} onChange={e => setXferDomain(e.target.value)} placeholder="yourdomain.com"
+            style={{ height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px' }} />
+          <input value={xferEpp} onChange={e => setXferEpp(e.target.value)} placeholder="EPP / Auth code"
+            style={{ height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px' }} />
         </div>
-        <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
-          <button onClick={()=>startTransfer('stripe')} disabled={xferBusy}
-            style={{ background:TEAL, color:'#fff', border:'none', borderRadius:10, padding:'10px 18px', fontWeight:700, cursor:'pointer' }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button onClick={() => startTransfer('stripe')} disabled={xferBusy}
+            style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>
             {xferBusy ? '…' : '💳 Transfer (pay by card)'}
           </button>
-          <button onClick={()=>startTransfer('nicky')} disabled={xferBusy}
-            style={{ background:'#fff', color:TEAL, border:`1px solid ${TEAL}`, borderRadius:10, padding:'10px 18px', fontWeight:700, cursor:'pointer' }}>
+          <button onClick={() => startTransfer('nicky')} disabled={xferBusy}
+            style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>
             {xferBusy ? '…' : '🪙 Transfer (crypto)'}
           </button>
         </div>
-        {xferMsg && <div style={{ marginTop:12, padding:'10px 14px', borderRadius:8, background: xferMsg.startsWith('✓')?'#dcfce7':'#fde8e8', color: xferMsg.startsWith('✓')?'#166534':'#b42318' }}>{xferMsg}</div>}
+        {xferMsg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: xferMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: xferMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{xferMsg}</div>}
 
         {transfers.length > 0 && (
-          <div style={{ marginTop:18 }}>
-            <h4 style={{ margin:'0 0 8px' }}>Transfer status</h4>
-            <table style={{ width:'100%', fontSize:14, borderCollapse:'collapse' }}>
-              <thead><tr style={{ textAlign:'left', color:MUTE }}><th style={{ padding:'6px 0' }}>Domain</th><th>Status</th><th>Started</th></tr></thead>
+          <div style={{ marginTop: 18 }}>
+            <h4 style={{ margin: '0 0 8px' }}>Transfer status</h4>
+            <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+              <thead><tr style={{ textAlign: 'left', color: MUTE }}><th style={{ padding: '6px 0' }}>Domain</th><th>Status</th><th>Started</th></tr></thead>
               <tbody>
-                {transfers.map(t=>(
-                  <tr key={t.id} style={{ borderTop:'1px solid #f0f0f0' }}>
-                    <td style={{ padding:'8px 0', fontWeight:600 }}>{t.domainName}</td>
-                    <td><span style={{ color: t.status==='completed'?'#166534' : t.status==='failed'?'#b42318':'#b45309', fontWeight:600 }}>
-                      {t.status==='completed'?'✓ Completed' : t.status==='failed'?'Failed' : t.status==='submitted'?(t.transferStatus||'In progress') : 'Processing'}
-                    </span>{t.status==='failed' && t.note && <div style={{ fontSize:12, color:'#b42318' }}>{t.note}</div>}</td>
+                {transfers.map(t => (
+                  <tr key={t.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '8px 0', fontWeight: 600 }}>{t.domainName}</td>
+                    <td><span style={{ color: t.status === 'completed' ? '#166534' : t.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>
+                      {t.status === 'completed' ? '✓ Completed' : t.status === 'failed' ? 'Failed' : t.status === 'submitted' ? (t.transferStatus || 'In progress') : 'Processing'}
+                    </span>{t.status === 'failed' && t.note && <div style={{ fontSize: 12, color: '#b42318' }}>{t.note}</div>}</td>
                     <td>{t.submittedAt ? new Date(t.submittedAt).toLocaleDateString() : new Date(t.createdAt).toLocaleDateString()}</td>
                   </tr>
                 ))}
@@ -4051,42 +4055,42 @@ const CustomerDomains = () => {
         )}
       </div>
 
-      <div style={{ ...card, marginTop:18 }}>
-        <h3 style={{ marginTop:0 }}>SSL certificates</h3>
-        <p style={{ color:MUTE, fontSize:14 }}>Secure your website with an SSL certificate (HTTPS padlock). After purchase, you'll activate it with a CSR for your domain.</p>
+      <div style={{ ...card, marginTop: 18 }}>
+        <h3 style={{ marginTop: 0 }}>SSL certificates</h3>
+        <p style={{ color: MUTE, fontSize: 14 }}>Secure your website with an SSL certificate (HTTPS padlock). After purchase, you'll activate it with a CSR for your domain.</p>
         {sslProducts.length === 0 ? (
-          <p style={{ color:MUTE }}>No SSL products are available right now. Please check back later.</p>
+          <p style={{ color: MUTE }}>No SSL products are available right now. Please check back later.</p>
         ) : (
           <>
-            <div style={{ display:'grid', gridTemplateColumns:'2fr 90px 1.5fr', gap:10, marginBottom:10 }}>
-              <select value={sslPick} onChange={e=>setSslPick(e.target.value)} style={{ height:44, borderRadius:10, border:'1px solid #d8dbe6', padding:'0 12px' }}>
-                {sslProducts.map(p=><option key={p.name} value={p.name}>{p.name} — ${Number(p.price).toFixed(2)}/yr</option>)}
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 90px 1.5fr', gap: 10, marginBottom: 10 }}>
+              <select value={sslPick} onChange={e => setSslPick(e.target.value)} style={{ height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 12px' }}>
+                {sslProducts.map(p => <option key={p.name} value={p.name}>{p.name} — ${Number(p.price).toFixed(2)}/yr</option>)}
               </select>
-              <select value={sslYears} onChange={e=>setSslYears(Number(e.target.value))} style={{ height:44, borderRadius:10, border:'1px solid #d8dbe6', padding:'0 8px' }}>
-                {[1,2].map(y=><option key={y} value={y}>{y} yr</option>)}
+              <select value={sslYears} onChange={e => setSslYears(Number(e.target.value))} style={{ height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 8px' }}>
+                {[1, 2].map(y => <option key={y} value={y}>{y} yr</option>)}
               </select>
-              <input value={sslForDomain} onChange={e=>setSslForDomain(e.target.value)} placeholder="for domain (optional)" style={{ height:44, borderRadius:10, border:'1px solid #d8dbe6', padding:'0 14px' }} />
+              <input value={sslForDomain} onChange={e => setSslForDomain(e.target.value)} placeholder="for domain (optional)" style={{ height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px' }} />
             </div>
-            <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
-              <button onClick={()=>buySsl('stripe')} disabled={sslBusy} style={{ background:TEAL, color:'#fff', border:'none', borderRadius:10, padding:'10px 18px', fontWeight:700, cursor:'pointer' }}>{sslBusy?'…':'💳 Buy SSL (card)'}</button>
-              <button onClick={()=>buySsl('nicky')} disabled={sslBusy} style={{ background:'#fff', color:TEAL, border:`1px solid ${TEAL}`, borderRadius:10, padding:'10px 18px', fontWeight:700, cursor:'pointer' }}>{sslBusy?'…':'🪙 Buy SSL (crypto)'}</button>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button onClick={() => buySsl('stripe')} disabled={sslBusy} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>{sslBusy ? '…' : '💳 Buy SSL (card)'}</button>
+              <button onClick={() => buySsl('nicky')} disabled={sslBusy} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>{sslBusy ? '…' : '🪙 Buy SSL (crypto)'}</button>
             </div>
           </>
         )}
-        {sslMsg && <div style={{ marginTop:12, padding:'10px 14px', borderRadius:8, background: sslMsg.startsWith('✓')?'#dcfce7':'#fde8e8', color: sslMsg.startsWith('✓')?'#166534':'#b42318' }}>{sslMsg}</div>}
+        {sslMsg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: sslMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: sslMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{sslMsg}</div>}
 
         {sslOrders.length > 0 && (
-          <div style={{ marginTop:18 }}>
-            <h4 style={{ margin:'0 0 8px' }}>Your SSL certificates</h4>
-            <table style={{ width:'100%', fontSize:14, borderCollapse:'collapse' }}>
-              <thead><tr style={{ textAlign:'left', color:MUTE }}><th style={{ padding:'6px 0' }}>Product</th><th>For</th><th>Status</th></tr></thead>
+          <div style={{ marginTop: 18 }}>
+            <h4 style={{ margin: '0 0 8px' }}>Your SSL certificates</h4>
+            <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+              <thead><tr style={{ textAlign: 'left', color: MUTE }}><th style={{ padding: '6px 0' }}>Product</th><th>For</th><th>Status</th></tr></thead>
               <tbody>
-                {sslOrders.map(o=>(
-                  <tr key={o.id} style={{ borderTop:'1px solid #f0f0f0' }}>
-                    <td style={{ padding:'8px 0', fontWeight:600 }}>{o.productType}</td>
-                    <td>{o.forDomain||'—'}</td>
-                    <td><span style={{ color: o.status==='purchased'?'#166534' : o.status==='failed'?'#b42318':'#b45309', fontWeight:600 }}>
-                      {o.status==='purchased'?'✓ Purchased' : o.status==='failed'?'Failed' : o.status==='test_paid'?'Test' : 'Processing'}
+                {sslOrders.map(o => (
+                  <tr key={o.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '8px 0', fontWeight: 600 }}>{o.productType}</td>
+                    <td>{o.forDomain || '—'}</td>
+                    <td><span style={{ color: o.status === 'purchased' ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>
+                      {o.status === 'purchased' ? '✓ Purchased' : o.status === 'failed' ? 'Failed' : o.status === 'test_paid' ? 'Test' : 'Processing'}
                     </span></td>
                   </tr>
                 ))}
@@ -4121,7 +4125,7 @@ const DomainManagePanel = ({ domain, onClose }) => {
       ]);
       if (vRes?.data) setVerif(vRes.data);
       if (cRes?.data?.contact) setContact(cRes.data.contact);
-    } catch (_) {}
+    } catch (_) { }
     finally { setVLoading(false); }
   };
 
@@ -4229,110 +4233,110 @@ const DomainManagePanel = ({ domain, onClose }) => {
     finally { setSaving(false); }
   };
 
-  const inp = { borderRadius:8, border:'1px solid #d8dbe6', padding:'7px 10px', fontSize:14 };
-  const overlay = { position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'40px 16px', zIndex:1000, overflowY:'auto' };
-  const modal = { background:'#fff', borderRadius:16, padding:24, width:'100%', maxWidth:760, boxShadow:'0 10px 40px rgba(0,0,0,0.2)' };
+  const inp = { borderRadius: 8, border: '1px solid #d8dbe6', padding: '7px 10px', fontSize: 14 };
+  const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1000, overflowY: 'auto' };
+  const modal = { background: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 760, boxShadow: '0 10px 40px rgba(0,0,0,0.2)' };
 
   return (
     <div style={overlay} onClick={onClose}>
-      <div style={modal} onClick={e=>e.stopPropagation()}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-          <h2 style={{ margin:0 }}>Manage {domain}</h2>
-          <button onClick={onClose} style={{ background:'transparent', border:'none', fontSize:24, cursor:'pointer', color:MUTE }}>×</button>
+      <div style={modal} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h2 style={{ margin: 0 }}>Manage {domain}</h2>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', fontSize: 24, cursor: 'pointer', color: MUTE }}>×</button>
         </div>
 
-        <div style={{ display:'flex', gap:8, marginBottom:16 }}>
-          <button onClick={()=>setTab('dns')} style={{ background: tab==='dns'?TEAL:'#fff', color: tab==='dns'?'#fff':INK, border:'1px solid '+(tab==='dns'?TEAL:'#d8dbe6'), borderRadius:8, padding:'8px 16px', cursor:'pointer', fontWeight:600 }}>DNS Records</button>
-          <button onClick={()=>setTab('nameservers')} style={{ background: tab==='nameservers'?TEAL:'#fff', color: tab==='nameservers'?'#fff':INK, border:'1px solid '+(tab==='nameservers'?TEAL:'#d8dbe6'), borderRadius:8, padding:'8px 16px', cursor:'pointer', fontWeight:600 }}>Nameservers</button>
-          <button onClick={()=>{ setTab('verification'); loadVerification(); }} style={{ background: tab==='verification'?TEAL:'#fff', color: tab==='verification'?'#fff':INK, border:'1px solid '+(tab==='verification'?TEAL:'#d8dbe6'), borderRadius:8, padding:'8px 16px', cursor:'pointer', fontWeight:600 }}>Verification</button>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <button onClick={() => setTab('dns')} style={{ background: tab === 'dns' ? TEAL : '#fff', color: tab === 'dns' ? '#fff' : INK, border: '1px solid ' + (tab === 'dns' ? TEAL : '#d8dbe6'), borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}>DNS Records</button>
+          <button onClick={() => setTab('nameservers')} style={{ background: tab === 'nameservers' ? TEAL : '#fff', color: tab === 'nameservers' ? '#fff' : INK, border: '1px solid ' + (tab === 'nameservers' ? TEAL : '#d8dbe6'), borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}>Nameservers</button>
+          <button onClick={() => { setTab('verification'); loadVerification(); }} style={{ background: tab === 'verification' ? TEAL : '#fff', color: tab === 'verification' ? '#fff' : INK, border: '1px solid ' + (tab === 'verification' ? TEAL : '#d8dbe6'), borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}>Verification</button>
         </div>
 
-        {msg && <div style={{ padding:'10px 14px', borderRadius:8, marginBottom:14, background: msg.startsWith('✓')?'#dcfce7':'#fef3c7', color: msg.startsWith('✓')?'#166534':'#92600a', fontSize:14 }}>{msg}</div>}
+        {msg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a', fontSize: 14 }}>{msg}</div>}
 
-        {loading ? <p>Loading…</p> : tab==='dns' ? (
+        {loading ? <p>Loading…</p> : tab === 'dns' ? (
           <div>
             {!usingNcDns && (
-              <div style={{ background:'#fffbeb', border:'1px solid #fde68a', borderRadius:8, padding:'10px 14px', marginBottom:12, fontSize:13, color:'#92600a' }}>
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: '#92600a' }}>
                 This domain is using custom nameservers, so these records may not apply. Switch to Namecheap default nameservers (Nameservers tab) to manage DNS here.
               </div>
             )}
-            <p style={{ color:MUTE, fontSize:13 }}>Add, edit, or remove DNS records. Common types: A (IP address), CNAME (alias), MX (mail), TXT (verification).</p>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 90px 2fr 70px 36px', gap:8, fontSize:12, fontWeight:700, color:MUTE, marginBottom:6 }}>
+            <p style={{ color: MUTE, fontSize: 13 }}>Add, edit, or remove DNS records. Common types: A (IP address), CNAME (alias), MX (mail), TXT (verification).</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 2fr 70px 36px', gap: 8, fontSize: 12, fontWeight: 700, color: MUTE, marginBottom: 6 }}>
               <div>Host</div><div>Type</div><div>Value</div><div>TTL</div><div></div>
             </div>
             {hosts.map((h, i) => (
-              <div key={i} style={{ display:'grid', gridTemplateColumns:'1fr 90px 2fr 70px 36px', gap:8, marginBottom:8, alignItems:'center' }}>
-                <input style={inp} value={h.name||''} onChange={e=>updateRecord(i,'name',e.target.value)} placeholder="@" />
-                <select style={inp} value={h.type} onChange={e=>updateRecord(i,'type',e.target.value)}>
-                  {['A','AAAA','CNAME','MX','TXT','NS','URL'].map(t=><option key={t} value={t}>{t}</option>)}
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 2fr 70px 36px', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                <input style={inp} value={h.name || ''} onChange={e => updateRecord(i, 'name', e.target.value)} placeholder="@" />
+                <select style={inp} value={h.type} onChange={e => updateRecord(i, 'type', e.target.value)}>
+                  {['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'URL'].map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
-                <input style={inp} value={h.address||''} onChange={e=>updateRecord(i,'address',e.target.value)} placeholder="value / IP / target" />
-                <input style={inp} value={h.ttl||1800} onChange={e=>updateRecord(i,'ttl',e.target.value)} />
-                <button onClick={()=>removeRecord(i)} style={{ background:'#fef2f2', color:'#b42318', border:'none', borderRadius:8, padding:'7px', cursor:'pointer' }}>×</button>
+                <input style={inp} value={h.address || ''} onChange={e => updateRecord(i, 'address', e.target.value)} placeholder="value / IP / target" />
+                <input style={inp} value={h.ttl || 1800} onChange={e => updateRecord(i, 'ttl', e.target.value)} />
+                <button onClick={() => removeRecord(i)} style={{ background: '#fef2f2', color: '#b42318', border: 'none', borderRadius: 8, padding: '7px', cursor: 'pointer' }}>×</button>
               </div>
             ))}
-            <div style={{ display:'flex', gap:10, marginTop:14, flexWrap:'wrap' }}>
-              <button onClick={addRecord} style={{ background:'#fff', color:INK, border:'1px solid #d8dbe6', borderRadius:8, padding:'8px 16px', cursor:'pointer' }}>+ Add record</button>
-              <button onClick={saveDns} disabled={saving} style={{ background:TEAL, color:'#fff', border:'none', borderRadius:8, padding:'8px 20px', fontWeight:700, cursor:'pointer' }}>{saving?'Saving…':'Save DNS records'}</button>
+            <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+              <button onClick={addRecord} style={{ background: '#fff', color: INK, border: '1px solid #d8dbe6', borderRadius: 8, padding: '8px 16px', cursor: 'pointer' }}>+ Add record</button>
+              <button onClick={saveDns} disabled={saving} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving…' : 'Save DNS records'}</button>
             </div>
 
-            <div style={{ marginTop:18, paddingTop:14, borderTop:'1px solid #eee' }}>
-              <h4 style={{ margin:'0 0 4px' }}>📧 Email setup (MX records)</h4>
-              <p style={{ color:MUTE, fontSize:13, marginTop:0 }}>Add mail records in one click, then Save.</p>
-              <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-                <button onClick={addGoogleEmail} style={{ background:'#fff', color:TEAL, border:`1px solid ${TEAL}`, borderRadius:8, padding:'7px 14px', cursor:'pointer', fontWeight:600, fontSize:13 }}>Set up Google Workspace email</button>
-                <button onClick={addCustomMx} style={{ background:'#fff', color:INK, border:'1px solid #d8dbe6', borderRadius:8, padding:'7px 14px', cursor:'pointer', fontSize:13 }}>+ Custom mail server</button>
+            <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid #eee' }}>
+              <h4 style={{ margin: '0 0 4px' }}>📧 Email setup (MX records)</h4>
+              <p style={{ color: MUTE, fontSize: 13, marginTop: 0 }}>Add mail records in one click, then Save.</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={addGoogleEmail} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Set up Google Workspace email</button>
+                <button onClick={addCustomMx} style={{ background: '#fff', color: INK, border: '1px solid #d8dbe6', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 13 }}>+ Custom mail server</button>
               </div>
-              <p style={{ color:MUTE, fontSize:12, marginTop:8 }}>
+              <p style={{ color: MUTE, fontSize: 12, marginTop: 8 }}>
                 This adds Google's single MX record (works for current Workspace accounts). Older accounts that need the legacy 5-record set can{' '}
-                <button onClick={addGoogleEmailLegacy} style={{ background:'none', border:'none', color:TEAL, cursor:'pointer', padding:0, fontSize:12, textDecoration:'underline' }}>use the 5-record set instead</button>.
+                <button onClick={addGoogleEmailLegacy} style={{ background: 'none', border: 'none', color: TEAL, cursor: 'pointer', padding: 0, fontSize: 12, textDecoration: 'underline' }}>use the 5-record set instead</button>.
               </p>
             </div>
           </div>
-        ) : tab==='nameservers' ? (
+        ) : tab === 'nameservers' ? (
           <div>
-            <p style={{ color:MUTE, fontSize:13 }}>Current nameservers:</p>
-            <ul style={{ fontSize:14 }}>{ns.length ? ns.map((n,i)=><li key={i}><code>{n}</code></li>) : <li>Using Namecheap default</li>}</ul>
+            <p style={{ color: MUTE, fontSize: 13 }}>Current nameservers:</p>
+            <ul style={{ fontSize: 14 }}>{ns.length ? ns.map((n, i) => <li key={i}><code>{n}</code></li>) : <li>Using Namecheap default</li>}</ul>
 
-            <div style={{ background:'#f6f8f7', borderRadius:10, padding:16, marginTop:16 }}>
-              <h4 style={{ marginTop:0 }}>Use custom nameservers</h4>
-              {customNs.map((n,i)=>(
-                <input key={i} style={{ ...inp, width:'100%', marginBottom:8 }} value={n} onChange={e=>{ const c=[...customNs]; c[i]=e.target.value; setCustomNs(c); }} placeholder={`ns${i+1}.example.com`} />
+            <div style={{ background: '#f6f8f7', borderRadius: 10, padding: 16, marginTop: 16 }}>
+              <h4 style={{ marginTop: 0 }}>Use custom nameservers</h4>
+              {customNs.map((n, i) => (
+                <input key={i} style={{ ...inp, width: '100%', marginBottom: 8 }} value={n} onChange={e => { const c = [...customNs]; c[i] = e.target.value; setCustomNs(c); }} placeholder={`ns${i + 1}.example.com`} />
               ))}
-              <div style={{ display:'flex', gap:8 }}>
-                <button onClick={()=>setCustomNs([...customNs, ''])} style={{ background:'#fff', border:'1px solid #d8dbe6', borderRadius:8, padding:'7px 14px', cursor:'pointer' }}>+ Add</button>
-                <button onClick={saveCustomNs} disabled={saving} style={{ background:TEAL, color:'#fff', border:'none', borderRadius:8, padding:'7px 18px', fontWeight:700, cursor:'pointer' }}>Set custom nameservers</button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setCustomNs([...customNs, ''])} style={{ background: '#fff', border: '1px solid #d8dbe6', borderRadius: 8, padding: '7px 14px', cursor: 'pointer' }}>+ Add</button>
+                <button onClick={saveCustomNs} disabled={saving} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 18px', fontWeight: 700, cursor: 'pointer' }}>Set custom nameservers</button>
               </div>
             </div>
 
-            <div style={{ marginTop:16 }}>
-              <button onClick={useDefaultNs} disabled={saving} style={{ background:'#fff', color:TEAL, border:`1px solid ${TEAL}`, borderRadius:8, padding:'8px 18px', fontWeight:700, cursor:'pointer' }}>
+            <div style={{ marginTop: 16 }}>
+              <button onClick={useDefaultNs} disabled={saving} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '8px 18px', fontWeight: 700, cursor: 'pointer' }}>
                 Reset to Namecheap default nameservers
               </button>
-              <p style={{ color:MUTE, fontSize:12, marginTop:6 }}>If you don't change nameservers, your domain stays on Namecheap's default DNS automatically.</p>
+              <p style={{ color: MUTE, fontSize: 12, marginTop: 6 }}>If you don't change nameservers, your domain stays on Namecheap's default DNS automatically.</p>
             </div>
 
-            <div style={{ marginTop:20, paddingTop:16, borderTop:'1px solid #eee' }}>
-              <h4 style={{ margin:'0 0 6px' }}>Transfer this domain away</h4>
-              <p style={{ color:MUTE, fontSize:12, marginTop:0 }}>Moving to another registrar? We'll email you the steps and send your EPP/auth code on request.</p>
-              <button onClick={requestTransferOut} disabled={saving} style={{ background:'#fff', color:'#b45309', border:'1px solid #f5c97f', borderRadius:8, padding:'8px 16px', fontWeight:600, cursor:'pointer' }}>
+            <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #eee' }}>
+              <h4 style={{ margin: '0 0 6px' }}>Transfer this domain away</h4>
+              <p style={{ color: MUTE, fontSize: 12, marginTop: 0 }}>Moving to another registrar? We'll email you the steps and send your EPP/auth code on request.</p>
+              <button onClick={requestTransferOut} disabled={saving} style={{ background: '#fff', color: '#b45309', border: '1px solid #f5c97f', borderRadius: 8, padding: '8px 16px', fontWeight: 600, cursor: 'pointer' }}>
                 Request transfer-out instructions
               </button>
             </div>
           </div>
         ) : (
           <div>
-            <h4 style={{ marginTop:0 }}>Registrant contact & verification</h4>
-            <p style={{ color:MUTE, fontSize:13 }}>ICANN requires valid, verified registrant contact details. Keep these accurate to avoid your domain being suspended.</p>
+            <h4 style={{ marginTop: 0 }}>Registrant contact & verification</h4>
+            <p style={{ color: MUTE, fontSize: 13 }}>ICANN requires valid, verified registrant contact details. Keep these accurate to avoid your domain being suspended.</p>
 
             {verif && (
-              <div style={{ background: verif.emailVerified ? '#dcfce7' : '#fffbeb', border:'1px solid '+(verif.emailVerified?'#bbf7d0':'#fde68a'), borderRadius:10, padding:14, marginBottom:16 }}>
+              <div style={{ background: verif.emailVerified ? '#dcfce7' : '#fffbeb', border: '1px solid ' + (verif.emailVerified ? '#bbf7d0' : '#fde68a'), borderRadius: 10, padding: 14, marginBottom: 16 }}>
                 <strong style={{ color: verif.emailVerified ? '#166534' : '#92600a' }}>
                   {verif.emailVerified === true ? '✓ Registrant email verified' : verif.emailVerified === false ? '⚠️ Registrant email NOT verified' : 'Verification status unknown'}
                 </strong>
                 {verif.emailVerified === false && (
-                  <div style={{ marginTop:8 }}>
-                    <button onClick={resendVerification} disabled={saving} style={{ background:TEAL, color:'#fff', border:'none', borderRadius:8, padding:'7px 16px', fontWeight:600, cursor:'pointer' }}>
+                  <div style={{ marginTop: 8 }}>
+                    <button onClick={resendVerification} disabled={saving} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 16px', fontWeight: 600, cursor: 'pointer' }}>
                       {saving ? '…' : 'Resend verification email'}
                     </button>
                   </div>
@@ -4341,16 +4345,16 @@ const DomainManagePanel = ({ domain, onClose }) => {
             )}
 
             {contact ? (
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-                {[['firstName','First name'],['lastName','Last name'],['email','Email'],['phone','Phone'],['address','Address'],['city','City'],['state','State/Province'],['zip','Postal code'],['country','Country (2-letter)']].map(([k,label])=>(
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                {[['firstName', 'First name'], ['lastName', 'Last name'], ['email', 'Email'], ['phone', 'Phone'], ['address', 'Address'], ['city', 'City'], ['state', 'State/Province'], ['zip', 'Postal code'], ['country', 'Country (2-letter)']].map(([k, label]) => (
                   <div key={k}>
-                    <label style={{ fontSize:12, color:MUTE }}>{label}</label>
-                    <input style={{ ...inp, width:'100%' }} value={contact[k]||''} onChange={e=>setContact({ ...contact, [k]: e.target.value })} />
+                    <label style={{ fontSize: 12, color: MUTE }}>{label}</label>
+                    <input style={{ ...inp, width: '100%' }} value={contact[k] || ''} onChange={e => setContact({ ...contact, [k]: e.target.value })} />
                   </div>
                 ))}
               </div>
             ) : <p>Loading contact details…</p>}
-            <button onClick={saveContacts} disabled={saving} style={{ background:TEAL, color:'#fff', border:'none', borderRadius:8, padding:'9px 20px', fontWeight:700, cursor:'pointer', marginTop:14 }}>
+            <button onClick={saveContacts} disabled={saving} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', fontWeight: 700, cursor: 'pointer', marginTop: 14 }}>
               {saving ? 'Saving…' : 'Save contact details'}
             </button>
           </div>
@@ -4368,28 +4372,49 @@ const CustomerSubscriptions = () => {
   const [renewing, setRenewing] = useState(null);
   const [renewBusy, setRenewBusy] = useState(false);
   const [renewMsg, setRenewMsg] = useState('');
+  const [seatSub, setSeatSub] = useState(null);   // subscription we're adding users to
+  const [seatCount, setSeatCount] = useState(1);
+  const [seatBusy, setSeatBusy] = useState(false);
+  const [seatMsg, setSeatMsg] = useState('');
 
-  useEffect(() => { (async () => {
-    try {
-      const [subRes, domRes] = await Promise.all([
-        axios.get(`${API_URL}/customer/my-subscriptions`).catch((e) => ({ error: e })),
-        axios.get(`${API_URL}/customer/my-domains`).catch(() => ({ data: { domains: [] } })),
-      ]);
-      if (subRes.error) {
-        const raw = subRes.error?.response?.data?.error || '';
-        // Hide confusing raw Google errors (e.g. "transfer token does not exist") — show a friendly message.
-        if (/transfer token|does not exist|not found|no customer/i.test(raw)) setError('');
-        else setError(raw || '');
-      }
-      else setData(subRes.data);
-      setDomains(domRes.data?.domains || []);
-    } catch (e) { setError(e?.response?.data?.error || 'Could not load your subscriptions.'); }
-    finally { setLoading(false); }
-  })(); }, []);
+  useEffect(() => {
+    (async () => {
+      try {
+        const [subRes, domRes] = await Promise.all([
+          axios.get(`${API_URL}/customer/my-subscriptions`).catch((e) => ({ error: e })),
+          axios.get(`${API_URL}/customer/my-domains`).catch(() => ({ data: { domains: [] } })),
+        ]);
+        if (subRes.error) {
+          const raw = subRes.error?.response?.data?.error || '';
+          // Hide confusing raw Google errors (e.g. "transfer token does not exist") — show a friendly message.
+          if (/transfer token|does not exist|not found|no customer/i.test(raw)) setError('');
+          else setError(raw || '');
+        }
+        else setData(subRes.data);
+        setDomains(domRes.data?.domains || []);
+      } catch (e) { setError(e?.response?.data?.error || 'Could not load your subscriptions.'); }
+      finally { setLoading(false); }
+    })();
+  }, []);
 
   if (loading) return <div className="loading">Loading your subscriptions…</div>;
 
   const renew = (s) => { setRenewing(s); setRenewMsg(''); };
+
+  const openSeats = (s) => {
+    setSeatSub(s);
+    setSeatCount((s.seats || 1) + 1); // default: one more than current
+    setSeatMsg('');
+  };
+  const doSeatChange = async (method) => {
+    setSeatBusy(true); setSeatMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/customer/subscriptions/change-seats`, { skuId: seatSub.skuId, domain: seatSub.domain, newSeats: seatCount, method });
+      if (r.data.checkoutUrl) window.location.href = r.data.checkoutUrl;
+      else setSeatMsg('Could not start checkout.');
+    } catch (e) { setSeatMsg(e?.response?.data?.error || 'Could not start checkout.'); }
+    finally { setSeatBusy(false); }
+  };
   const doRenew = async (method) => {
     setRenewBusy(true); setRenewMsg('');
     try {
@@ -4399,7 +4424,7 @@ const CustomerSubscriptions = () => {
     } catch (e) {
       const status = e?.response?.status;
       const serverMsg = e?.response?.data?.error || e?.response?.data?.message;
-      setRenewMsg(serverMsg ? serverMsg : (status ? `Renewal failed (HTTP ${status}). ${status===404?'The renewal feature may not be deployed yet.':''}` : 'Network error: ' + e.message));
+      setRenewMsg(serverMsg ? serverMsg : (status ? `Renewal failed (HTTP ${status}). ${status === 404 ? 'The renewal feature may not be deployed yet.' : ''}` : 'Network error: ' + e.message));
     }
     finally { setRenewBusy(false); }
   };
@@ -4412,47 +4437,51 @@ const CustomerSubscriptions = () => {
   return (
     <div className="section">
       <h2>📊 My Subscriptions</h2>
-      {error && <div style={{ background:'#fff7ed', color:'#9a3412', padding:'10px 14px', borderRadius:8, marginBottom:16, fontSize:14 }}>{error}</div>}
+      {error && <div style={{ background: '#fff7ed', color: '#9a3412', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 14 }}>{error}</div>}
 
       {/* Google Workspace + add-on subscriptions (each billed separately) */}
-      <h3 style={{ marginTop:8 }}>Subscriptions</h3>
-      {data?.domain && <p style={{ color:'#5b6075', marginTop:0 }}>Domain: <strong>{data.domain}</strong>{data.account ? ` · ${data.account.toUpperCase()} account` : ''}</p>}
-      <p style={{ color:'#6b7280', fontSize:13, marginTop:0 }}>Each subscription is billed and renewed <strong>separately</strong>. Paying one (e.g. Google Workspace) does not renew the others (e.g. Google Voice or add-ons) — pay each one to keep it active.</p>
+      <h3 style={{ marginTop: 8 }}>Subscriptions</h3>
+      {data?.domain && <p style={{ color: '#5b6075', marginTop: 0 }}>Domain: <strong>{data.domain}</strong>{data.account ? ` · ${data.account.toUpperCase()} account` : ''}</p>}
+      <p style={{ color: '#6b7280', fontSize: 13, marginTop: 0 }}>Each subscription is billed and renewed <strong>separately</strong>. Paying one (e.g. Google Workspace) does not renew the others (e.g. Google Voice or add-ons) — pay each one to keep it active.</p>
       {!hasSubs ? (
-        <div style={{ background:'#f5f8ff', border:'1px solid #dbe4ff', borderRadius:12, padding:18, marginBottom:24 }}>
-          <p style={{ margin:0 }}>{data?.note || "No Workspace subscription yet."} Use <strong>New subscription</strong> to get started or <strong>Import Workspace</strong> to transfer an existing one.</p>
+        <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 18, marginBottom: 24 }}>
+          <p style={{ margin: 0 }}>{data?.note || "No Workspace subscription yet."} Use <strong>New subscription</strong> to get started or <strong>Import Workspace</strong> to transfer an existing one.</p>
         </div>
       ) : (
-        <table className="data-table" style={{ marginBottom:24 }}>
+        <table className="data-table" style={{ marginBottom: 24 }}>
           <thead><tr><th>Product</th><th>Type</th><th>Seats</th><th>Status</th><th>Renews</th><th></th></tr></thead>
           <tbody>
-            {data.subscriptions.map((s,i)=>{
+            {data.subscriptions.map((s, i) => {
               const d = s.daysUntilRenewal;
               const soon = d !== null && d !== undefined && d <= 7;
               const overdue = d !== null && d !== undefined && d < 0;
               const isPrimary = s.category === 'workspace';
               return (
-              <tr key={i}>
-                <td style={{ fontWeight:600 }}>{s.skuName}</td>
-                <td>{isPrimary ? <span style={{ fontSize:12, background:'#e0f2f1', color:'#0F766E', padding:'2px 8px', borderRadius:99, fontWeight:600 }}>Primary</span> : <span style={{ fontSize:12, background:'#f3f4f6', color:'#6b7280', padding:'2px 8px', borderRadius:99 }}>Add-on</span>}</td>
-                <td>{s.seats ?? '—'}</td>
-                <td><span className={`status ${(s.status||'').toLowerCase()}`}>{s.status}</span></td>
-                <td>
-                  <span style={{ fontWeight:600, color: overdue ? '#b42318' : soon ? '#b45309' : '#111827' }}>{fmtDate(s.renewalDate)}</span>
-                  {d !== null && d !== undefined && (
-                    <div style={{ fontSize:12, color: overdue ? '#b42318' : soon ? '#b45309' : '#6b7280' }}>
-                      {overdue ? `${Math.abs(d)} day${Math.abs(d)===1?'':'s'} overdue` : d === 0 ? 'Due today' : `in ${d} day${d===1?'':'s'}`}
-                    </div>
-                  )}
-                  {s.cycleStatus === 'paid' && <div style={{ fontSize:11, color:'#166534', fontWeight:600 }}>✓ Paid this cycle</div>}
-                </td>
-                <td>
-                  {s.cycleStatus === 'paid'
-                    ? <span style={{ fontSize:12, color:'#6b7280' }}>Paid</span>
-                    : <button className="btn btn-primary" style={{ fontSize:12, padding:'5px 14px' }} onClick={()=>renew(s)}>Renew</button>}
-                </td>
-              </tr>
-            );})}
+                <tr key={i}>
+                  <td style={{ fontWeight: 600 }}>{s.skuName}</td>
+                  <td>{isPrimary ? <span style={{ fontSize: 12, background: '#e0f2f1', color: '#0F766E', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>Primary</span> : <span style={{ fontSize: 12, background: '#f3f4f6', color: '#6b7280', padding: '2px 8px', borderRadius: 99 }}>Add-on</span>}</td>
+                  <td>{s.seats ?? '—'}</td>
+                  <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
+                  <td>
+                    <span style={{ fontWeight: 600, color: overdue ? '#b42318' : soon ? '#b45309' : '#111827' }}>{fmtDate(s.renewalDate)}</span>
+                    {d !== null && d !== undefined && (
+                      <div style={{ fontSize: 12, color: overdue ? '#b42318' : soon ? '#b45309' : '#6b7280' }}>
+                        {overdue ? `${Math.abs(d)} day${Math.abs(d) === 1 ? '' : 's'} overdue` : d === 0 ? 'Due today' : `in ${d} day${d === 1 ? '' : 's'}`}
+                      </div>
+                    )}
+                    {s.cycleStatus === 'paid' && <div style={{ fontSize: 11, color: '#166534', fontWeight: 600 }}>✓ Paid this cycle</div>}
+                  </td>
+                  <td>
+                    {s.cycleStatus === 'paid'
+                      ? <span style={{ fontSize: 12, color: '#6b7280' }}>Paid</span>
+                      : <button className="btn btn-primary" style={{ fontSize: 12, padding: '5px 14px' }} onClick={() => renew(s)}>Renew</button>}
+                    {isPrimary && s.status === 'ACTIVE' && (
+                      <button className="btn btn-secondary" style={{ fontSize: 12, padding: '5px 12px', marginTop: 4, display: 'block' }} onClick={() => openSeats(s)}>+ Add users</button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -4460,18 +4489,18 @@ const CustomerSubscriptions = () => {
       {/* Purchased domains */}
       <h3>Domains</h3>
       {!hasDomains ? (
-        <div style={{ background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:12, padding:18 }}>
-          <p style={{ margin:0 }}>No domains yet. Browse the <strong>Domains</strong> tab to register one.</p>
+        <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 12, padding: 18 }}>
+          <p style={{ margin: 0 }}>No domains yet. Browse the <strong>Domains</strong> tab to register one.</p>
         </div>
       ) : (
         <table className="data-table">
           <thead><tr><th>Domain</th><th>Order #</th><th>Status</th><th>Registered</th><th>Renews</th></tr></thead>
           <tbody>
-            {domains.map((d)=>(
+            {domains.map((d) => (
               <tr key={d.id}>
-                <td style={{ fontWeight:600 }}>{d.domainName}</td>
-                <td style={{ fontFamily:'monospace', fontSize:13 }}>{d.orderNumber || '—'}</td>
-                <td><span className={`status ${(d.status||'').toLowerCase()}`}>{d.status === 'registered' ? 'Active' : d.status === 'test_paid' ? 'Test' : d.status === 'failed' ? 'Failed' : d.status}</span>{d.status==='failed' && d.error && <div style={{ fontSize:12, color:'#b42318' }}>{d.error}</div>}</td>
+                <td style={{ fontWeight: 600 }}>{d.domainName}</td>
+                <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{d.orderNumber || '—'}</td>
+                <td><span className={`status ${(d.status || '').toLowerCase()}`}>{d.status === 'registered' ? 'Active' : d.status === 'test_paid' ? 'Test' : d.status === 'failed' ? 'Failed' : d.status}</span>{d.status === 'failed' && d.error && <div style={{ fontSize: 12, color: '#b42318' }}>{d.error}</div>}</td>
                 <td>{fmtD(d.registeredAt || d.createdAt)}</td>
                 <td>{fmtD(d.expiresAt)}</td>
               </tr>
@@ -4480,18 +4509,60 @@ const CustomerSubscriptions = () => {
         </table>
       )}
 
+      {/* Add users (seat increase) modal */}
+      {seatSub && (() => {
+        const cur = seatSub.seats || 1;
+        const price = seatSub.seatPrice;
+        const added = Math.max(0, seatCount - cur);
+        const cost = price != null ? (price * added) : null;
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 1000 }} onClick={() => !seatBusy && setSeatSub(null)}>
+            <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 420, width: '100%' }} onClick={e => e.stopPropagation()}>
+              <h3 style={{ marginTop: 0 }}>Add users to {seatSub.skuName}</h3>
+              <p style={{ color: '#6b7280', marginTop: 0, fontSize: 14 }}>Domain: <strong>{seatSub.domain}</strong> · currently <strong>{cur} user{cur === 1 ? '' : 's'}</strong></p>
+              <p style={{ color: '#374151', fontSize: 14 }}>Choose how many total users you want. You can only increase here — to reduce users, contact support.</p>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center', margin: '16px 0' }}>
+                <button onClick={() => setSeatCount(Math.max(cur + 1, seatCount - 1))} disabled={seatCount <= cur + 1} style={{ width: 44, height: 44, borderRadius: 10, border: '1px solid #d8dbe6', background: '#fff', fontSize: 22, cursor: 'pointer' }}>−</button>
+                <div style={{ minWidth: 64, textAlign: 'center' }}>
+                  <div style={{ fontSize: 32, fontWeight: 800 }}>{seatCount}</div>
+                  <div style={{ fontSize: 12, color: '#6b7280' }}>total users</div>
+                </div>
+                <button onClick={() => setSeatCount(seatCount + 1)} style={{ width: 44, height: 44, borderRadius: 10, border: '1px solid #d8dbe6', background: '#fff', fontSize: 22, cursor: 'pointer' }}>+</button>
+              </div>
+
+              <div style={{ background: '#f8fafc', borderRadius: 10, padding: '12px 16px', marginBottom: 14, fontSize: 14 }}>
+                Adding <strong>{added}</strong> user{added === 1 ? '' : 's'}
+                {price != null
+                  ? <> · <strong style={{ color: '#0F766E' }}>${cost.toFixed(2)}</strong>/month <span style={{ color: '#6b7280' }}>(+ tax)</span></>
+                  : <span style={{ color: '#b45309' }}> · price will be confirmed at checkout</span>}
+              </div>
+
+              {seatMsg && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{seatMsg}</div>}
+
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button onClick={() => doSeatChange('stripe')} disabled={seatBusy || added < 1} style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{seatBusy ? '…' : '💳 Pay by card'}</button>
+                <button onClick={() => doSeatChange('nicky')} disabled={seatBusy || added < 1} style={{ background: '#fff', color: '#0F766E', border: '1px solid #0F766E', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{seatBusy ? '…' : '🪙 Crypto'}</button>
+                <button onClick={() => setSeatSub(null)} disabled={seatBusy} style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}>Cancel</button>
+              </div>
+              <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 10, marginBottom: 0 }}>After payment, the new user licenses are applied to your domain automatically. Create the users in your Google Admin console.</p>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Renewal modal */}
       {renewing && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', display:'flex', alignItems:'center', justifyContent:'center', padding:20, zIndex:1000 }} onClick={()=>!renewBusy && setRenewing(null)}>
-          <div style={{ background:'#fff', borderRadius:16, padding:24, maxWidth:420, width:'100%' }} onClick={e=>e.stopPropagation()}>
-            <h3 style={{ marginTop:0 }}>Renew {renewing.skuName}</h3>
-            <p style={{ color:'#6b7280', marginTop:0, fontSize:14 }}>Domain: <strong>{renewing.domain}</strong> · {renewing.seats ?? '?'} seat{renewing.seats===1?'':'s'}</p>
-            <p style={{ color:'#374151', fontSize:14 }}>Renewing keeps your subscription active and moves your next renewal date forward by one month. Choose how to pay:</p>
-            {renewMsg && <div style={{ background:'#fde8e8', color:'#b42318', padding:'10px 14px', borderRadius:8, marginBottom:12, fontSize:13 }}>{renewMsg}</div>}
-            <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
-              <button onClick={()=>doRenew('stripe')} disabled={renewBusy} style={{ background:'#0F766E', color:'#fff', border:'none', borderRadius:10, padding:'11px 20px', fontWeight:700, cursor:'pointer' }}>{renewBusy?'…':'💳 Pay by card'}</button>
-              <button onClick={()=>doRenew('nicky')} disabled={renewBusy} style={{ background:'#fff', color:'#0F766E', border:'1px solid #0F766E', borderRadius:10, padding:'11px 20px', fontWeight:700, cursor:'pointer' }}>{renewBusy?'…':'🪙 Pay with crypto'}</button>
-              <button onClick={()=>setRenewing(null)} disabled={renewBusy} style={{ background:'transparent', border:'none', color:'#6b7280', cursor:'pointer' }}>Cancel</button>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 1000 }} onClick={() => !renewBusy && setRenewing(null)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 420, width: '100%' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Renew {renewing.skuName}</h3>
+            <p style={{ color: '#6b7280', marginTop: 0, fontSize: 14 }}>Domain: <strong>{renewing.domain}</strong> · {renewing.seats ?? '?'} seat{renewing.seats === 1 ? '' : 's'}</p>
+            <p style={{ color: '#374151', fontSize: 14 }}>Renewing keeps your subscription active and moves your next renewal date forward by one month. Choose how to pay:</p>
+            {renewMsg && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{renewMsg}</div>}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button onClick={() => doRenew('stripe')} disabled={renewBusy} style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{renewBusy ? '…' : '💳 Pay by card'}</button>
+              <button onClick={() => doRenew('nicky')} disabled={renewBusy} style={{ background: '#fff', color: '#0F766E', border: '1px solid #0F766E', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{renewBusy ? '…' : '🪙 Pay with crypto'}</button>
+              <button onClick={() => setRenewing(null)} disabled={renewBusy} style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}>Cancel</button>
             </div>
           </div>
         </div>
@@ -4514,13 +4585,13 @@ const CustomerSsl = () => {
     setLoading(true);
     try {
       const [p, o] = await Promise.all([
-        axios.get(`${API_URL}/customer/nc/ssl`).catch(()=>({ data:{ products:[] } })),
-        axios.get(`${API_URL}/customer/nc/ssl/orders`).catch(()=>({ data:{ orders:[] } })),
+        axios.get(`${API_URL}/customer/nc/ssl`).catch(() => ({ data: { products: [] } })),
+        axios.get(`${API_URL}/customer/nc/ssl/orders`).catch(() => ({ data: { orders: [] } })),
       ]);
       setProducts(p.data.products || []);
       if (p.data.products?.length && !sel) setSel(p.data.products[0].name);
       setOrders(o.data.orders || []);
-    } catch (_) {}
+    } catch (_) { }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
@@ -4536,61 +4607,61 @@ const CustomerSsl = () => {
     finally { setBusy(false); }
   };
 
-  const card = { background:'#fff', borderRadius:16, padding:24, marginBottom:18, boxShadow:'0 1px 3px rgba(0,0,0,0.06)' };
+  const card = { background: '#fff', borderRadius: 16, padding: 24, marginBottom: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
   if (loading) return <div style={card}>Loading SSL products…</div>;
 
   return (
     <div>
-      <h1 style={{ marginTop:0 }}>SSL certificates</h1>
-      <p style={{ color:MUTE, marginTop:0 }}>Secure your website with HTTPS. After purchase, we'll help you activate the certificate on your domain.</p>
+      <h1 style={{ marginTop: 0 }}>SSL certificates</h1>
+      <p style={{ color: MUTE, marginTop: 0 }}>Secure your website with HTTPS. After purchase, we'll help you activate the certificate on your domain.</p>
 
       <div style={card}>
-        <h3 style={{ marginTop:0 }}>Buy a certificate</h3>
+        <h3 style={{ marginTop: 0 }}>Buy a certificate</h3>
         {products.length === 0 ? (
-          <p style={{ color:MUTE }}>SSL products aren't available right now. Please check back later or contact support.</p>
+          <p style={{ color: MUTE }}>SSL products aren't available right now. Please check back later or contact support.</p>
         ) : (
           <>
-            <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 2fr', gap:10, marginBottom:12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 2fr', gap: 10, marginBottom: 12 }}>
               <div>
-                <label style={{ fontSize:12, color:MUTE }}>Product</label>
-                <select value={sel} onChange={e=>setSel(e.target.value)} style={{ width:'100%', height:44, borderRadius:10, border:'1px solid #d8dbe6', padding:'0 12px' }}>
-                  {products.map(p=><option key={p.name} value={p.name}>{p.name} — ${Number(p.price).toFixed(2)}/yr</option>)}
+                <label style={{ fontSize: 12, color: MUTE }}>Product</label>
+                <select value={sel} onChange={e => setSel(e.target.value)} style={{ width: '100%', height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 12px' }}>
+                  {products.map(p => <option key={p.name} value={p.name}>{p.name} — ${Number(p.price).toFixed(2)}/yr</option>)}
                 </select>
               </div>
               <div>
-                <label style={{ fontSize:12, color:MUTE }}>Years</label>
-                <select value={years} onChange={e=>setYears(Number(e.target.value))} style={{ width:'100%', height:44, borderRadius:10, border:'1px solid #d8dbe6', padding:'0 12px' }}>
-                  {[1,2].map(y=><option key={y} value={y}>{y} year{y>1?'s':''}</option>)}
+                <label style={{ fontSize: 12, color: MUTE }}>Years</label>
+                <select value={years} onChange={e => setYears(Number(e.target.value))} style={{ width: '100%', height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 12px' }}>
+                  {[1, 2].map(y => <option key={y} value={y}>{y} year{y > 1 ? 's' : ''}</option>)}
                 </select>
               </div>
               <div>
-                <label style={{ fontSize:12, color:MUTE }}>For domain (optional)</label>
-                <input value={forDomain} onChange={e=>setForDomain(e.target.value)} placeholder="example.com" style={{ width:'100%', height:44, borderRadius:10, border:'1px solid #d8dbe6', padding:'0 12px' }} />
+                <label style={{ fontSize: 12, color: MUTE }}>For domain (optional)</label>
+                <input value={forDomain} onChange={e => setForDomain(e.target.value)} placeholder="example.com" style={{ width: '100%', height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 12px' }} />
               </div>
             </div>
-            <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
-              <button onClick={()=>buy('stripe')} disabled={busy} style={{ background:TEAL, color:'#fff', border:'none', borderRadius:10, padding:'10px 20px', fontWeight:700, cursor:'pointer' }}>{busy?'…':'💳 Buy by card'}</button>
-              <button onClick={()=>buy('nicky')} disabled={busy} style={{ background:'#fff', color:TEAL, border:`1px solid ${TEAL}`, borderRadius:10, padding:'10px 20px', fontWeight:700, cursor:'pointer' }}>{busy?'…':'🪙 Buy with crypto'}</button>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button onClick={() => buy('stripe')} disabled={busy} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 20px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '💳 Buy by card'}</button>
+              <button onClick={() => buy('nicky')} disabled={busy} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 20px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '🪙 Buy with crypto'}</button>
             </div>
-            {msg && <div style={{ marginTop:12, padding:'10px 14px', borderRadius:8, background: msg.startsWith('✓')?'#dcfce7':'#fde8e8', color: msg.startsWith('✓')?'#166534':'#b42318' }}>{msg}</div>}
+            {msg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</div>}
           </>
         )}
       </div>
 
       <div style={card}>
-        <h3 style={{ marginTop:0 }}>My SSL orders</h3>
-        {orders.length === 0 ? <p style={{ color:MUTE }}>No SSL orders yet.</p> : (
-          <table style={{ width:'100%', fontSize:14, borderCollapse:'collapse' }}>
-            <thead><tr style={{ textAlign:'left', color:MUTE }}><th style={{ padding:'6px 0' }}>Product</th><th>Domain</th><th>Status</th><th>Note</th></tr></thead>
+        <h3 style={{ marginTop: 0 }}>My SSL orders</h3>
+        {orders.length === 0 ? <p style={{ color: MUTE }}>No SSL orders yet.</p> : (
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: MUTE }}><th style={{ padding: '6px 0' }}>Product</th><th>Domain</th><th>Status</th><th>Note</th></tr></thead>
             <tbody>
-              {orders.map(o=>(
-                <tr key={o.id} style={{ borderTop:'1px solid #f0f0f0' }}>
-                  <td style={{ padding:'8px 0', fontWeight:600 }}>{o.productType}</td>
+              {orders.map(o => (
+                <tr key={o.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '8px 0', fontWeight: 600 }}>{o.productType}</td>
                   <td>{o.forDomain || '—'}</td>
-                  <td><span style={{ color: (o.status==='active'||o.status==='purchased')?'#166534' : o.status==='failed'?'#b42318':'#b45309', fontWeight:600 }}>
-                    {o.status==='purchased'?'Purchased' : o.status==='active'?'✓ Active' : o.status==='failed'?'Failed' : o.status==='pending'?'Processing':o.status}
+                  <td><span style={{ color: (o.status === 'active' || o.status === 'purchased') ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>
+                    {o.status === 'purchased' ? 'Purchased' : o.status === 'active' ? '✓ Active' : o.status === 'failed' ? 'Failed' : o.status === 'pending' ? 'Processing' : o.status}
                   </span></td>
-                  <td style={{ color:MUTE, fontSize:13 }}>{o.activationNote || '—'}</td>
+                  <td style={{ color: MUTE, fontSize: 13 }}>{o.activationNote || '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -4614,7 +4685,7 @@ const CustomerAddons = () => {
   useEffect(() => {
     (async () => {
       try { const r = await axios.get(`${API_URL}/customer/addons`); setAddons(r.data.addons || []); }
-      catch (_) {}
+      catch (_) { }
       finally { setLoading(false); }
     })();
   }, []);
@@ -4669,32 +4740,32 @@ const CustomerAddons = () => {
 
       {/* Domain selection modal */}
       {picking && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', display:'flex', alignItems:'center', justifyContent:'center', padding:20, zIndex:1000 }} onClick={()=>!busy && setPicking(null)}>
-          <div style={{ background:'#fff', borderRadius:16, padding:24, maxWidth:440, width:'100%' }} onClick={e=>e.stopPropagation()}>
-            <h3 style={{ marginTop:0 }}>Add {picking.name}</h3>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 1000 }} onClick={() => !busy && setPicking(null)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 440, width: '100%' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Add {picking.name}</h3>
             {domains === null ? (
-              <p style={{ color:'#6b7280' }}>Checking your Workspace domains…</p>
+              <p style={{ color: '#6b7280' }}>Checking your Workspace domains…</p>
             ) : domains.length === 0 ? (
               <div>
-                <div style={{ background:'#fef2f2', color:'#b42318', borderRadius:10, padding:'14px 16px', marginBottom:16 }}>
+                <div style={{ background: '#fef2f2', color: '#b42318', borderRadius: 10, padding: '14px 16px', marginBottom: 16 }}>
                   Please purchase a Google Workspace plan first. Add-ons require an active Workspace subscription — they don't work on their own.
                 </div>
-                <button className="btn btn-secondary" onClick={()=>setPicking(null)}>Close</button>
+                <button className="btn btn-secondary" onClick={() => setPicking(null)}>Close</button>
               </div>
             ) : (
               <>
-                <p style={{ color:'#6b7280', marginTop:0 }}>Choose the Workspace domain to add this to. It will be billed on that domain's account.</p>
-                <select value={chosenDomain} onChange={e=>setChosenDomain(e.target.value)} style={{ width:'100%', height:46, borderRadius:10, border:'1px solid #d8dbe6', padding:'0 12px', marginBottom:8 }}>
+                <p style={{ color: '#6b7280', marginTop: 0 }}>Choose the Workspace domain to add this to. It will be billed on that domain's account.</p>
+                <select value={chosenDomain} onChange={e => setChosenDomain(e.target.value)} style={{ width: '100%', height: 46, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 12px', marginBottom: 8 }}>
                   <option value="">Select a domain…</option>
-                  {domains.map(d=><option key={d.domain} value={d.domain}>{d.domain} ({d.account.toUpperCase()})</option>)}
+                  {domains.map(d => <option key={d.domain} value={d.domain}>{d.domain} ({d.account.toUpperCase()})</option>)}
                 </select>
-                <div style={{ background:'#f8fafc', borderRadius:8, padding:'10px 14px', margin:'10px 0', fontSize:14 }}>
-                  {picking.name} — <strong style={{ color:TEAL }}>${picking.price}/user/mo</strong> <span style={{ color:'#6b7280' }}>+ tax</span>
+                <div style={{ background: '#f8fafc', borderRadius: 8, padding: '10px 14px', margin: '10px 0', fontSize: 14 }}>
+                  {picking.name} — <strong style={{ color: TEAL }}>${picking.price}/user/mo</strong> <span style={{ color: '#6b7280' }}>+ tax</span>
                 </div>
-                <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
-                  <button onClick={()=>checkout('stripe')} disabled={busy || !chosenDomain} style={{ background:TEAL, color:'#fff', border:'none', borderRadius:10, padding:'10px 18px', fontWeight:700, cursor:'pointer' }}>{busy?'…':'💳 Pay by card'}</button>
-                  <button onClick={()=>checkout('nicky')} disabled={busy || !chosenDomain} style={{ background:'#fff', color:TEAL, border:`1px solid ${TEAL}`, borderRadius:10, padding:'10px 18px', fontWeight:700, cursor:'pointer' }}>{busy?'…':'🪙 Crypto'}</button>
-                  <button onClick={()=>setPicking(null)} disabled={busy} style={{ background:'transparent', border:'none', color:'#6b7280', cursor:'pointer' }}>Cancel</button>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <button onClick={() => checkout('stripe')} disabled={busy || !chosenDomain} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '💳 Pay by card'}</button>
+                  <button onClick={() => checkout('nicky')} disabled={busy || !chosenDomain} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '🪙 Crypto'}</button>
+                  <button onClick={() => setPicking(null)} disabled={busy} style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}>Cancel</button>
                 </div>
               </>
             )}
@@ -4711,20 +4782,20 @@ const CustomerVoice = () => {
   return (
     <div className="section">
       <h2>📞 Google Voice</h2>
-      <div style={{ background:'#f5f8ff', border:'1px solid #dbe4ff', borderRadius:12, padding:20, marginBottom:16 }}>
-        <p style={{ marginTop:0 }}>
+      <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 20, marginBottom: 16 }}>
+        <p style={{ marginTop: 0 }}>
           Google Voice adds business phone numbers to your Workspace. Voice is available in supported countries
           (US, Canada, UK, and parts of Europe). One Voice subscription per account.
         </p>
-        <p style={{ marginBottom:0, color:'#5b6075' }}>
+        <p style={{ marginBottom: 0, color: '#5b6075' }}>
           To request Voice for your domain, please open a support ticket and our team will provision it for you.
         </p>
       </div>
 
-      <div style={{ background:'#fffbea', border:'1px solid #fde68a', borderRadius:12, padding:20 }}>
-        <h3 style={{ marginTop:0 }}>📋 After Voice is active: assign your phone numbers</h3>
+      <div style={{ background: '#fffbea', border: '1px solid #fde68a', borderRadius: 12, padding: 20 }}>
+        <h3 style={{ marginTop: 0 }}>📋 After Voice is active: assign your phone numbers</h3>
         <p>Once your Voice subscription is active, phone numbers are assigned in <strong>your own Google Admin console</strong> (this step is required by Google and can't be done from this portal):</p>
-        <ol style={{ lineHeight:1.8 }}>
+        <ol style={{ lineHeight: 1.8 }}>
           <li>Go to your Google Admin console</li>
           <li>Open <strong>Apps → Google Workspace → Google Voice</strong></li>
           <li>Add a <strong>Voice location</strong> (service address — required for emergency calling)</li>
@@ -4732,10 +4803,10 @@ const CustomerVoice = () => {
           <li>Assign or request a <strong>phone number</strong> for each user</li>
         </ol>
         <a href="https://admin.google.com/ac/apps/voice" target="_blank" rel="noreferrer"
-           className="btn btn-primary" style={{ display:'inline-block', marginTop:8, textDecoration:'none' }}>
+          className="btn btn-primary" style={{ display: 'inline-block', marginTop: 8, textDecoration: 'none' }}>
           Open Google Admin console →
         </a>
-        <p style={{ marginBottom:0, marginTop:12, fontSize:13, color:'#92600a' }}>
+        <p style={{ marginBottom: 0, marginTop: 12, fontSize: 13, color: '#92600a' }}>
           Need help? <a href="https://knowledge.workspace.google.com/admin/voice/assign-voice-numbers-to-users" target="_blank" rel="noreferrer">Google's guide to assigning numbers</a>.
         </p>
       </div>
@@ -4747,23 +4818,23 @@ const CustomerVoice = () => {
 const CustomerSupport = () => {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ subject:'', message:'', priority:'normal' });
+  const [form, setForm] = useState({ subject: '', message: '', priority: 'normal' });
   const [msg, setMsg] = useState('');
   const [openId, setOpenId] = useState(null);
   const [reply, setReply] = useState('');
 
   const load = async () => {
     setLoading(true);
-    try { const res = await axios.get(`${API_URL}/customer/tickets`); setTickets(res.data.tickets||[]); }
-    catch (_) {} finally { setLoading(false); }
+    try { const res = await axios.get(`${API_URL}/customer/tickets`); setTickets(res.data.tickets || []); }
+    catch (_) { } finally { setLoading(false); }
   };
-  useEffect(()=>{ load(); }, []);
+  useEffect(() => { load(); }, []);
 
   const submit = async () => {
     if (!form.subject || !form.message) { setMsg('Please enter a subject and message.'); return; }
     try {
       await axios.post(`${API_URL}/customer/tickets`, form);
-      setForm({ subject:'', message:'', priority:'normal' }); setMsg('✓ Ticket submitted.');
+      setForm({ subject: '', message: '', priority: 'normal' }); setMsg('✓ Ticket submitted.');
       load();
     } catch (e) { setMsg(e?.response?.data?.error || 'Could not submit ticket.'); }
   };
@@ -4771,58 +4842,60 @@ const CustomerSupport = () => {
   const sendReply = async (id) => {
     if (!reply) return;
     try { await axios.post(`${API_URL}/customer/tickets/${id}/reply`, { message: reply }); setReply(''); load(); }
-    catch (_) {}
+    catch (_) { }
   };
 
   return (
     <div className="section">
       <h2>🎫 Support</h2>
 
-      <div style={{ background:'#f5f8ff', border:'1px solid #dbe4ff', borderRadius:12, padding:16, marginBottom:20 }}>
-        <h3 style={{ marginTop:0 }}>Open a new ticket</h3>
-        <input placeholder="Subject" value={form.subject} onChange={e=>setForm({...form, subject:e.target.value})}
-          style={{ width:'100%', height:40, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 10px', marginBottom:10 }} />
-        <textarea placeholder="Describe your issue…" value={form.message} onChange={e=>setForm({...form, message:e.target.value})}
-          style={{ width:'100%', minHeight:90, borderRadius:8, border:'1px solid #d8dbe6', padding:10, marginBottom:10 }} />
-        <div style={{ display:'flex', gap:10, alignItems:'center' }}>
-          <select value={form.priority} onChange={e=>setForm({...form, priority:e.target.value})}
-            style={{ height:40, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 10px' }}>
+      <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+        <h3 style={{ marginTop: 0 }}>Open a new ticket</h3>
+        <input placeholder="Subject" value={form.subject} onChange={e => setForm({ ...form, subject: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 10 }} />
+        <textarea placeholder="Describe your issue…" value={form.message} onChange={e => setForm({ ...form, message: e.target.value })}
+          style={{ width: '100%', minHeight: 90, borderRadius: 8, border: '1px solid #d8dbe6', padding: 10, marginBottom: 10 }} />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <select value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })}
+            style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }}>
             <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
           </select>
           <button className="btn btn-primary" onClick={submit}>Submit ticket</button>
-          {msg && <span style={{ fontSize:14, color: msg.startsWith('✓')?'#166534':'#b42318' }}>{msg}</span>}
+          {msg && <span style={{ fontSize: 14, color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</span>}
         </div>
       </div>
 
       <h3>My tickets</h3>
-      {loading ? <p>Loading…</p> : tickets.length===0 ? <p>No tickets yet.</p> : (
-        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-          {tickets.map(t=>(
-            <div key={t._id} style={{ border:'1px solid #e5e7eb', borderRadius:10, padding:14 }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+      {loading ? <p>Loading…</p> : tickets.length === 0 ? <p>No tickets yet.</p> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {tickets.map(t => (
+            <div key={t._id} style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <strong>{t.subject}</strong>
-                <span className={`status ${t.status}`}>{t.status.replace('_',' ')}</span>
+                <span className={`status ${t.status}`}>{t.status.replace('_', ' ')}</span>
               </div>
-              <button className="btn btn-secondary" style={{ marginTop:8 }}
-                onClick={()=>setOpenId(openId===t._id?null:t._id)}>
-                {openId===t._id?'Hide':'View conversation'}
+              <button className="btn btn-secondary" style={{ marginTop: 8 }}
+                onClick={() => setOpenId(openId === t._id ? null : t._id)}>
+                {openId === t._id ? 'Hide' : 'View conversation'}
               </button>
-              {openId===t._id && (
-                <div style={{ marginTop:12 }}>
-                  {t.messages.map((m,i)=>(
-                    <div key={i} style={{ marginBottom:8, padding:'8px 12px', borderRadius:8,
-                      background: m.fromRole==='admin'?'#eef2ff':'#f3f4f6' }}>
-                      <div style={{ fontSize:12, color:'#6b7280', marginBottom:2 }}>
-                        {m.fromRole==='admin'?'Support':'You'} • {new Date(m.createdAt).toLocaleString()}
+              {openId === t._id && (
+                <div style={{ marginTop: 12 }}>
+                  {t.messages.map((m, i) => (
+                    <div key={i} style={{
+                      marginBottom: 8, padding: '8px 12px', borderRadius: 8,
+                      background: m.fromRole === 'admin' ? '#eef2ff' : '#f3f4f6'
+                    }}>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>
+                        {m.fromRole === 'admin' ? 'Support' : 'You'} • {new Date(m.createdAt).toLocaleString()}
                       </div>
                       <div>{m.body}</div>
                     </div>
                   ))}
-                  {t.status!=='closed' && (
-                    <div style={{ display:'flex', gap:8, marginTop:8 }}>
-                      <input placeholder="Type a reply…" value={reply} onChange={e=>setReply(e.target.value)}
-                        style={{ flex:1, height:38, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 10px' }} />
-                      <button className="btn btn-primary" onClick={()=>sendReply(t._id)}>Reply</button>
+                  {t.status !== 'closed' && (
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <input placeholder="Type a reply…" value={reply} onChange={e => setReply(e.target.value)}
+                        style={{ flex: 1, height: 38, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }} />
+                      <button className="btn btn-primary" onClick={() => sendReply(t._id)}>Reply</button>
                     </div>
                   )}
                 </div>
@@ -4838,9 +4911,9 @@ const CustomerSupport = () => {
 // Customer: account settings (username/email, password)
 const CustomerSettings = () => {
   const { user } = useAuth();
-  const [profile, setProfile] = useState({ username: user?.username||'', businessEmail: user?.businessEmail||'' });
+  const [profile, setProfile] = useState({ username: user?.username || '', businessEmail: user?.businessEmail || '' });
   const [pMsg, setPMsg] = useState('');
-  const [pwd, setPwd] = useState({ currentPassword:'', newPassword:'' });
+  const [pwd, setPwd] = useState({ currentPassword: '', newPassword: '' });
   const [pwdMsg, setPwdMsg] = useState('');
 
   const saveProfile = async () => {
@@ -4850,35 +4923,35 @@ const CustomerSettings = () => {
   };
   const changePwd = async () => {
     setPwdMsg('');
-    try { const r = await axios.post(`${API_URL}/customer/change-password`, pwd); setPwdMsg('✓ '+(r.data.message||'Password changed.')); setPwd({currentPassword:'',newPassword:''}); }
+    try { const r = await axios.post(`${API_URL}/customer/change-password`, pwd); setPwdMsg('✓ ' + (r.data.message || 'Password changed.')); setPwd({ currentPassword: '', newPassword: '' }); }
     catch (e) { setPwdMsg(e?.response?.data?.error || 'Could not change password.'); }
   };
 
   return (
     <div className="section">
       <h2>⚙ Account Settings</h2>
-      <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:12, padding:20, marginBottom:20, maxWidth:480 }}>
-        <h3 style={{ marginTop:0 }}>Profile</h3>
-        <label style={{ display:'block', fontSize:13, marginBottom:4 }}>Username</label>
-        <input value={profile.username} onChange={e=>setProfile({...profile, username:e.target.value})}
-          style={{ width:'100%', height:40, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 10px', marginBottom:12 }} />
-        <label style={{ display:'block', fontSize:13, marginBottom:4 }}>Email</label>
-        <input value={profile.businessEmail} onChange={e=>setProfile({...profile, businessEmail:e.target.value})}
-          style={{ width:'100%', height:40, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 10px', marginBottom:12 }} />
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20, marginBottom: 20, maxWidth: 480 }}>
+        <h3 style={{ marginTop: 0 }}>Profile</h3>
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Username</label>
+        <input value={profile.username} onChange={e => setProfile({ ...profile, username: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Email</label>
+        <input value={profile.businessEmail} onChange={e => setProfile({ ...profile, businessEmail: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
         <button className="btn btn-primary" onClick={saveProfile}>Save profile</button>
-        {pMsg && <span style={{ marginLeft:10, fontSize:14, color: pMsg.startsWith('✓')?'#166534':'#b42318' }}>{pMsg}</span>}
+        {pMsg && <span style={{ marginLeft: 10, fontSize: 14, color: pMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{pMsg}</span>}
       </div>
 
-      <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:12, padding:20, maxWidth:480 }}>
-        <h3 style={{ marginTop:0 }}>Change password</h3>
-        <label style={{ display:'block', fontSize:13, marginBottom:4 }}>Current password</label>
-        <input type="password" value={pwd.currentPassword} onChange={e=>setPwd({...pwd, currentPassword:e.target.value})}
-          style={{ width:'100%', height:40, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 10px', marginBottom:12 }} />
-        <label style={{ display:'block', fontSize:13, marginBottom:4 }}>New password</label>
-        <input type="password" value={pwd.newPassword} onChange={e=>setPwd({...pwd, newPassword:e.target.value})}
-          style={{ width:'100%', height:40, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 10px', marginBottom:12 }} />
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20, maxWidth: 480 }}>
+        <h3 style={{ marginTop: 0 }}>Change password</h3>
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Current password</label>
+        <input type="password" value={pwd.currentPassword} onChange={e => setPwd({ ...pwd, currentPassword: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
+        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>New password</label>
+        <input type="password" value={pwd.newPassword} onChange={e => setPwd({ ...pwd, newPassword: e.target.value })}
+          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
         <button className="btn btn-primary" onClick={changePwd}>Change password</button>
-        {pwdMsg && <span style={{ marginLeft:10, fontSize:14, color: pwdMsg.startsWith('✓')?'#166534':'#b42318' }}>{pwdMsg}</span>}
+        {pwdMsg && <span style={{ marginLeft: 10, fontSize: 14, color: pwdMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{pwdMsg}</span>}
       </div>
     </div>
   );
@@ -4893,9 +4966,11 @@ const LandingPage = () => {
   const [dResult, setDResult] = useState(null);
   const [dLoading, setDLoading] = useState(false);
   const [dError, setDError] = useState('');
-  useEffect(() => { (async () => {
-    try { const res = await axios.get(`${API_URL}/products`); setPlans(res.data.workspace || []); } catch (_) {}
-  })(); }, []);
+  useEffect(() => {
+    (async () => {
+      try { const res = await axios.get(`${API_URL}/products`); setPlans(res.data.workspace || []); } catch (_) { }
+    })();
+  }, []);
 
   const T = '#0F766E', TD = '#115E56', INKL = '#1f2937', MUTEL = '#6b7280';
   const go = (p) => { window.location.href = p; };
@@ -4921,9 +4996,9 @@ const LandingPage = () => {
           {brand.logoDataUrl
             ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 44, maxWidth: 200 }} />
             : <>
-                <div style={{ width: 40, height: 40, borderRadius: 10, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>{(brand.brandName||'G')[0]}</div>
-                <strong style={{ fontSize: 22, color: T }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
-              </>}
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>{(brand.brandName || 'G')[0]}</div>
+              <strong style={{ fontSize: 22, color: T }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
+            </>}
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
           <button onClick={() => go('/login')} style={{ background: 'transparent', border: 'none', color: INKL, fontSize: 16, cursor: 'pointer', padding: '10px 16px' }}>↪ Login</button>
@@ -5062,11 +5137,11 @@ const LandingPage = () => {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
               {brand.logoDataUrl
-                ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 40, maxWidth: 180, background:'#fff', padding:6, borderRadius:8 }} />
+                ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 40, maxWidth: 180, background: '#fff', padding: 6, borderRadius: 8 }} />
                 : <>
-                    <div style={{ width: 36, height: 36, borderRadius: 9, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>{(brand.brandName||'G')[0]}</div>
-                    <strong style={{ color: '#fff', fontSize: 18 }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
-                  </>}
+                  <div style={{ width: 36, height: 36, borderRadius: 9, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>{(brand.brandName || 'G')[0]}</div>
+                  <strong style={{ color: '#fff', fontSize: 18 }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
+                </>}
             </div>
             <p style={{ maxWidth: 320, lineHeight: 1.6, color: '#9fb4ae' }}>
               Google Workspace for your domain — simple ordering, secure payment, and support while you get set up.
@@ -5074,7 +5149,7 @@ const LandingPage = () => {
           </div>
           <div>
             <div style={{ fontSize: 12, letterSpacing: 1, color: '#7e948e', fontWeight: 700, marginBottom: 14 }}>EXPLORE</div>
-            {[['Plans & pricing','/register'],['Why choose us','/'],['Create account','/register'],['Sign in','/login']].map(([t,h])=>(
+            {[['Plans & pricing', '/register'], ['Why choose us', '/'], ['Create account', '/register'], ['Sign in', '/login']].map(([t, h]) => (
               <div key={t} style={{ marginBottom: 12 }}>
                 <a href={h} style={{ color: '#cbd5d1', textDecoration: 'none' }}>{t}</a>
               </div>
@@ -5139,17 +5214,17 @@ function App() {
 
 // ==================== STAGE 1: WORKSPACE ORDER FLOW ====================
 const US_STATES = [
-  ['AL','Alabama'],['AK','Alaska'],['AZ','Arizona'],['AR','Arkansas'],['CA','California'],
-  ['CO','Colorado'],['CT','Connecticut'],['DE','Delaware'],['FL','Florida'],['GA','Georgia'],
-  ['HI','Hawaii'],['ID','Idaho'],['IL','Illinois'],['IN','Indiana'],['IA','Iowa'],
-  ['KS','Kansas'],['KY','Kentucky'],['LA','Louisiana'],['ME','Maine'],['MD','Maryland'],
-  ['MA','Massachusetts'],['MI','Michigan'],['MN','Minnesota'],['MS','Mississippi'],['MO','Missouri'],
-  ['MT','Montana'],['NE','Nebraska'],['NV','Nevada'],['NH','New Hampshire'],['NJ','New Jersey'],
-  ['NM','New Mexico'],['NY','New York'],['NC','North Carolina'],['ND','North Dakota'],['OH','Ohio'],
-  ['OK','Oklahoma'],['OR','Oregon'],['PA','Pennsylvania'],['RI','Rhode Island'],['SC','South Carolina'],
-  ['SD','South Dakota'],['TN','Tennessee'],['TX','Texas'],['UT','Utah'],['VT','Vermont'],
-  ['VA','Virginia'],['WA','Washington'],['WV','West Virginia'],['WI','Wisconsin'],['WY','Wyoming'],
-  ['DC','District of Columbia'],
+  ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'],
+  ['CO', 'Colorado'], ['CT', 'Connecticut'], ['DE', 'Delaware'], ['FL', 'Florida'], ['GA', 'Georgia'],
+  ['HI', 'Hawaii'], ['ID', 'Idaho'], ['IL', 'Illinois'], ['IN', 'Indiana'], ['IA', 'Iowa'],
+  ['KS', 'Kansas'], ['KY', 'Kentucky'], ['LA', 'Louisiana'], ['ME', 'Maine'], ['MD', 'Maryland'],
+  ['MA', 'Massachusetts'], ['MI', 'Michigan'], ['MN', 'Minnesota'], ['MS', 'Mississippi'], ['MO', 'Missouri'],
+  ['MT', 'Montana'], ['NE', 'Nebraska'], ['NV', 'Nevada'], ['NH', 'New Hampshire'], ['NJ', 'New Jersey'],
+  ['NM', 'New Mexico'], ['NY', 'New York'], ['NC', 'North Carolina'], ['ND', 'North Dakota'], ['OH', 'Ohio'],
+  ['OK', 'Oklahoma'], ['OR', 'Oregon'], ['PA', 'Pennsylvania'], ['RI', 'Rhode Island'], ['SC', 'South Carolina'],
+  ['SD', 'South Dakota'], ['TN', 'Tennessee'], ['TX', 'Texas'], ['UT', 'Utah'], ['VT', 'Vermont'],
+  ['VA', 'Virginia'], ['WA', 'Washington'], ['WV', 'West Virginia'], ['WI', 'Wisconsin'], ['WY', 'Wyoming'],
+  ['DC', 'District of Columbia'],
 ];
 
 function WorkspaceOrderFlow() {
@@ -5200,7 +5275,7 @@ function WorkspaceOrderFlow() {
           // Default to flexible if allowed, else annual.
           if (!opt.data.flexibleEnabled && opt.data.annualEnabled) setPlanType('annual');
         }
-      } catch (_) {}
+      } catch (_) { }
       // Load any saved draft so the customer can resume an interrupted order.
       try {
         const dr = await axios.get(`${API_URL}/workspace-orders/draft`);
@@ -5213,7 +5288,7 @@ function WorkspaceOrderFlow() {
           if (d.step) setStep(d.step);
           setDraftLoaded(true);
         }
-      } catch (_) {}
+      } catch (_) { }
     })();
   }, []);
 
@@ -5226,7 +5301,7 @@ function WorkspaceOrderFlow() {
       axios.post(`${API_URL}/workspace-orders/draft`, {
         draftData: { form, selectedPlanId, seats, step, planType },
         draftStep: step,
-      }).catch(() => {});
+      }).catch(() => { });
     }, 1200);
     return () => clearTimeout(t);
   }, [form, selectedPlanId, seats, step, plans]);
@@ -5459,7 +5534,7 @@ function WorkspaceOrderFlow() {
     <div className="wof-wrap">
       <style>{wofStyles}</style>
       {draftLoaded && (
-        <div style={{ background:'#ecfdf5', border:'1px solid #a7f3d0', color:'#065f46', borderRadius:10, padding:'10px 14px', marginBottom:14, fontSize:14 }}>
+        <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#065f46', borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontSize: 14 }}>
           ✓ We restored your previous order details so you can continue where you left off.
         </div>
       )}
@@ -5504,24 +5579,26 @@ function WorkspaceOrderFlow() {
           </div>
 
           {(orderOpts.flexibleEnabled && orderOpts.annualEnabled) && (
-            <div style={{ margin:'4px 0 8px' }}>
-              <label style={{ fontWeight:600, display:'block', marginBottom:8 }}>Payment plan</label>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }} className="grid-2">
+            <div style={{ margin: '4px 0 8px' }}>
+              <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>Payment plan</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }} className="grid-2">
                 {[
-                  { v:'flexible', t:'Flexible', d:'Monthly, pay-as-you-go. Cancel or change seats anytime.' },
-                  { v:'annual', t:'Annual', d:'12-month commitment, paid monthly. Often lower per-seat price.' },
+                  { v: 'flexible', t: 'Flexible', d: 'Monthly, pay-as-you-go. Cancel or change seats anytime.' },
+                  { v: 'annual', t: 'Annual', d: '12-month commitment, paid monthly. Often lower per-seat price.' },
                 ].map(opt => (
-                  <button key={opt.v} type="button" onClick={()=>setPlanType(opt.v)}
-                    style={{ textAlign:'left', padding:'14px 16px', borderRadius:12, cursor:'pointer',
-                      border: planType===opt.v ? '2px solid #0F766E' : '1px solid #d8dbe6',
-                      background: planType===opt.v ? '#f0f7f5' : '#fff' }}>
-                    <div style={{ fontWeight:700, marginBottom:4 }}>{opt.t}{planType===opt.v && ' ✓'}</div>
-                    <div style={{ fontSize:12, color:'#6b7280' }}>{opt.d}</div>
+                  <button key={opt.v} type="button" onClick={() => setPlanType(opt.v)}
+                    style={{
+                      textAlign: 'left', padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
+                      border: planType === opt.v ? '2px solid #0F766E' : '1px solid #d8dbe6',
+                      background: planType === opt.v ? '#f0f7f5' : '#fff'
+                    }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>{opt.t}{planType === opt.v && ' ✓'}</div>
+                    <div style={{ fontSize: 12, color: '#6b7280' }}>{opt.d}</div>
                   </button>
                 ))}
               </div>
-              <p style={{ fontSize:12, color:'#6b7280', marginTop:8 }}>
-                {planType==='annual' ? 'Annual: you commit for 12 months; seats can be added but not reduced until renewal.' : 'Flexible: full flexibility, adjust or cancel anytime.'}
+              <p style={{ fontSize: 12, color: '#6b7280', marginTop: 8 }}>
+                {planType === 'annual' ? 'Annual: you commit for 12 months; seats can be added but not reduced until renewal.' : 'Flexible: full flexibility, adjust or cancel anytime.'}
               </p>
             </div>
           )}
@@ -5780,8 +5857,8 @@ const AdminBrandingSection = () => {
     (async () => {
       try {
         const r = await axios.get(`${API_URL}/branding`);
-        if (r.data) { setBrandName(r.data.brandName||''); setBrandColor(r.data.brandColor||'#0F766E'); setLogo(r.data.logoDataUrl||''); setFavicon(r.data.faviconDataUrl||''); }
-      } catch (_) {}
+        if (r.data) { setBrandName(r.data.brandName || ''); setBrandColor(r.data.brandColor || '#0F766E'); setLogo(r.data.logoDataUrl || ''); setFavicon(r.data.faviconDataUrl || ''); }
+      } catch (_) { }
     })();
   }, []);
 
@@ -5803,46 +5880,46 @@ const AdminBrandingSection = () => {
     finally { setSaving(false); }
   };
 
-  const box = { background:'#fff', borderRadius:14, padding:24, border:'1px solid #e5e7eb', maxWidth:680 };
-  const label = { fontSize:13, fontWeight:600, display:'block', marginBottom:6 };
+  const box = { background: '#fff', borderRadius: 14, padding: 24, border: '1px solid #e5e7eb', maxWidth: 680 };
+  const label = { fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 };
 
   return (
     <div>
-      <h2 style={{ marginTop:0 }}>🎨 Branding</h2>
-      <p style={{ color:'#6b7280' }}>Upload your logo and favicon, set your brand name and color. These appear across the portal.</p>
+      <h2 style={{ marginTop: 0 }}>🎨 Branding</h2>
+      <p style={{ color: '#6b7280' }}>Upload your logo and favicon, set your brand name and color. These appear across the portal.</p>
 
-      {msg && <div style={{ padding:'10px 14px', borderRadius:8, marginBottom:14, maxWidth:680, background: msg.startsWith('✓')?'#dcfce7':'#fef3c7', color: msg.startsWith('✓')?'#166534':'#92600a' }}>{msg}</div>}
+      {msg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, maxWidth: 680, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a' }}>{msg}</div>}
 
       <div style={box}>
-        <div style={{ marginBottom:18 }}>
+        <div style={{ marginBottom: 18 }}>
           <label style={label}>Brand name</label>
-          <input value={brandName} onChange={e=>setBrandName(e.target.value)} placeholder="GNB MENTOR LLC"
-            style={{ width:'100%', height:42, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 12px' }} />
+          <input value={brandName} onChange={e => setBrandName(e.target.value)} placeholder="GNB MENTOR LLC"
+            style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }} />
         </div>
 
-        <div style={{ marginBottom:18 }}>
+        <div style={{ marginBottom: 18 }}>
           <label style={label}>Brand color</label>
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <input type="color" value={brandColor} onChange={e=>setBrandColor(e.target.value)} style={{ width:48, height:42, border:'1px solid #d8dbe6', borderRadius:8, cursor:'pointer' }} />
-            <input value={brandColor} onChange={e=>setBrandColor(e.target.value)} style={{ flex:1, height:42, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 12px' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input type="color" value={brandColor} onChange={e => setBrandColor(e.target.value)} style={{ width: 48, height: 42, border: '1px solid #d8dbe6', borderRadius: 8, cursor: 'pointer' }} />
+            <input value={brandColor} onChange={e => setBrandColor(e.target.value)} style={{ flex: 1, height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }} />
           </div>
         </div>
 
-        <div style={{ marginBottom:18 }}>
+        <div style={{ marginBottom: 18 }}>
           <label style={label}>Logo (PNG/JPG/SVG, under 500KB)</label>
-          {logo && <div style={{ marginBottom:8 }}><img src={logo} alt="logo" style={{ maxHeight:60, maxWidth:240, background:'#f8fafc', padding:6, borderRadius:8 }} /></div>}
-          <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" onChange={e=>fileToDataUrl(e.target.files[0], 500, setLogo)} />
-          {logo && <button onClick={()=>setLogo('')} style={{ marginLeft:10, background:'#fef2f2', color:'#b42318', border:'none', borderRadius:6, padding:'4px 10px', cursor:'pointer', fontSize:12 }}>Remove</button>}
+          {logo && <div style={{ marginBottom: 8 }}><img src={logo} alt="logo" style={{ maxHeight: 60, maxWidth: 240, background: '#f8fafc', padding: 6, borderRadius: 8 }} /></div>}
+          <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" onChange={e => fileToDataUrl(e.target.files[0], 500, setLogo)} />
+          {logo && <button onClick={() => setLogo('')} style={{ marginLeft: 10, background: '#fef2f2', color: '#b42318', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>Remove</button>}
         </div>
 
-        <div style={{ marginBottom:18 }}>
+        <div style={{ marginBottom: 18 }}>
           <label style={label}>Favicon (PNG/ICO, small, under 100KB)</label>
-          {favicon && <div style={{ marginBottom:8 }}><img src={favicon} alt="favicon" style={{ width:32, height:32, background:'#f8fafc', padding:4, borderRadius:6 }} /></div>}
-          <input type="file" accept="image/png,image/x-icon,image/vnd.microsoft.icon,image/svg+xml" onChange={e=>fileToDataUrl(e.target.files[0], 100, setFavicon)} />
-          {favicon && <button onClick={()=>setFavicon('')} style={{ marginLeft:10, background:'#fef2f2', color:'#b42318', border:'none', borderRadius:6, padding:'4px 10px', cursor:'pointer', fontSize:12 }}>Remove</button>}
+          {favicon && <div style={{ marginBottom: 8 }}><img src={favicon} alt="favicon" style={{ width: 32, height: 32, background: '#f8fafc', padding: 4, borderRadius: 6 }} /></div>}
+          <input type="file" accept="image/png,image/x-icon,image/vnd.microsoft.icon,image/svg+xml" onChange={e => fileToDataUrl(e.target.files[0], 100, setFavicon)} />
+          {favicon && <button onClick={() => setFavicon('')} style={{ marginLeft: 10, background: '#fef2f2', color: '#b42318', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>Remove</button>}
         </div>
 
-        <button onClick={save} disabled={saving} style={{ background:'#0F766E', color:'#fff', border:'none', borderRadius:8, padding:'10px 24px', fontWeight:700, cursor:'pointer' }}>
+        <button onClick={save} disabled={saving} style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontWeight: 700, cursor: 'pointer' }}>
           {saving ? 'Saving…' : 'Save branding'}
         </button>
       </div>
@@ -5914,20 +5991,20 @@ const CustomerWorkspaceImport = () => {
   const load = async () => {
     try {
       const [i, p, o, t] = await Promise.all([
-        axios.get(`${API_URL}/customer/workspace/transfer-info`).catch(()=>null),
-        axios.get(`${API_URL}/products`).catch(()=>null),
-        axios.get(`${API_URL}/order-options`).catch(()=>null),
-        axios.get(`${API_URL}/customer/workspace/transfers`).catch(()=>null),
+        axios.get(`${API_URL}/customer/workspace/transfer-info`).catch(() => null),
+        axios.get(`${API_URL}/products`).catch(() => null),
+        axios.get(`${API_URL}/order-options`).catch(() => null),
+        axios.get(`${API_URL}/customer/workspace/transfers`).catch(() => null),
       ]);
       if (i?.data) setInfo(i.data);
       if (p?.data?.workspace) { setPlans(p.data.workspace); if (p.data.workspace[0]) setPlanId(p.data.workspace[0].id); }
       if (o?.data) { setOpts(o.data); if (!o.data.flexibleEnabled && o.data.annualEnabled) setPlanType('annual'); }
       if (t?.data) setTransfers(t.data.transfers || []);
-    } catch(_){}
+    } catch (_) { }
   };
   useEffect(() => { load(); }, []);
 
-  const copyToken = () => { if (info?.token) { navigator.clipboard?.writeText(info.token); setCopied(true); setTimeout(()=>setCopied(false), 2000); } };
+  const copyToken = () => { if (info?.token) { navigator.clipboard?.writeText(info.token); setCopied(true); setTimeout(() => setCopied(false), 2000); } };
 
   const submit = async (method) => {
     const dom = domain.toLowerCase().trim();
@@ -5943,33 +6020,33 @@ const CustomerWorkspaceImport = () => {
   };
 
   const selectedPlan = plans.find(p => p.id === planId);
-  const monthly = selectedPlan ? Number(selectedPlan.monthlyPrice) * Math.max(1, Number(seats)||1) : 0;
+  const monthly = selectedPlan ? Number(selectedPlan.monthlyPrice) * Math.max(1, Number(seats) || 1) : 0;
 
-  const card = { background:'#fff', borderRadius:16, padding:24, boxShadow:'0 1px 3px rgba(0,0,0,0.06)', marginBottom:18 };
-  const inp = { width:'100%', height:46, borderRadius:10, border:'1px solid #d8dbe6', padding:'0 14px', fontSize:15 };
-  const stepRow = { display:'flex', gap:12, marginBottom:14 };
-  const num = { flexShrink:0, width:28, height:28, borderRadius:999, background:TEAL, color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:14 };
+  const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 18 };
+  const inp = { width: '100%', height: 46, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px', fontSize: 15 };
+  const stepRow = { display: 'flex', gap: 12, marginBottom: 14 };
+  const num = { flexShrink: 0, width: 28, height: 28, borderRadius: 999, background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14 };
 
   return (
     <div>
-      <h2 style={{ marginTop:0 }}>📥 Import your Google Workspace</h2>
-      <p style={{ color:MUTE }}>Already using Google Workspace? Move billing & management to us. Your users, email, and data stay exactly the same.</p>
+      <h2 style={{ marginTop: 0 }}>📥 Import your Google Workspace</h2>
+      <p style={{ color: MUTE }}>Already using Google Workspace? Move billing & management to us. Your users, email, and data stay exactly the same.</p>
 
       <div style={card}>
-        <h3 style={{ marginTop:0 }}>Step 1 — Grant us permission in your Google Admin</h3>
+        <h3 style={{ marginTop: 0 }}>Step 1 — Grant us permission in your Google Admin</h3>
         {!info?.configured ? (
-          <div style={{ background:'#fffbeb', border:'1px solid #fde68a', borderRadius:8, padding:'12px 14px', color:'#92600a' }}>
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '12px 14px', color: '#92600a' }}>
             Transfer isn't set up yet. Please contact support to get your transfer token.
           </div>
         ) : (
           <>
-            <div style={stepRow}><div style={num}>1</div><div>Sign in to <a href="https://admin.google.com" target="_blank" rel="noreferrer" style={{ color:TEAL }}>admin.google.com</a> as a Super Admin.</div></div>
-            <div style={stepRow}><div style={num}>2</div><div>Open <a href="https://admin.google.com/TransferToken" target="_blank" rel="noreferrer" style={{ color:TEAL }}>admin.google.com/TransferToken</a>. Enter your domain{info.partnerId ? <> and our Partner ID <strong>{info.partnerId}</strong></> : ''}, agree to terms.</div></div>
+            <div style={stepRow}><div style={num}>1</div><div>Sign in to <a href="https://admin.google.com" target="_blank" rel="noreferrer" style={{ color: TEAL }}>admin.google.com</a> as a Super Admin.</div></div>
+            <div style={stepRow}><div style={num}>2</div><div>Open <a href="https://admin.google.com/TransferToken" target="_blank" rel="noreferrer" style={{ color: TEAL }}>admin.google.com/TransferToken</a>. Enter your domain{info.partnerId ? <> and our Partner ID <strong>{info.partnerId}</strong></> : ''}, agree to terms.</div></div>
             <div style={stepRow}><div style={num}>3</div><div>
               Paste <strong>our transfer token</strong> below and submit it in your Google Admin to authorize us:
-              <div style={{ display:'flex', gap:8, alignItems:'center', marginTop:8, flexWrap:'wrap' }}>
-                <code style={{ background:'#f1f5f4', padding:'8px 14px', borderRadius:8, fontSize:16, fontWeight:700, letterSpacing:1 }}>{info.token}</code>
-                <button onClick={copyToken} style={{ background:TEAL, color:'#fff', border:'none', borderRadius:8, padding:'8px 16px', fontWeight:600, cursor:'pointer' }}>{copied?'Copied ✓':'Copy token'}</button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                <code style={{ background: '#f1f5f4', padding: '8px 14px', borderRadius: 8, fontSize: 16, fontWeight: 700, letterSpacing: 1 }}>{info.token}</code>
+                <button onClick={copyToken} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, cursor: 'pointer' }}>{copied ? 'Copied ✓' : 'Copy token'}</button>
               </div>
             </div></div>
             <div style={stepRow}><div style={num}>4</div><div>Once you've authorized us in Google Admin, complete Step 2 below — pick your plan and pay. The transfer finishes instantly.</div></div>
@@ -5979,50 +6056,50 @@ const CustomerWorkspaceImport = () => {
 
       {info?.configured && (
         <div style={card}>
-          <h3 style={{ marginTop:0 }}>Step 2 — Your domain & plan</h3>
-          <div style={{ display:'grid', gap:12, marginBottom:12 }}>
-            <div><label style={{ fontSize:13, fontWeight:600 }}>Your domain</label><input style={inp} value={domain} onChange={e=>setDomain(e.target.value)} placeholder="yourcompany.com" /></div>
-            <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:12 }} className="grid-2">
-              <div><label style={{ fontSize:13, fontWeight:600 }}>Plan you're using</label>
-                <select style={inp} value={planId} onChange={e=>setPlanId(e.target.value)}>
-                  {plans.map(p=><option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}/seat/mo</option>)}
+          <h3 style={{ marginTop: 0 }}>Step 2 — Your domain & plan</h3>
+          <div style={{ display: 'grid', gap: 12, marginBottom: 12 }}>
+            <div><label style={{ fontSize: 13, fontWeight: 600 }}>Your domain</label><input style={inp} value={domain} onChange={e => setDomain(e.target.value)} placeholder="yourcompany.com" /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }} className="grid-2">
+              <div><label style={{ fontSize: 13, fontWeight: 600 }}>Plan you're using</label>
+                <select style={inp} value={planId} onChange={e => setPlanId(e.target.value)}>
+                  {plans.map(p => <option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}/seat/mo</option>)}
                 </select>
               </div>
-              <div><label style={{ fontSize:13, fontWeight:600 }}>Seats</label><input type="number" min="1" style={inp} value={seats} onChange={e=>setSeats(Math.max(1, parseInt(e.target.value||'1',10)))} /></div>
+              <div><label style={{ fontSize: 13, fontWeight: 600 }}>Seats</label><input type="number" min="1" style={inp} value={seats} onChange={e => setSeats(Math.max(1, parseInt(e.target.value || '1', 10)))} /></div>
             </div>
             {(opts.flexibleEnabled && opts.annualEnabled) && (
               <div>
-                <label style={{ fontSize:13, fontWeight:600, display:'block', marginBottom:6 }}>Payment plan</label>
-                <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
-                  {[['flexible','Flexible (monthly)'],['annual','Annual (monthly pay)']].map(([v,l])=>(
-                    <button key={v} type="button" onClick={()=>setPlanType(v)} style={{ padding:'8px 16px', borderRadius:8, cursor:'pointer', border: planType===v?`2px solid ${TEAL}`:'1px solid #d8dbe6', background: planType===v?'#f0f7f5':'#fff', fontWeight:600 }}>{l}{planType===v?' ✓':''}</button>
+                <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Payment plan</label>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {[['flexible', 'Flexible (monthly)'], ['annual', 'Annual (monthly pay)']].map(([v, l]) => (
+                    <button key={v} type="button" onClick={() => setPlanType(v)} style={{ padding: '8px 16px', borderRadius: 8, cursor: 'pointer', border: planType === v ? `2px solid ${TEAL}` : '1px solid #d8dbe6', background: planType === v ? '#f0f7f5' : '#fff', fontWeight: 600 }}>{l}{planType === v ? ' ✓' : ''}</button>
                   ))}
                 </div>
               </div>
             )}
           </div>
-          <div style={{ background:'#f8fafc', borderRadius:10, padding:'12px 16px', marginBottom:12, fontSize:15 }}>
-            Monthly total: <strong style={{ color:TEAL, fontSize:18 }}>${monthly.toFixed(2)}</strong> <span style={{ color:MUTE, fontSize:13 }}>+ tax (for {seats} seat{seats==1?'':'s'})</span>
+          <div style={{ background: '#f8fafc', borderRadius: 10, padding: '12px 16px', marginBottom: 12, fontSize: 15 }}>
+            Monthly total: <strong style={{ color: TEAL, fontSize: 18 }}>${monthly.toFixed(2)}</strong> <span style={{ color: MUTE, fontSize: 13 }}>+ tax (for {seats} seat{seats == 1 ? '' : 's'})</span>
           </div>
-          <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
-            <button onClick={()=>submit('stripe')} disabled={busy} style={{ background:TEAL, color:'#fff', border:'none', borderRadius:10, padding:'11px 22px', fontWeight:700, cursor:'pointer' }}>{busy?'…':'💳 Pay & complete transfer'}</button>
-            <button onClick={()=>submit('nicky')} disabled={busy} style={{ background:'#fff', color:TEAL, border:`1px solid ${TEAL}`, borderRadius:10, padding:'11px 22px', fontWeight:700, cursor:'pointer' }}>{busy?'…':'🪙 Pay with crypto'}</button>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button onClick={() => submit('stripe')} disabled={busy} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 22px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '💳 Pay & complete transfer'}</button>
+            <button onClick={() => submit('nicky')} disabled={busy} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '11px 22px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '🪙 Pay with crypto'}</button>
           </div>
-          {msg && <div style={{ marginTop:12, padding:'10px 14px', borderRadius:8, background: msg.startsWith('✓')?'#dcfce7':'#fde8e8', color: msg.startsWith('✓')?'#166534':'#b42318' }}>{msg}</div>}
+          {msg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</div>}
         </div>
       )}
 
       {transfers.length > 0 && (
         <div style={card}>
-          <h3 style={{ marginTop:0 }}>Transfer history</h3>
-          <table style={{ width:'100%', fontSize:14, borderCollapse:'collapse' }}>
-            <thead><tr style={{ textAlign:'left', color:MUTE }}><th style={{ padding:'6px 0' }}>Domain</th><th>Plan</th><th>Status</th><th>Date</th></tr></thead>
+          <h3 style={{ marginTop: 0 }}>Transfer history</h3>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: MUTE }}><th style={{ padding: '6px 0' }}>Domain</th><th>Plan</th><th>Status</th><th>Date</th></tr></thead>
             <tbody>
-              {transfers.map(t=>(
-                <tr key={t.id} style={{ borderTop:'1px solid #f0f0f0' }}>
-                  <td style={{ padding:'8px 0', fontWeight:600 }}>{t.domain}</td>
-                  <td>{t.planName||'—'}</td>
-                  <td><span style={{ color: t.status==='completed'?'#166534' : t.status==='failed'?'#b42318':'#b45309', fontWeight:600 }}>{t.status==='completed'?'✓ Completed' : t.status==='failed'?'Failed' : t.status==='test_paid'?'Test':'Processing'}</span>{t.status==='failed' && t.note && <div style={{ fontSize:12, color:'#b42318' }}>{t.note}</div>}</td>
+              {transfers.map(t => (
+                <tr key={t.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '8px 0', fontWeight: 600 }}>{t.domain}</td>
+                  <td>{t.planName || '—'}</td>
+                  <td><span style={{ color: t.status === 'completed' ? '#166534' : t.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{t.status === 'completed' ? '✓ Completed' : t.status === 'failed' ? 'Failed' : t.status === 'test_paid' ? 'Test' : 'Processing'}</span>{t.status === 'failed' && t.note && <div style={{ fontSize: 12, color: '#b42318' }}>{t.note}</div>}</td>
                   <td>{new Date(t.createdAt).toLocaleDateString()}</td>
                 </tr>
               ))}
@@ -6045,12 +6122,12 @@ const CustomerHosting = () => {
   const load = async () => {
     try {
       const [p, o] = await Promise.all([
-        axios.get(`${API_URL}/customer/nc/hosting`).catch(()=>null),
-        axios.get(`${API_URL}/customer/nc/hosting/orders`).catch(()=>null),
+        axios.get(`${API_URL}/customer/nc/hosting`).catch(() => null),
+        axios.get(`${API_URL}/customer/nc/hosting/orders`).catch(() => null),
       ]);
       if (p?.data?.plans) setPlans(p.data.plans);
       if (o?.data?.orders) setOrders(o.data.orders);
-    } catch(_){}
+    } catch (_) { }
   };
   useEffect(() => { load(); }, []);
 
@@ -6064,53 +6141,53 @@ const CustomerHosting = () => {
     finally { setBusy(''); }
   };
 
-  const card = { background:'#fff', borderRadius:16, padding:24, boxShadow:'0 1px 3px rgba(0,0,0,0.06)', marginBottom:18 };
+  const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 18 };
 
   return (
     <div>
-      <h2 style={{ marginTop:0 }}>🖥 Web Hosting</h2>
-      <p style={{ color:MUTE }}>Fast, reliable hosting for your website. Pick a plan to get started.</p>
+      <h2 style={{ marginTop: 0 }}>🖥 Web Hosting</h2>
+      <p style={{ color: MUTE }}>Fast, reliable hosting for your website. Pick a plan to get started.</p>
 
       {plans.length === 0 ? (
-        <div style={card}><p style={{ color:MUTE, margin:0 }}>No hosting plans are available right now. Please check back later.</p></div>
+        <div style={card}><p style={{ color: MUTE, margin: 0 }}>No hosting plans are available right now. Please check back later.</p></div>
       ) : (
         <>
           <div style={{ ...card }}>
-            <label style={{ fontSize:13, fontWeight:600 }}>Domain for this hosting (optional)</label>
-            <input value={forDomain} onChange={e=>setForDomain(e.target.value)} placeholder="yourdomain.com"
-              style={{ width:'100%', maxWidth:360, height:44, borderRadius:10, border:'1px solid #d8dbe6', padding:'0 14px', marginTop:6, display:'block' }} />
+            <label style={{ fontSize: 13, fontWeight: 600 }}>Domain for this hosting (optional)</label>
+            <input value={forDomain} onChange={e => setForDomain(e.target.value)} placeholder="yourdomain.com"
+              style={{ width: '100%', maxWidth: 360, height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px', marginTop: 6, display: 'block' }} />
           </div>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:16 }} className="grid-2">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }} className="grid-2">
             {plans.map(p => (
-              <div key={p.planId} style={{ background:'#fff', borderRadius:16, padding:24, border:'1px solid #e5e7eb' }}>
-                <h3 style={{ margin:'0 0 4px' }}>{p.name}</h3>
-                <div style={{ fontSize:28, fontWeight:800, color:TEAL }}>${Number(p.price).toFixed(2)}<span style={{ fontSize:14, color:MUTE, fontWeight:400 }}>/{p.billingCycle==='monthly'?'mo':'yr'}</span></div>
-                {p.description && <p style={{ color:MUTE, fontSize:14 }}>{p.description}</p>}
+              <div key={p.planId} style={{ background: '#fff', borderRadius: 16, padding: 24, border: '1px solid #e5e7eb' }}>
+                <h3 style={{ margin: '0 0 4px' }}>{p.name}</h3>
+                <div style={{ fontSize: 28, fontWeight: 800, color: TEAL }}>${Number(p.price).toFixed(2)}<span style={{ fontSize: 14, color: MUTE, fontWeight: 400 }}>/{p.billingCycle === 'monthly' ? 'mo' : 'yr'}</span></div>
+                {p.description && <p style={{ color: MUTE, fontSize: 14 }}>{p.description}</p>}
                 {p.features && p.features.length > 0 && (
-                  <ul style={{ paddingLeft:18, fontSize:14, color:'#374151' }}>{p.features.map((f,i)=><li key={i} style={{ marginBottom:4 }}>{f}</li>)}</ul>
+                  <ul style={{ paddingLeft: 18, fontSize: 14, color: '#374151' }}>{p.features.map((f, i) => <li key={i} style={{ marginBottom: 4 }}>{f}</li>)}</ul>
                 )}
-                <div style={{ display:'flex', gap:8, marginTop:14, flexWrap:'wrap' }}>
-                  <button onClick={()=>buy(p,'stripe')} disabled={busy===p.planId} style={{ background:TEAL, color:'#fff', border:'none', borderRadius:8, padding:'9px 16px', fontWeight:700, cursor:'pointer', fontSize:14 }}>{busy===p.planId?'…':'Buy (card)'}</button>
-                  <button onClick={()=>buy(p,'nicky')} disabled={busy===p.planId} style={{ background:'#fff', color:TEAL, border:`1px solid ${TEAL}`, borderRadius:8, padding:'9px 14px', fontWeight:700, cursor:'pointer', fontSize:14 }}>🪙</button>
+                <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+                  <button onClick={() => buy(p, 'stripe')} disabled={busy === p.planId} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>{busy === p.planId ? '…' : 'Buy (card)'}</button>
+                  <button onClick={() => buy(p, 'nicky')} disabled={busy === p.planId} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '9px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>🪙</button>
                 </div>
               </div>
             ))}
           </div>
         </>
       )}
-      {msg && <div style={{ marginTop:12, padding:'10px 14px', borderRadius:8, background:'#fde8e8', color:'#b42318' }}>{msg}</div>}
+      {msg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: '#fde8e8', color: '#b42318' }}>{msg}</div>}
 
       {orders.length > 0 && (
-        <div style={{ ...card, marginTop:18 }}>
-          <h3 style={{ marginTop:0 }}>Your hosting</h3>
-          <table style={{ width:'100%', fontSize:14, borderCollapse:'collapse' }}>
-            <thead><tr style={{ textAlign:'left', color:MUTE }}><th style={{ padding:'6px 0' }}>Plan</th><th>For</th><th>Status</th></tr></thead>
+        <div style={{ ...card, marginTop: 18 }}>
+          <h3 style={{ marginTop: 0 }}>Your hosting</h3>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: MUTE }}><th style={{ padding: '6px 0' }}>Plan</th><th>For</th><th>Status</th></tr></thead>
             <tbody>
-              {orders.map(o=>(
-                <tr key={o.id} style={{ borderTop:'1px solid #f0f0f0' }}>
-                  <td style={{ padding:'8px 0', fontWeight:600 }}>{o.planName}</td>
-                  <td>{o.forDomain||'—'}</td>
-                  <td><span style={{ color: o.status==='active'?'#166534' : o.status==='failed'?'#b42318':'#b45309', fontWeight:600 }}>{o.status==='active'?'✓ Active' : o.status==='failed'?'Failed' : o.status==='test_paid'?'Test':'Processing'}</span></td>
+              {orders.map(o => (
+                <tr key={o.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '8px 0', fontWeight: 600 }}>{o.planName}</td>
+                  <td>{o.forDomain || '—'}</td>
+                  <td><span style={{ color: o.status === 'active' ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{o.status === 'active' ? '✓ Active' : o.status === 'failed' ? 'Failed' : o.status === 'test_paid' ? 'Test' : 'Processing'}</span></td>
                 </tr>
               ))}
             </tbody>
@@ -6139,10 +6216,10 @@ const AdminOrderWorkspace = () => {
   const [retryBusy, setRetryBusy] = useState('');
 
   const loadPlans = async () => {
-    try { const r = await axios.get(`${API_URL}/products`); if (r.data?.workspace) { setPlans(r.data.workspace); if (r.data.workspace[0]) setForm(f=>({ ...f, planId: r.data.workspace[0].id })); } } catch(_){}
+    try { const r = await axios.get(`${API_URL}/products`); if (r.data?.workspace) { setPlans(r.data.workspace); if (r.data.workspace[0]) setForm(f => ({ ...f, planId: r.data.workspace[0].id })); } } catch (_) { }
   };
   const loadOrders = async () => {
-    try { const r = await axios.get(`${API_URL}/admin/workspace-orders${q ? `?q=${encodeURIComponent(q)}` : ''}`); setOrders(r.data.orders || []); } catch(_){}
+    try { const r = await axios.get(`${API_URL}/admin/workspace-orders${q ? `?q=${encodeURIComponent(q)}` : ''}`); setOrders(r.data.orders || []); } catch (_) { }
   };
   // Domain order tracking
   const [domQ, setDomQ] = useState('');
@@ -6150,7 +6227,7 @@ const AdminOrderWorkspace = () => {
   const [domRetryBusy, setDomRetryBusy] = useState('');
   const [domMsg, setDomMsg] = useState('');
   const loadDomOrders = async () => {
-    try { const r = await axios.get(`${API_URL}/admin/domain-orders${domQ ? `?q=${encodeURIComponent(domQ)}` : ''}`); setDomOrders(r.data.orders || []); } catch(_){}
+    try { const r = await axios.get(`${API_URL}/admin/domain-orders${domQ ? `?q=${encodeURIComponent(domQ)}` : ''}`); setDomOrders(r.data.orders || []); } catch (_) { }
   };
   const retryDom = async (orderNumber) => {
     setDomRetryBusy(orderNumber); setDomMsg('');
@@ -6172,11 +6249,11 @@ const AdminOrderWorkspace = () => {
       const payload = {
         organization: { domain: form.domain.toLowerCase().trim(), name: form.orgName, country: form.country, streetAddress: form.streetAddress, streetAddress2: form.streetAddress2, city: form.city, state: form.state, zip: form.zip, desiredAdminUsername: form.desiredAdminUsername, tempPassword: form.tempPassword },
         contact: { firstName: form.firstName, lastName: form.lastName, email: form.email, alternateEmail: form.alternateEmail, phone: form.phone },
-        plan: plans.find(p=>p.id===form.planId),
+        plan: plans.find(p => p.id === form.planId),
         seats: Number(form.seats),
         planType: form.planType,
         account: form.account || undefined,
-        monthlyTotal: (plans.find(p=>p.id===form.planId)?.monthlyPrice || 0) * Number(form.seats),
+        monthlyTotal: (plans.find(p => p.id === form.planId)?.monthlyPrice || 0) * Number(form.seats),
       };
       const r = await axios.post(`${API_URL}/admin/workspace-orders/provision`, payload);
       setMsg('✓ ' + (r.data.message || 'Workspace provisioned.') + ` (Order ${r.data.orderNumber})` + (r.data.provisionNote ? ` — Note: ${r.data.provisionNote}` : ''));
@@ -6195,90 +6272,90 @@ const AdminOrderWorkspace = () => {
     finally { setRetryBusy(''); }
   };
 
-  const box = { background:'#fff', borderRadius:14, padding:20, border:'1px solid #e5e7eb', marginBottom:20 };
-  const inp = { width:'100%', height:42, borderRadius:8, border:'1px solid #d8dbe6', padding:'0 12px', boxSizing:'border-box' };
-  const lab = { fontSize:12, fontWeight:600, display:'block', marginBottom:4 };
+  const box = { background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #e5e7eb', marginBottom: 20 };
+  const inp = { width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', boxSizing: 'border-box' };
+  const lab = { fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 };
 
   return (
     <div className="section">
       <h2>✨ Create Google Workspace (no payment)</h2>
-      <p style={{ color:'#5b6075' }}>Fill the form and submit — the Workspace is created in Google immediately. No checkout required.</p>
+      <p style={{ color: '#5b6075' }}>Fill the form and submit — the Workspace is created in Google immediately. No checkout required.</p>
 
-      {msg && <div style={{ padding:'10px 14px', borderRadius:8, marginBottom:14, background: msg.startsWith('✓')?'#dcfce7':'#fde8e8', color: msg.startsWith('✓')?'#166534':'#b42318' }}>{msg}</div>}
+      {msg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</div>}
 
       <div style={box}>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }} className="grid-2">
-          <div><label style={lab}>Domain *</label><input style={inp} value={form.domain} onChange={e=>set('domain', e.target.value)} placeholder="redvi.shop" /></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }} className="grid-2">
+          <div><label style={lab}>Domain *</label><input style={inp} value={form.domain} onChange={e => set('domain', e.target.value)} placeholder="redvi.shop" /></div>
           <div><label style={lab}>Reseller account</label>
-            <select style={inp} value={form.account} onChange={e=>set('account', e.target.value)}>
+            <select style={inp} value={form.account} onChange={e => set('account', e.target.value)}>
               <option value="">Auto (by order routing)</option>
               <option value="pk">Pakistan</option>
               <option value="usa">USA</option>
             </select>
           </div>
           <div><label style={lab}>Plan *</label>
-            <select style={inp} value={form.planId} onChange={e=>set('planId', e.target.value)}>
-              {plans.map(p=><option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}/seat/mo</option>)}
+            <select style={inp} value={form.planId} onChange={e => set('planId', e.target.value)}>
+              {plans.map(p => <option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}/seat/mo</option>)}
             </select>
           </div>
-          <div><label style={lab}>Seats *</label><input type="number" min="1" style={inp} value={form.seats} onChange={e=>set('seats', e.target.value)} /></div>
+          <div><label style={lab}>Seats *</label><input type="number" min="1" style={inp} value={form.seats} onChange={e => set('seats', e.target.value)} /></div>
           <div><label style={lab}>Plan type</label>
-            <select style={inp} value={form.planType} onChange={e=>set('planType', e.target.value)}>
+            <select style={inp} value={form.planType} onChange={e => set('planType', e.target.value)}>
               <option value="flexible">Flexible (monthly)</option>
               <option value="annual">Annual (monthly pay)</option>
             </select>
           </div>
-          <div><label style={lab}>Organization name</label><input style={inp} value={form.orgName} onChange={e=>set('orgName', e.target.value)} /></div>
-          <div><label style={lab}>Admin first name</label><input style={inp} value={form.firstName} onChange={e=>set('firstName', e.target.value)} /></div>
-          <div><label style={lab}>Admin last name</label><input style={inp} value={form.lastName} onChange={e=>set('lastName', e.target.value)} /></div>
-          <div><label style={lab}>Contact email</label><input style={inp} value={form.email} onChange={e=>set('email', e.target.value)} placeholder="owner@redvi.shop" /></div>
-          <div><label style={lab}>Alternate email</label><input style={inp} value={form.alternateEmail} onChange={e=>set('alternateEmail', e.target.value)} placeholder="recovery email" /></div>
-          <div><label style={lab}>Phone</label><input style={inp} value={form.phone} onChange={e=>set('phone', e.target.value)} /></div>
-          <div><label style={lab}>Admin username</label><input style={inp} value={form.desiredAdminUsername} onChange={e=>set('desiredAdminUsername', e.target.value)} placeholder="admin" /></div>
-          <div><label style={lab}>Temp password (optional)</label><input style={inp} value={form.tempPassword} onChange={e=>set('tempPassword', e.target.value)} placeholder="auto-generated if blank" /></div>
+          <div><label style={lab}>Organization name</label><input style={inp} value={form.orgName} onChange={e => set('orgName', e.target.value)} /></div>
+          <div><label style={lab}>Admin first name</label><input style={inp} value={form.firstName} onChange={e => set('firstName', e.target.value)} /></div>
+          <div><label style={lab}>Admin last name</label><input style={inp} value={form.lastName} onChange={e => set('lastName', e.target.value)} /></div>
+          <div><label style={lab}>Contact email</label><input style={inp} value={form.email} onChange={e => set('email', e.target.value)} placeholder="owner@redvi.shop" /></div>
+          <div><label style={lab}>Alternate email</label><input style={inp} value={form.alternateEmail} onChange={e => set('alternateEmail', e.target.value)} placeholder="recovery email" /></div>
+          <div><label style={lab}>Phone</label><input style={inp} value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
+          <div><label style={lab}>Admin username</label><input style={inp} value={form.desiredAdminUsername} onChange={e => set('desiredAdminUsername', e.target.value)} placeholder="admin" /></div>
+          <div><label style={lab}>Temp password (optional)</label><input style={inp} value={form.tempPassword} onChange={e => set('tempPassword', e.target.value)} placeholder="auto-generated if blank" /></div>
           <div><label style={lab}>Country</label>
-            <select style={inp} value={form.country} onChange={e=>set('country', e.target.value)}>
-              {COUNTRIES.map(c=><option key={c} value={c}>{c}</option>)}
+            <select style={inp} value={form.country} onChange={e => set('country', e.target.value)}>
+              {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
-          <div style={{ gridColumn:'1 / -1' }}>
+          <div style={{ gridColumn: '1 / -1' }}>
             <label style={lab}>Address lookup (Google Maps)</label>
             <AddressAutocomplete onPick={({ street, city, state, zip }) => setForm(f => ({ ...f, streetAddress: street || f.streetAddress, city: city || f.city, state: state || f.state, zip: zip || f.zip }))} />
           </div>
-          <div><label style={lab}>Street address</label><input style={inp} value={form.streetAddress} onChange={e=>set('streetAddress', e.target.value)} /></div>
-          <div><label style={lab}>Street address 2 (optional)</label><input style={inp} value={form.streetAddress2} onChange={e=>set('streetAddress2', e.target.value)} /></div>
-          <div><label style={lab}>City</label><input style={inp} value={form.city} onChange={e=>set('city', e.target.value)} /></div>
-          <div><label style={lab}>State</label><input style={inp} value={form.state} onChange={e=>set('state', e.target.value)} /></div>
-          <div><label style={lab}>ZIP</label><input style={inp} value={form.zip} onChange={e=>set('zip', e.target.value)} /></div>
+          <div><label style={lab}>Street address</label><input style={inp} value={form.streetAddress} onChange={e => set('streetAddress', e.target.value)} /></div>
+          <div><label style={lab}>Street address 2 (optional)</label><input style={inp} value={form.streetAddress2} onChange={e => set('streetAddress2', e.target.value)} /></div>
+          <div><label style={lab}>City</label><input style={inp} value={form.city} onChange={e => set('city', e.target.value)} /></div>
+          <div><label style={lab}>State</label><input style={inp} value={form.state} onChange={e => set('state', e.target.value)} /></div>
+          <div><label style={lab}>ZIP</label><input style={inp} value={form.zip} onChange={e => set('zip', e.target.value)} /></div>
         </div>
-        <button onClick={submit} disabled={busy} className="btn btn-primary" style={{ marginTop:16 }}>{busy ? 'Provisioning…' : 'Submit & create Workspace'}</button>
+        <button onClick={submit} disabled={busy} className="btn btn-primary" style={{ marginTop: 16 }}>{busy ? 'Provisioning…' : 'Submit & create Workspace'}</button>
       </div>
 
       <h2>📋 Track & retry orders</h2>
-      <p style={{ color:'#5b6075' }}>Search by order number (e.g. WS-1782543824372) or domain. Retry provisioning for orders that were paid but not created.</p>
-      <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
-        <input style={{ ...inp, maxWidth:360 }} value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter') loadOrders(); }} placeholder="WS-... or domain.com" />
+      <p style={{ color: '#5b6075' }}>Search by order number (e.g. WS-1782543824372) or domain. Retry provisioning for orders that were paid but not created.</p>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <input style={{ ...inp, maxWidth: 360 }} value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') loadOrders(); }} placeholder="WS-... or domain.com" />
         <button onClick={loadOrders} className="btn btn-secondary">Search</button>
       </div>
 
-      {orders.length === 0 ? <p style={{ color:'#9ca3af' }}>No orders found.</p> : (
-        <div style={{ overflowX:'auto' }}>
-          <table style={{ width:'100%', fontSize:14, borderCollapse:'collapse' }}>
-            <thead><tr style={{ textAlign:'left', color:'#6b7280' }}>
-              <th style={{ padding:'8px 0' }}>Order #</th><th>Domain</th><th>Plan</th><th>Acct</th><th>Status</th><th>In Google</th><th></th>
+      {orders.length === 0 ? <p style={{ color: '#9ca3af' }}>No orders found.</p> : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}>
+              <th style={{ padding: '8px 0' }}>Order #</th><th>Domain</th><th>Plan</th><th>Acct</th><th>Status</th><th>In Google</th><th></th>
             </tr></thead>
             <tbody>
-              {orders.map(o=>(
-                <tr key={o.orderNumber} style={{ borderTop:'1px solid #f0f0f0' }}>
-                  <td style={{ padding:'8px 0', fontFamily:'monospace', fontSize:13 }}>{o.orderNumber}</td>
-                  <td style={{ fontWeight:600 }}>{o.domain}</td>
+              {orders.map(o => (
+                <tr key={o.orderNumber} style={{ borderTop: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '8px 0', fontFamily: 'monospace', fontSize: 13 }}>{o.orderNumber}</td>
+                  <td style={{ fontWeight: 600 }}>{o.domain}</td>
                   <td>{o.planName} ({o.seats})</td>
                   <td>{o.account}</td>
-                  <td><span style={{ color: o.status==='provisioned'?'#166534' : o.status==='failed'?'#b42318':'#b45309', fontWeight:600 }}>{o.status}</span>{o.provisionNote && <div style={{ fontSize:11, color:'#b45309' }}>{o.provisionNote}</div>}</td>
+                  <td><span style={{ color: o.status === 'provisioned' ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{o.status}</span>{o.provisionNote && <div style={{ fontSize: 11, color: '#b45309' }}>{o.provisionNote}</div>}</td>
                   <td>{o.googleProvisioned ? '✓' : '—'}</td>
-                  <td style={{ textAlign:'right' }}>
-                    <button onClick={()=>retry(o.orderNumber)} disabled={retryBusy===o.orderNumber} className="btn btn-secondary" style={{ fontSize:12, padding:'4px 10px' }}>
-                      {retryBusy===o.orderNumber ? '…' : 'Retry provision'}
+                  <td style={{ textAlign: 'right' }}>
+                    <button onClick={() => retry(o.orderNumber)} disabled={retryBusy === o.orderNumber} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>
+                      {retryBusy === o.orderNumber ? '…' : 'Retry provision'}
                     </button>
                   </td>
                 </tr>
@@ -6288,30 +6365,30 @@ const AdminOrderWorkspace = () => {
         </div>
       )}
 
-      <h2 style={{ marginTop:32 }}>🌐 Domain orders</h2>
-      <p style={{ color:'#5b6075' }}>Search domain purchases by order number (DM-...) or domain. Retry registration for orders that were paid but not registered.</p>
-      {domMsg && <div style={{ padding:'8px 12px', borderRadius:8, marginBottom:12, background: domMsg.startsWith('✓')?'#dcfce7':'#fde8e8', color: domMsg.startsWith('✓')?'#166534':'#b42318' }}>{domMsg}</div>}
-      <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
-        <input style={{ ...inp, maxWidth:360 }} value={domQ} onChange={e=>setDomQ(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter') loadDomOrders(); }} placeholder="DM-... or domain.com" />
+      <h2 style={{ marginTop: 32 }}>🌐 Domain orders</h2>
+      <p style={{ color: '#5b6075' }}>Search domain purchases by order number (DM-...) or domain. Retry registration for orders that were paid but not registered.</p>
+      {domMsg && <div style={{ padding: '8px 12px', borderRadius: 8, marginBottom: 12, background: domMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: domMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{domMsg}</div>}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <input style={{ ...inp, maxWidth: 360 }} value={domQ} onChange={e => setDomQ(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') loadDomOrders(); }} placeholder="DM-... or domain.com" />
         <button onClick={loadDomOrders} className="btn btn-secondary">Search</button>
       </div>
-      {domOrders.length === 0 ? <p style={{ color:'#9ca3af' }}>No domain orders found.</p> : (
-        <div style={{ overflowX:'auto' }}>
-          <table style={{ width:'100%', fontSize:14, borderCollapse:'collapse' }}>
-            <thead><tr style={{ textAlign:'left', color:'#6b7280' }}>
-              <th style={{ padding:'8px 0' }}>Order #</th><th>Domain</th><th>Years</th><th>Status</th><th></th>
+      {domOrders.length === 0 ? <p style={{ color: '#9ca3af' }}>No domain orders found.</p> : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}>
+              <th style={{ padding: '8px 0' }}>Order #</th><th>Domain</th><th>Years</th><th>Status</th><th></th>
             </tr></thead>
             <tbody>
-              {domOrders.map(o=>(
-                <tr key={o.orderNumber} style={{ borderTop:'1px solid #f0f0f0' }}>
-                  <td style={{ padding:'8px 0', fontFamily:'monospace', fontSize:13 }}>{o.orderNumber}</td>
-                  <td style={{ fontWeight:600 }}>{o.domainName}</td>
+              {domOrders.map(o => (
+                <tr key={o.orderNumber} style={{ borderTop: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '8px 0', fontFamily: 'monospace', fontSize: 13 }}>{o.orderNumber}</td>
+                  <td style={{ fontWeight: 600 }}>{o.domainName}</td>
                   <td>{o.period}</td>
-                  <td><span style={{ color: o.status==='registered'?'#166534' : o.status==='failed'?'#b42318':'#b45309', fontWeight:600 }}>{o.status}</span>{o.error && <div style={{ fontSize:11, color:'#b42318' }}>{o.error}</div>}</td>
-                  <td style={{ textAlign:'right' }}>
+                  <td><span style={{ color: o.status === 'registered' ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{o.status}</span>{o.error && <div style={{ fontSize: 11, color: '#b42318' }}>{o.error}</div>}</td>
+                  <td style={{ textAlign: 'right' }}>
                     {o.status !== 'registered' && (
-                      <button onClick={()=>retryDom(o.orderNumber)} disabled={domRetryBusy===o.orderNumber} className="btn btn-secondary" style={{ fontSize:12, padding:'4px 10px' }}>
-                        {domRetryBusy===o.orderNumber ? '…' : 'Retry register'}
+                      <button onClick={() => retryDom(o.orderNumber)} disabled={domRetryBusy === o.orderNumber} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>
+                        {domRetryBusy === o.orderNumber ? '…' : 'Retry register'}
                       </button>
                     )}
                   </td>
