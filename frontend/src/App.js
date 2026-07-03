@@ -45,49 +45,57 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
   const containerRef = useRef(null);
   const mountedRef = useRef(false);
   const [mapsReady, setMapsReady] = useState(false);
+  const [status, setStatus] = useState(''); // visible status for debugging
 
-  // Load the Google Maps JavaScript API (with Places) once — same as the customer form.
+  // Load Google Maps JS (Places) once.
   useEffect(() => {
-    if (!MAPS_KEY) return;
+    if (!MAPS_KEY) { setStatus('no-key'); return; }
     let poll;
     const ready = () => setMapsReady(true);
-    if (window.google && window.google.maps && window.google.maps.places) { ready(); return; }
+    if (window.google?.maps?.importLibrary) { ready(); return; }
     const existing = document.getElementById('gmaps-places-script');
     if (existing) {
       existing.addEventListener('load', ready);
-      // The script may already be mid-load (added by another form) and we missed 'load' — poll.
-      poll = setInterval(() => { if (window.google && window.google.maps && window.google.maps.places) { clearInterval(poll); ready(); } }, 250);
+      poll = setInterval(() => { if (window.google?.maps?.importLibrary) { clearInterval(poll); ready(); } }, 250);
       return () => { existing.removeEventListener('load', ready); if (poll) clearInterval(poll); };
     }
     const script = document.createElement('script');
     script.id = 'gmaps-places-script';
     script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&loading=async&v=weekly`;
-    script.async = true;
-    script.defer = true;
+    script.async = true; script.defer = true;
     script.onload = ready;
+    script.onerror = () => setStatus('script-failed');
     document.body.appendChild(script);
   }, []);
 
-  // Mount the PlaceAutocompleteElement when maps is ready — identical to the customer form.
+  // Mount the autocomplete element once Maps is ready. Retry until the container is painted.
   useEffect(() => {
-    if (!mapsReady || !containerRef.current) return;
-    if (mountedRef.current) return; // already mounted
+    if (!mapsReady || mountedRef.current) return;
     let cancelled = false;
+    let tries = 0;
 
-    (async () => {
+    const mount = async () => {
+      if (cancelled || mountedRef.current) return;
+      if (!containerRef.current) {                 // container not painted yet — retry
+        if (tries++ < 30) setTimeout(mount, 100);
+        return;
+      }
       try {
         const { PlaceAutocompleteElement } = await window.google.maps.importLibrary('places');
         if (cancelled || !containerRef.current) return;
 
-        const el = new PlaceAutocompleteElement({
-          componentRestrictions: { country: countries },
-        });
+        // Build the element. Try the NEW API prop first, then fall back, then no restriction.
+        let el;
+        try { el = new PlaceAutocompleteElement({ includedRegionCodes: countries }); }
+        catch (_) {
+          try { el = new PlaceAutocompleteElement({ componentRestrictions: { country: countries } }); }
+          catch (_2) { el = new PlaceAutocompleteElement(); }
+        }
         el.style.width = '100%';
+        containerRef.current.innerHTML = '';
+        containerRef.current.appendChild(el);
         mountedRef.current = true;
-
-        const container = containerRef.current;
-        container.innerHTML = '';
-        container.appendChild(el);
+        setStatus('ready');
 
         el.addEventListener('gmp-select', async (event) => {
           try {
@@ -100,22 +108,33 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
             const city = get('locality')?.longText || get('sublocality')?.longText || get('postal_town')?.longText || '';
             const stateShort = get('administrative_area_level_1')?.shortText || '';
             const zip = get('postal_code')?.longText || '';
-            const street = `${streetNumber} ${route}`.trim();
-            onPick({ street, city, state: stateShort, zip });
-          } catch (err) {
-            console.error('Place select error:', err);
-          }
+            onPick({ street: `${streetNumber} ${route}`.trim(), city, state: stateShort, zip });
+          } catch (err) { console.error('Place select error:', err); }
         });
       } catch (err) {
         console.error('Autocomplete init error:', err);
+        setStatus('init-error: ' + (err?.message || 'unknown'));
       }
-    })();
-
+    };
+    mount();
     return () => { cancelled = true; };
   }, [mapsReady]);
 
-  if (!MAPS_KEY) return null;
-  return <div ref={containerRef} style={{ width: '100%', minHeight: 44 }} />;
+  if (!MAPS_KEY) {
+    return <small style={{ color: '#b45309' }}>Address autocomplete needs REACT_APP_GOOGLE_MAPS_API_KEY set on the frontend host, then redeploy.</small>;
+  }
+  return (
+    <div>
+      <div ref={containerRef} style={{ width: '100%', minHeight: 44 }} />
+      {status && status !== 'ready' && status !== '' && (
+        <small style={{ color: '#b45309' }}>
+          {status === 'script-failed' ? 'Google Maps script failed to load — check the API key/referrer settings.'
+            : status.startsWith('init-error') ? 'Maps error: ' + status.replace('init-error: ', '')
+              : ''}
+        </small>
+      )}
+    </div>
+  );
 };
 
 // Auth Context
