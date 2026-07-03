@@ -3216,10 +3216,15 @@ function skuName(skuId) {
 // category, so new add-ons automatically follow the same rules with no code changes.
 function skuCategory(skuId) {
   const meta = SKU_CATALOG[String(skuId)];
+  const name = (meta?.name || '').toLowerCase();
+  // RULE: any product whose name contains "workspace" is the PRIMARY subscription.
+  if (name.includes('workspace')) return 'workspace';
+  // Voice is always an add-on.
+  if (name.includes('voice')) return 'voice';
   if (meta?.category) {
-    // 'core' in the catalog means a primary Google Workspace plan.
     if (meta.category === 'core' || meta.category === 'workspace') return 'workspace';
-    return meta.category; // 'voice' | 'addon'
+    if (meta.category === 'voice') return 'voice';
+    return 'addon';
   }
   if (WORKSPACE_SKUS.includes(String(skuId))) return 'workspace';
   return 'addon';
@@ -6140,6 +6145,107 @@ app.delete('/api/admin/plans/:id', authenticateCustomer, requireAdmin, async (re
 // WORKSPACE ORDERS (Stage 1 customer order intake)
 // Admin: create a workspace order AND provision it immediately — NO payment step.
 // Admin fills the sign-up form, hits submit, and the Workspace is created in Google right away.
+// Reusable: create + provision ONE admin workspace order (no payment). Returns {ok, orderNumber, ...}.
+async function adminCreateAndProvisionWorkspace(body) {
+  const dom = (body.organization?.domain || '').toLowerCase().trim();
+  if (!dom || !body.plan?.id || !body.seats) {
+    return { ok: false, domain: dom, error: 'Missing domain, plan, or seats.' };
+  }
+
+  let cust = await Customer.findOne({ domain: dom });
+  if (!cust && body.contact?.email) cust = await Customer.findOne({ businessEmail: (body.contact.email || '').toLowerCase() });
+  if (!cust) {
+    cust = await Customer.create({
+      username: dom.split('.')[0],
+      businessEmail: body.contact?.email || `admin@${dom}`,
+      firstName: body.contact?.firstName || 'Admin',
+      lastName: body.contact?.lastName || '',
+      domain: dom, role: 'customer', account: body.account || undefined,
+      passwordHash: 'ADMIN_CREATED_NO_LOGIN',
+    });
+  } else if (!cust.domain) { cust.domain = dom; await cust.save(); }
+
+  const orderNumber = `WS-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const order = await WorkspaceOrder.create({
+    customerId: cust._id, orderNumber, type: 'workspace',
+    planType: body.planType === 'annual' ? 'annual' : 'flexible',
+    account: body.account || '', plan: body.plan, seats: Number(body.seats),
+    monthlyTotal: body.monthlyTotal, organization: body.organization, contact: body.contact, status: 'pending',
+  });
+
+  try {
+    const result = await provisionWorkspaceOrder(order);
+    try {
+      const planDoc = await Plan.findOne({ planId: order.plan?.id });
+      if (planDoc?.skuId) {
+        const now = new Date();
+        let rec = await SubBilling.findOne({ domain: dom, skuId: planDoc.skuId });
+        if (!rec) { rec = new SubBilling({ account: order.account || 'pk', domain: dom, skuId: planDoc.skuId }); startNewBillingCycle(rec, now); }
+        applyPaymentToCurrentCycle(rec, now);
+        await rec.save();
+      }
+    } catch (_) { }
+    return { ok: true, domain: dom, orderNumber, account: order.account || 'auto', message: result.message, provisionNote: order.provisionNote || null };
+  } catch (e) {
+    order.status = 'failed'; await order.save();
+    return { ok: false, domain: dom, orderNumber, error: e.message };
+  }
+}
+
+// Admin: BULK create + provision many workspaces at once (no payment).
+// SAFEGUARD: stops the whole batch if the first few domains fail (prevents wasting domains
+// when something is misconfigured, e.g. USA auth not set up).
+app.post('/api/admin/workspace-orders/provision-bulk', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    if (rows.length === 0) return res.status(400).json({ error: 'No rows provided.' });
+    if (rows.length > 100) return res.status(400).json({ error: 'Please limit to 100 domains per batch.' });
+
+    // Stop condition: if the first N domains ALL fail, abort the rest.
+    const STOP_AFTER_INITIAL_FAILURES = Number(req.body?.stopAfterFailures) || 3;
+
+    const results = [];
+    let consecutiveFailuresFromStart = 0;
+    let aborted = false;
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      let out;
+      try {
+        out = await adminCreateAndProvisionWorkspace(r);
+      } catch (e) {
+        out = { ok: false, domain: r?.organization?.domain || '?', error: e.message };
+      }
+      results.push(out);
+
+      // Track failures among the FIRST few domains only.
+      if (i < STOP_AFTER_INITIAL_FAILURES) {
+        if (!out.ok) consecutiveFailuresFromStart++;
+      }
+      // If the first STOP_AFTER_INITIAL_FAILURES domains all failed, abort to avoid wasting the rest.
+      if (i === STOP_AFTER_INITIAL_FAILURES - 1 && consecutiveFailuresFromStart >= STOP_AFTER_INITIAL_FAILURES && rows.length > STOP_AFTER_INITIAL_FAILURES) {
+        aborted = true;
+        console.error(`BULK ABORTED: first ${STOP_AFTER_INITIAL_FAILURES} domains all failed. Stopping to avoid wasting the remaining ${rows.length - results.length} domains.`);
+        break;
+      }
+    }
+
+    const okCount = results.filter((x) => x.ok).length;
+    res.json({
+      success: true,
+      total: rows.length,
+      attempted: results.length,
+      provisioned: okCount,
+      failed: results.length - okCount,
+      aborted,
+      abortReason: aborted ? `Stopped after the first ${STOP_AFTER_INITIAL_FAILURES} domains all failed — the remaining ${rows.length - results.length} were NOT attempted, so no domains were wasted. Fix the error below and retry.` : null,
+      results,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/admin/workspace-orders/provision', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const body = req.body || {};

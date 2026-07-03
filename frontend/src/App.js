@@ -4457,7 +4457,8 @@ const CustomerSubscriptions = () => {
               const d = s.daysUntilRenewal;
               const soon = d !== null && d !== undefined && d <= 7;
               const overdue = d !== null && d !== undefined && d < 0;
-              const isPrimary = s.category === 'workspace';
+              const nm = (s.skuName || '').toLowerCase();
+              const isPrimary = nm.includes('workspace') || s.category === 'workspace';
               return (
                 <tr key={i}>
                   <td style={{ fontWeight: 600 }}>{s.skuName}</td>
@@ -6235,13 +6236,49 @@ const AdminOrderWorkspace = () => {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
-  // Order tracking
+  // Bulk create
+  const [bulkText, setBulkText] = useState('');
+  const [bulkPlan, setBulkPlan] = useState('');
+  const [bulkPlanType, setBulkPlanType] = useState('flexible');
+  const [bulkAccount, setBulkAccount] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResults, setBulkResults] = useState(null);
+
+  const runBulk = async () => {
+    setBulkResults(null);
+    const lines = bulkText.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) { setMsg('Paste at least one domain.'); return; }
+    if (!bulkPlan) { setMsg('Choose a plan for the batch.'); return; }
+    const planObj = plans.find(p => p.id === bulkPlan);
+    const rows = lines.map(line => {
+      const parts = line.split(',').map(x => x.trim());
+      const domain = (parts[0] || '').toLowerCase();
+      const seats = parseInt(parts[1], 10) || 1;
+      const orgName = parts[2] || domain.split('.')[0];
+      const adminUser = parts[3] || 'admin';
+      return {
+        organization: { domain, name: orgName, country: 'United States', desiredAdminUsername: adminUser, tempPassword: '' },
+        contact: { firstName: 'Admin', lastName: '', email: `admin@${domain}` },
+        plan: planObj, seats, planType: bulkPlanType, account: bulkAccount || undefined,
+        monthlyTotal: (planObj?.monthlyPrice || 0) * seats,
+      };
+    });
+    setBulkBusy(true); setMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/admin/workspace-orders/provision-bulk`, { rows });
+      setBulkResults(r.data);
+      loadOrders();
+    } catch (e) { setMsg(e?.response?.data?.error || 'Bulk creation failed.'); }
+    finally { setBulkBusy(false); }
+  };
+
+  // Order tracking state below
   const [q, setQ] = useState('');
   const [orders, setOrders] = useState([]);
   const [retryBusy, setRetryBusy] = useState('');
 
   const loadPlans = async () => {
-    try { const r = await axios.get(`${API_URL}/products`); if (r.data?.workspace) { setPlans(r.data.workspace); if (r.data.workspace[0]) setForm(f => ({ ...f, planId: r.data.workspace[0].id })); } } catch (_) { }
+    try { const r = await axios.get(`${API_URL}/products`); if (r.data?.workspace) { setPlans(r.data.workspace); if (r.data.workspace[0]) { setForm(f => ({ ...f, planId: r.data.workspace[0].id })); setBulkPlan(r.data.workspace[0].id); } } } catch (_) { }
   };
   const loadOrders = async () => {
     try { const r = await axios.get(`${API_URL}/admin/workspace-orders${q ? `?q=${encodeURIComponent(q)}` : ''}`); setOrders(r.data.orders || []); } catch (_) { }
@@ -6354,6 +6391,74 @@ const AdminOrderWorkspace = () => {
           <div><label style={lab}>ZIP</label><input style={inp} value={form.zip} onChange={e => set('zip', e.target.value)} /></div>
         </div>
         <button onClick={submit} disabled={busy} className="btn btn-primary" style={{ marginTop: 16 }}>{busy ? 'Provisioning…' : 'Submit & create Workspace'}</button>
+      </div>
+
+      <h2>📦 Bulk create Workspaces (no payment)</h2>
+      <p style={{ color: '#5b6075' }}>Provision many domains at once. Paste one domain per line. Optional extra fields per line, comma-separated: <code>domain, seats, orgName, adminUser</code>. Example:</p>
+      <div style={{ background: '#f0fdf4', border: '1px solid #86efac', color: '#166534', borderRadius: 8, padding: '8px 12px', fontSize: 13, marginBottom: 8 }}>
+        🛡 Safety: if the first 3 domains all fail, the batch stops automatically so the rest aren't wasted. Test with 1–2 domains first.
+      </div>
+      <pre style={{ background: '#f8fafc', padding: 12, borderRadius: 8, fontSize: 12, overflowX: 'auto' }}>{`example1.com
+example2.com, 5
+example3.com, 3, Acme Inc, admin`}</pre>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #e5e7eb', marginBottom: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }} className="grid-2">
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Plan for the batch *</label>
+            <select value={bulkPlan} onChange={e => setBulkPlan(e.target.value)} style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }}>
+              {plans.map(p => <option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}/seat/mo</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Payment plan</label>
+            <select value={bulkPlanType} onChange={e => setBulkPlanType(e.target.value)} style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }}>
+              <option value="flexible">Flexible (monthly)</option>
+              <option value="annual">Annual (yearly commitment, monthly pay)</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Reseller account</label>
+            <select value={bulkAccount} onChange={e => setBulkAccount(e.target.value)} style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }}>
+              <option value="">Auto (by order routing)</option>
+              <option value="pk">Pakistan</option>
+              <option value="usa">USA</option>
+            </select>
+          </div>
+        </div>
+        <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Domains (one per line)</label>
+        <textarea value={bulkText} onChange={e => setBulkText(e.target.value)} rows={8}
+          placeholder={"domain1.com\ndomain2.com, 5\ndomain3.com, 3, Acme Inc, admin"}
+          style={{ width: '100%', borderRadius: 8, border: '1px solid #d8dbe6', padding: 12, fontFamily: 'monospace', fontSize: 13, boxSizing: 'border-box' }} />
+        <button onClick={runBulk} disabled={bulkBusy} className="btn btn-primary" style={{ marginTop: 12 }}>
+          {bulkBusy ? 'Creating… (this can take a while)' : `Create ${bulkText.split('\n').map(l => l.trim()).filter(Boolean).length || ''} Workspaces`}
+        </button>
+
+        {bulkResults && (
+          <div style={{ marginTop: 16 }}>
+            {bulkResults.aborted && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#b42318', padding: '12px 14px', borderRadius: 10, marginBottom: 12, fontSize: 13 }}>
+                ⛔ <strong>Batch stopped.</strong> {bulkResults.abortReason}
+              </div>
+            )}
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>
+              {bulkResults.provisioned} provisioned, {bulkResults.failed} failed (attempted {bulkResults.attempted} of {bulkResults.total})
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}><th style={{ padding: '6px 0' }}>Domain</th><th>Result</th><th>Order #</th></tr></thead>
+                <tbody>
+                  {bulkResults.results.map((r, i) => (
+                    <tr key={i} style={{ borderTop: '1px solid #f0f0f0' }}>
+                      <td style={{ padding: '6px 0', fontWeight: 600 }}>{r.domain}</td>
+                      <td style={{ color: r.ok ? '#166534' : '#b42318' }}>{r.ok ? '✓ Provisioned' : '✗ ' + (r.error || 'failed')}{r.provisionNote ? ` (${r.provisionNote})` : ''}</td>
+                      <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{r.orderNumber || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       <h2>📋 Track & retry orders</h2>
