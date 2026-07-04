@@ -1,0 +1,8 @@
+{
+  "name": "Google Workspace Reseller Portal",
+  "description": "A full-featured reseller portal for Google Workspace, Google Voice, and Namecheap domains, SSL, and hosting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

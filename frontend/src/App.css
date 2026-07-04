@@ -1,19 +1,21 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap');
+
 /* ==================== GLOBAL STYLES ==================== */
 
 :root {
-  --primary-color: #1f2937;
-  --secondary-color: #3b82f6;
+  --primary-color: #111827;
+  --secondary-color: #0f766e;
   --success-color: #10b981;
   --warning-color: #f59e0b;
   --danger-color: #ef4444;
-  --light-bg: #f3f4f6;
+  --light-bg: #ffffff;
   --white: #ffffff;
   --text-dark: #111827;
-  --text-light: #6b7280;
-  --border-color: #e5e7eb;
-  --shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.05);
-  --transition: all 0.3s ease;
+  --text-light: #4b5563;
+  --border-color: rgba(17, 24, 39, 0.08);
+  --shadow: 0 10px 15px -3px rgba(0,0,0,0.05), 0 4px 6px -2px rgba(0,0,0,0.02);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 * {
@@ -23,9 +25,7 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: var(--light-bg);
@@ -165,7 +165,7 @@ body {
 }
 
 .btn-primary:hover:not(:disabled) {
-  background-color: #2563eb;
+  background-color: #0b5953;
   transform: translateY(-2px);
   box-shadow: var(--shadow);
 }
@@ -372,7 +372,7 @@ body {
 }
 
 .stat-card {
-  background: linear-gradient(135deg, var(--secondary-color), #2563eb);
+  background: linear-gradient(135deg, var(--secondary-color), #0b5953);
   color: var(--white);
   padding: 24px;
   border-radius: 12px;
@@ -967,3 +967,87 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-light);
 }
+
+/* ==================== WORKSPACE RESELLER UTILITY STYLES ==================== */
+
+.grid {
+  display: grid !important;
+}
+
+.grid-cols-1 {
+  grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+}
+
+.grid-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+.gap-3 { gap: 0.75rem !important; }
+.gap-4 { gap: 1rem !important; }
+.gap-6 { gap: 1.5rem !important; }
+.gap-8 { gap: 2rem !important; }
+.gap-12 { gap: 3rem !important; }
+
+.px-6 { padding-left: 1.5rem !important; padding-right: 1.5rem !important; }
+.py-12 { padding-top: 3rem !important; padding-bottom: 3rem !important; }
+.p-6 { padding: 1.5rem !important; }
+
+.items-start { align-items: start !important; }
+.items-stretch { align-items: stretch !important; }
+
+@media (min-width: 640px) {
+  .sm\:grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .sm\:grid-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+  .sm\:p-10 {
+    padding: 2.5rem !important;
+  }
+}
+
+@media (min-width: 768px) {
+  .md\:grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .md\:grid-cols-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+  .md\:px-10 {
+    padding-left: 2.5rem !important;
+    padding-right: 2.5rem !important;
+  }
+  .md\:py-20 {
+    padding-top: 5rem !important;
+    padding-bottom: 5rem !important;
+  }
+}
+
+@media (min-width: 1024px) {
+  .lg\:grid-cols-12 {
+    grid-template-columns: repeat(12, minmax(0, 1fr)) !important;
+  }
+  .lg\:grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .lg\:col-span-7 {
+    grid-column: span 7 / span 12 !important;
+  }
+  .lg\:col-span-5 {
+    grid-column: span 5 / span 12 !important;
+  }
+  .lg\:gap-16 {
+    gap: 4rem !important;
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite !important;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+

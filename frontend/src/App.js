@@ -8,7 +8,7 @@ import axios from 'axios';
 import './App.css';
 
 // API Config
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API_URL = process.env.REACT_APP_API_URL || (window.location.origin + '/api');
 const MAPS_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '';
 const GOOGLE_SIGNIN_CLIENT_ID = process.env.REACT_APP_GOOGLE_SIGNIN_CLIENT_ID || '';
 
@@ -242,11 +242,28 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
   const [showPw, setShowPw] = useState(false);
   const [showPwReg, setShowPwReg] = useState(false);
   const googleBtnRef = useRef(null);
+  const [googleClientId, setGoogleClientId] = useState(GOOGLE_SIGNIN_CLIENT_ID);
+
+  // Fetch client ID from backend if not supplied at build time
+  useEffect(() => {
+    if (adminMode || googleClientId) return;
+    let active = true;
+    axios.get(`${API_URL}/auth/google-client-id`)
+      .then(res => {
+        if (active && res.data.clientId) {
+          setGoogleClientId(res.data.clientId);
+        }
+      })
+      .catch(err => {
+        console.error('Failed to fetch google-client-id from backend:', err);
+      });
+    return () => { active = false; };
+  }, [adminMode, googleClientId]);
 
   // Google Identity Services: load the script and render the sign-in button.
   useEffect(() => {
     if (adminMode) return; // Google sign-in is for customers
-    if (!GOOGLE_SIGNIN_CLIENT_ID) return; // not configured
+    if (!googleClientId) return; // not configured
     let cancelled = false;
     let tries = 0;
     const handleCredential = async (response) => {
@@ -265,7 +282,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
         return;
       }
       try {
-        window.google.accounts.id.initialize({ client_id: GOOGLE_SIGNIN_CLIENT_ID, callback: handleCredential });
+        window.google.accounts.id.initialize({ client_id: googleClientId, callback: handleCredential });
         googleBtnRef.current.innerHTML = '';
         const w = Math.min(376, googleBtnRef.current.offsetWidth || 360);
         window.google.accounts.id.renderButton(googleBtnRef.current, { theme: 'outline', size: 'large', width: w, text: activeTab === 'register' ? 'signup_with' : 'signin_with' });
@@ -286,7 +303,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
     s.onload = render;
     document.body.appendChild(s);
     return () => { cancelled = true; };
-  }, [activeTab, adminMode]);
+  }, [activeTab, adminMode, googleClientId]);
 
 
   // Login Form
@@ -422,7 +439,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
           </p>
         )}
 
-        {!adminMode && GOOGLE_SIGNIN_CLIENT_ID && (
+        {!adminMode && googleClientId && (
           <div style={{ marginBottom: 8 }}>
             <div ref={googleBtnRef} style={{ display: 'flex', justifyContent: 'center', minHeight: 44 }} />
             <div className="auth-divider">or {activeTab === 'register' ? 'sign up' : 'sign in'} with email</div>
@@ -672,6 +689,14 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              className={`menu-item ${activeSection === 'leads' ? 'active' : ''}`}
+              onClick={() => setActiveSection('leads')}
+            >
+              💼 Prospective Leads
+            </button>
+          </li>
+          <li>
+            <button
               className={`menu-item ${activeSection === 'tickets' ? 'active' : ''}`}
               onClick={() => setActiveSection('tickets')}
             >
@@ -733,6 +758,7 @@ const Dashboard = () => {
         {activeSection === 'subs-pk' && <SubscriptionsSection account="PK" />}
         {activeSection === 'subs-usa' && <SubscriptionsSection account="USA" />}
         {activeSection === 'customers' && <AdminCustomersSection />}
+        {activeSection === 'leads' && <AdminLeadsSection />}
         {activeSection === 'tickets' && <AdminTicketsSection />}
         {activeSection === 'payments' && <AdminPaymentsSection />}
         {activeSection === 'emails' && <AdminEmailsSection />}
@@ -2065,6 +2091,270 @@ const AdminCustomersSection = () => {
             )}
             <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 10, marginBottom: 0 }}>The account (Pakistan/USA) is detected automatically from where the subscription lives.</p>
           </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ==================== ADMIN: LEADS SECTION ====================
+const AdminLeadsSection = () => {
+  const [leads, setLeads] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [editingNotes, setEditingNotes] = useState({}); // { [id]: notesString }
+  const [savingNotes, setSavingNotes] = useState({});  // { [id]: boolean }
+
+  const loadLeads = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await axios.get(`${API_URL}/admin/leads`);
+      setLeads(res.data.leads || []);
+    } catch (e) {
+      setError(e?.response?.data?.error || 'Could not load leads.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadLeads();
+  }, []);
+
+  const handleStatusChange = async (id, newStatus) => {
+    try {
+      await axios.post(`${API_URL}/admin/leads/${id}`, { status: newStatus });
+      setLeads(prev => prev.map(l => l._id === id ? { ...l, status: newStatus, updatedAt: new Date() } : l));
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Failed to update status.');
+    }
+  };
+
+  const handleNotesSave = async (id) => {
+    setSavingNotes(prev => ({ ...prev, [id]: true }));
+    try {
+      const notesVal = editingNotes[id] === undefined ? '' : editingNotes[id];
+      await axios.post(`${API_URL}/admin/leads/${id}`, { notes: notesVal });
+      setLeads(prev => prev.map(l => l._id === id ? { ...l, notes: notesVal, updatedAt: new Date() } : l));
+      alert('Notes saved successfully.');
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Failed to save notes.');
+    } finally {
+      setSavingNotes(prev => ({ ...prev, [id]: false }));
+    }
+  };
+
+  const handleDeleteLead = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this lead?')) return;
+    try {
+      await axios.delete(`${API_URL}/admin/leads/${id}`);
+      setLeads(prev => prev.filter(l => l._id !== id));
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Failed to delete lead.');
+    }
+  };
+
+  const filteredLeads = leads.filter(l => {
+    const term = search.toLowerCase().trim();
+    const matchesSearch = !term ||
+      (l.fullName || '').toLowerCase().includes(term) ||
+      (l.email || '').toLowerCase().includes(term) ||
+      (l.phone || '').toLowerCase().includes(term) ||
+      (l.businessName || '').toLowerCase().includes(term) ||
+      (l.domain || '').toLowerCase().includes(term) ||
+      (l.message || '').toLowerCase().includes(term);
+
+    const matchesStatus = statusFilter === 'All' || l.status === statusFilter;
+
+    return matchesSearch && matchesStatus;
+  });
+
+  const countByStatus = (status) => leads.filter(l => l.status === status).length;
+
+  return (
+    <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto', fontFamily: 'Inter, system-ui, sans-serif' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: '#0F766E' }}>💼 Prospective Leads</h2>
+          <p style={{ margin: '4px 0 0', color: '#6b7280' }}>Manage incoming business setup services inquiries.</p>
+        </div>
+        <button onClick={loadLeads} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          🔄 Refresh
+        </button>
+      </div>
+
+      {/* Metrics Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
+        {[
+          { label: 'Total Inquiries', count: leads.length, color: '#0F766E', bg: '#f0f7f5' },
+          { label: 'New Leads', count: countByStatus('New'), color: '#3b82f6', bg: '#eff6ff' },
+          { label: 'In Discussion', count: countByStatus('In Discussion'), color: '#f59e0b', bg: '#fffbeb' },
+          { label: 'Closed/Done', count: countByStatus('Closed'), color: '#10b981', bg: '#ecfdf5' },
+        ].map((card, idx) => (
+          <div key={idx} style={{ background: '#fff', borderRadius: 16, padding: '20px 24px', border: '1px solid #eef2f1', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>{card.label}</span>
+            <div style={{ fontSize: 28, fontWeight: 800, color: card.color, marginTop: 4 }}>{card.count}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search leads by name, email, company..."
+          style={{ flex: 1, minWidth: 260, height: 42, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px', fontSize: 14 }}
+        />
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          style={{ height: 42, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px', fontSize: 14, background: '#fff', minWidth: 160 }}
+        >
+          <option value="All">All Statuses</option>
+          <option value="New">New</option>
+          <option value="In Discussion">In Discussion</option>
+          <option value="Contacted">Contacted</option>
+          <option value="Qualified">Qualified</option>
+          <option value="Closed">Closed</option>
+        </select>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 48, color: '#6b7280' }}>Loading leads data...</div>
+      ) : error ? (
+        <div style={{ padding: 16, background: '#fef2f2', color: '#b91c1c', borderRadius: 12, marginBottom: 24 }}>{error}</div>
+      ) : filteredLeads.length === 0 ? (
+        <div style={{ background: '#fff', borderRadius: 16, padding: 48, textAlign: 'center', border: '1px solid #eef2f1' }}>
+          <span style={{ fontSize: 40 }}>📭</span>
+          <h3 style={{ margin: '12px 0 4px', fontSize: 18, fontWeight: 600 }}>No leads found</h3>
+          <p style={{ color: '#6b7280', margin: 0 }}>There are no inquiries matching your current criteria.</p>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {filteredLeads.map(lead => (
+            <div key={lead._id} style={{ background: '#fff', borderRadius: 16, border: '1px solid #eef2f1', boxShadow: '0 1px 3px rgba(0,0,0,0.02)', padding: 24, display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#1f2937' }}>{lead.fullName}</h3>
+                    {lead.businessName && <span style={{ fontSize: 13, color: '#4b5563', fontWeight: 500 }}>🏢 {lead.businessName}</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, color: '#9ca3af' }}>
+                      {new Date(lead.createdAt).toLocaleDateString()} {new Date(lead.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    <select
+                      value={lead.status}
+                      onChange={e => handleStatusChange(lead._id, e.target.value)}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: 8,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        border: '1px solid #d8dbe6',
+                        background: lead.status === 'New' ? '#eff6ff' : lead.status === 'In Discussion' ? '#fffbeb' : lead.status === 'Closed' ? '#ecfdf5' : '#fafafa',
+                        color: lead.status === 'New' ? '#1e40af' : lead.status === 'In Discussion' ? '#b45309' : lead.status === 'Closed' ? '#047857' : '#374151',
+                      }}
+                    >
+                      <option value="New">New</option>
+                      <option value="In Discussion">In Discussion</option>
+                      <option value="Contacted">Contacted</option>
+                      <option value="Qualified">Qualified</option>
+                      <option value="Closed">Closed</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13, color: '#4b5563', borderTop: '1px dashed #f3f4f6', paddingTop: 8 }}>
+                  <div>✉️ <a href={`mailto:${lead.email}`} style={{ color: '#0F766E', textDecoration: 'none', fontWeight: 500 }}>{lead.email}</a></div>
+                  {lead.phone && <div>📞 {lead.phone}</div>}
+                  {lead.domain && <div>🌐 <span style={{ fontWeight: 500 }}>{lead.domain}</span></div>}
+                </div>
+
+                {lead.services && lead.services.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                    {lead.services.map((srv, idx) => (
+                      <span key={idx} style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', borderRadius: 999, padding: '2px 10px', fontSize: 11, fontWeight: 500 }}>
+                        {srv}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {lead.message && (
+                  <div style={{ background: '#f9fafb', borderRadius: 10, padding: 14, fontSize: 13, lineHeight: 1.5, color: '#374151', whiteSpace: 'pre-line' }}>
+                    <strong style={{ display: 'block', fontSize: 11, textTransform: 'uppercase', color: '#9ca3af', marginBottom: 4, letterSpacing: 0.5 }}>Inquiry Message</strong>
+                    {lead.message}
+                  </div>
+                )}
+              </div>
+
+              {/* Internal Notes / Administration Area */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderLeft: '1px solid #f3f4f6', paddingLeft: 24 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <strong style={{ fontSize: 12, textTransform: 'uppercase', color: '#9ca3af', letterSpacing: 0.5 }}>Internal Admin Notes</strong>
+                  <button
+                    onClick={() => handleNotesSave(lead._id)}
+                    disabled={savingNotes[lead._id]}
+                    style={{
+                      background: '#0F766E',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: 6,
+                      padding: '4px 10px',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {savingNotes[lead._id] ? 'Saving...' : '💾 Save Notes'}
+                  </button>
+                </div>
+                <textarea
+                  value={editingNotes[lead._id] !== undefined ? editingNotes[lead._id] : (lead.notes || '')}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setEditingNotes(prev => ({ ...prev, [lead._id]: val }));
+                  }}
+                  placeholder="Add notes about status, follow-up calls, pricing quote, package details..."
+                  style={{
+                    flex: 1,
+                    minHeight: 100,
+                    borderRadius: 10,
+                    border: '1px solid #d8dbe6',
+                    padding: 10,
+                    fontSize: 12,
+                    resize: 'none',
+                    lineHeight: 1.4,
+                    background: '#fffbeb',
+                  }}
+                />
+                <button
+                  onClick={() => handleDeleteLead(lead._id)}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid #fecaca',
+                    color: '#dc2626',
+                    borderRadius: 8,
+                    padding: '6px 12px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    alignSelf: 'flex-end',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  🗑️ Delete Lead
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -5015,6 +5305,1187 @@ const CustomerSettings = () => {
 };
 
 
+// ==================== INTERACTIVE FAQ SECTION ====================
+const FaqSection = ({ brand, T, INKL, MUTEL }) => {
+  const [activeCategory, setActiveCategory] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [expandedItems, setExpandedItems] = useState({});
+
+  const faqCategories = [
+    {
+      id: 'workspace',
+      title: 'Google Workspace Setup',
+      icon: '🏢',
+      questions: [
+        {
+          q: 'What is Google Workspace and how does it benefit my business?',
+          a: 'Google Workspace provides professional email addresses at your own domain (e.g., mail@company.com), plus premium access to Gmail, Google Drive, Google Meet, Calendar, Docs, and Sheets. It helps establish brand credibility, features enterprise-grade spam filtering, and provides central management controls for your team.'
+        },
+        {
+          q: 'How long does Google Workspace take to set up?',
+          a: 'The provisioning process is almost instantaneous. However, fully configuring your domain\'s DNS settings (MX, SPF, DKIM, DMARC) for secure, reliable email deliverability usually propagates across the internet within 1 to 4 hours, and up to 24 hours globally.'
+        },
+        {
+          q: 'Can you migrate my existing emails from Microsoft 365, GoDaddy, or cPanel?',
+          a: 'Absolutely! Our business setup services include professional data migration. We can seamlessly migrate your historical email threads, contacts, calendars, and folders with zero downtime or email loss during the transition.'
+        },
+        {
+          q: 'What are SPF, DKIM, DMARC, and MX records?',
+          a: 'These are DNS (Domain Name System) records. MX records route incoming emails to Google servers. SPF, DKIM, and DMARC are crucial security protocols that authenticate your sending domain, verifying that incoming emails are genuinely sent from you. They prevent hackers from spoofing your email address and guarantee that your emails go to the recipient\'s inbox instead of the spam folder.'
+        }
+      ]
+    },
+    {
+      id: 'domains',
+      title: 'Domain Registration & Transfers',
+      icon: '🌐',
+      questions: [
+        {
+          q: 'Can I purchase a domain through GNB Mentor and connect it to Google Workspace?',
+          a: 'Yes! We offer fully integrated domain registration and connection directly within your customer portal. Once purchased, you can buy Google Workspace licenses and associate them immediately. We handle the technical heavy lifting.'
+        },
+        {
+          q: 'What is WHOIS privacy protection and do I need it?',
+          a: 'WHOIS privacy protection conceals your personal contact details (name, home address, email, phone) from the public ICANN directory, replacing it with proxy information. It is highly recommended to protect your identity and prevent spam, telemarketing, and security threats.'
+        },
+        {
+          q: 'How do I transfer an existing domain to GNB Mentor?',
+          a: 'To transfer a domain, you need to unlock the domain at your current registrar, obtain an Auth Code (EPP Key), and submit a transfer order in our portal. Domain transfers typically take 5 to 7 days to complete, but your website and emails remain active during the process.'
+        },
+        {
+          q: 'How long does domain registration take to become active?',
+          a: 'Domain registrations are processed in real-time. Once registered, your domain name is immediately reserved under your ownership. DNS propagation (the time it takes for servers worldwide to recognize your domain) typically takes between 1 and 2 hours.'
+        }
+      ]
+    },
+    {
+      id: 'hosting',
+      title: 'Web Hosting & SSL Certificates',
+      icon: '🔒',
+      questions: [
+        {
+          q: 'What type of web hosting plans do you offer?',
+          a: 'We provide secure, high-performance web hosting plans powered by premium cloud infrastructure, perfect for custom corporate websites, blogs, and landing pages. They feature high uptime, automated backups, SSD storage, and simple hosting control panels.'
+        },
+        {
+          q: 'What is an SSL certificate and why is it mandatory?',
+          a: 'An SSL (Secure Sockets Layer) certificate encrypts the connection between your visitors\' browsers and your web server. It ensures that sensitive transactions, passwords, and form data are secured. Google Chrome and other major web browsers flag websites without SSL as "Not Secure," hurting your credibility and search rankings.'
+        },
+        {
+          q: 'How are SSL certificates installed on my hosting account?',
+          a: 'Once you order an SSL certificate, our system handles the validation process. If you opt for our Setup Services or use our hosting, our technical team installs and activates the SSL certificate on your behalf so that your domain automatically defaults to the secure HTTPS protocol.'
+        }
+      ]
+    }
+  ];
+
+  const toggleItem = (catId, qIdx) => {
+    const key = `${catId}-${qIdx}`;
+    setExpandedItems(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  const matchesSearch = (text) => {
+    if (!searchQuery) return true;
+    return text.toLowerCase().includes(searchQuery.toLowerCase());
+  };
+
+  const filteredCategories = faqCategories
+    .map(category => {
+      const filteredQuestions = category.questions.filter(item => 
+        matchesSearch(item.q) || matchesSearch(item.a)
+      );
+      return {
+        ...category,
+        questions: filteredQuestions
+      };
+    })
+    .filter(category => {
+      const matchesCat = activeCategory === 'All' || category.id === activeCategory;
+      return matchesCat && category.questions.length > 0;
+    });
+
+  return (
+    <section id="faq-section" className="px-6 py-12 md:px-10 md:py-20" style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+      <style>{`
+        .faq-card-interactive {
+          transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+          will-change: transform, box-shadow;
+        }
+        .faq-card-interactive:hover {
+          transform: translateY(-4px) !important;
+          box-shadow: 0 16px 32px rgba(15,118,110,0.1), 0 4px 12px rgba(15,118,110,0.04) !important;
+          border-color: ${T} !important;
+        }
+      `}</style>
+      <div style={{ maxWidth: 1000, margin: '0 auto' }}>
+        
+        <div style={{ textAlign: 'center', marginBottom: 48 }}>
+          <div style={{ display: 'inline-block', background: '#ecfdf5', color: '#047857', borderRadius: 99, padding: '4px 14px', fontSize: 13, fontWeight: 700, marginBottom: 16 }}>
+            🙋‍♂️ Frequently Asked Questions
+          </div>
+          <h2 style={{ fontSize: 36, fontWeight: 800, margin: '0 0 12px', color: INKL }}>
+            Got questions? We have <span style={{ color: T }}>answers</span>.
+          </h2>
+          <p style={{ fontSize: 16, color: MUTEL, maxWidth: 600, margin: '0 auto 32px', lineHeight: 1.6 }}>
+            Everything you need to know about professional Google Workspace setup, secure custom domain registration, web hosting, and SSL certificates.
+          </p>
+
+          <div style={{ maxWidth: 500, margin: '0 auto 32px', position: 'relative' }}>
+            <span style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', fontSize: 18, pointerEvents: 'none' }}>🔍</span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search FAQs (e.g., MX records, SSL, migration)..."
+              style={{
+                width: '100%',
+                height: 48,
+                borderRadius: 14,
+                border: '1px solid #d8dbe6',
+                padding: '0 16px 0 48px',
+                fontSize: 15,
+                outline: 'none',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
+              }}
+            />
+            {searchQuery && (
+              <button 
+                onClick={() => setSearchQuery('')}
+                style={{
+                  position: 'absolute',
+                  right: 16,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  color: MUTEL,
+                  fontWeight: 600
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+            {['All', 'workspace', 'domains', 'hosting'].map(catId => {
+              const label = catId === 'All' ? 'All Questions' : 
+                            catId === 'workspace' ? 'Google Workspace' : 
+                            catId === 'domains' ? 'Domains' : 'Hosting & SSL';
+              const icon = catId === 'All' ? '✨' : 
+                           catId === 'workspace' ? '🏢' : 
+                           catId === 'domains' ? '🌐' : '🔒';
+              const isActive = activeCategory === catId;
+              return (
+                <button
+                  key={catId}
+                  onClick={() => setActiveCategory(catId)}
+                  style={{
+                    padding: '10px 18px',
+                    borderRadius: 99,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: '1px solid',
+                    borderColor: isActive ? T : '#e2e8f0',
+                    background: isActive ? T : '#fff',
+                    color: isActive ? '#fff' : INKL,
+                    transition: 'all 0.15s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    boxShadow: isActive ? '0 4px 12px rgba(15,118,110,0.15)' : 'none'
+                  }}
+                >
+                  <span>{icon}</span> {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {filteredCategories.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px 0', border: '1px dashed #e2e8f0', borderRadius: 16 }}>
+            <span style={{ fontSize: 32 }}>🔍</span>
+            <h4 style={{ margin: '12px 0 4px', fontSize: 16, fontWeight: 700, color: INKL }}>No answers found</h4>
+            <p style={{ margin: 0, fontSize: 14, color: MUTEL }}>Try searching for another keyword or phrase.</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            {filteredCategories.map(category => (
+              <div key={category.id} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <h3 style={{ fontSize: 18, fontWeight: 800, color: T, display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0 4px' }}>
+                  <span>{category.icon}</span> {category.title}
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {category.questions.map((item, qIdx) => {
+                    const isExpanded = !!expandedItems[`${category.id}-${qIdx}`];
+                    return (
+                      <div 
+                        key={qIdx} 
+                        className="faq-card-interactive"
+                        style={{
+                          background: '#fff',
+                          borderRadius: 12,
+                          border: '1px solid',
+                          borderColor: isExpanded ? T : '#e2e8f0',
+                          boxShadow: isExpanded ? '0 4px 18px rgba(15,118,110,0.03)' : '0 1px 2px rgba(0,0,0,0.01)',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <button
+                          onClick={() => toggleItem(category.id, qIdx)}
+                          className="px-5 py-4 sm:px-6 sm:py-5"
+                          style={{
+                            width: '100%',
+                            background: 'none',
+                            border: 'none',
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: 16
+                          }}
+                        >
+                          <span style={{ fontSize: 15, fontWeight: 700, color: isExpanded ? T : INKL, lineHeight: 1.4 }}>
+                            {item.q}
+                          </span>
+                          <span style={{
+                            fontSize: 18,
+                            color: isExpanded ? T : MUTEL,
+                            transform: isExpanded ? 'rotate(45deg)' : 'rotate(0deg)',
+                            transition: 'transform 0.2s ease-in-out',
+                            fontWeight: 300,
+                            flexShrink: 0
+                          }}>
+                            ＋
+                          </span>
+                        </button>
+                        
+                        <div style={{
+                          maxHeight: isExpanded ? 500 : 0,
+                          opacity: isExpanded ? 1 : 0,
+                          overflow: 'hidden',
+                          transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                          borderTop: isExpanded ? '1px solid #f1f5f9' : '1px solid transparent'
+                        }}>
+                          <div className="px-5 py-4 sm:px-6 sm:py-5" style={{ fontSize: 14, color: MUTEL, lineHeight: 1.6, background: '#fcfdfd' }}>
+                            {item.a}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+      </div>
+    </section>
+  );
+};
+
+
+// ==================== WORKSPACE PLANS COST CALCULATOR ====================
+const WorkspaceCalculator = ({ plans, T, TD, INKL, MUTEL }) => {
+  const fallbackPlans = [
+    { id: 'starter', name: 'Business Starter', monthlyPrice: 7.20, features: ['Custom secure business email', '100-participant video meetings', '30 GB pooled storage per user', 'Security and management controls'] },
+    { id: 'standard', name: 'Business Standard', monthlyPrice: 14.40, features: ['Custom secure email', '150-participant video meetings + recording', '2 TB pooled storage per user', 'Upgrade Support'] },
+    { id: 'plus', name: 'Business Plus', monthlyPrice: 21.60, features: ['Custom secure email', '500-participant video meetings + recording + tracking', '5 TB pooled storage', 'Enhanced Vault Security'] }
+  ];
+
+  const activePlans = plans && plans.length > 0 ? plans : fallbackPlans;
+  const [selectedPlanId, setSelectedPlanId] = useState(activePlans[0]?.id || 'starter');
+  const [userCount, setUserCount] = useState(5);
+  const [billingCycle, setBillingCycle] = useState('annual'); // 'monthly' | 'annual'
+  
+  // Optional additions
+  const [includeDomain, setIncludeDomain] = useState(false);
+  const [includeVoice, setIncludeVoice] = useState(false);
+  const [includeMigration, setIncludeMigration] = useState(false);
+
+  const selectedPlan = activePlans.find(p => p.id === selectedPlanId) || activePlans[0];
+  
+  // Pricing math
+  const basePricePerUser = Number(selectedPlan?.monthlyPrice || 7.20);
+  // Annual subscription gets 10% discount on seat licensing
+  const licensePrice = billingCycle === 'annual' ? basePricePerUser * 0.90 : basePricePerUser;
+  
+  const monthlyLicenseTotal = licensePrice * userCount;
+  const voiceTotal = includeVoice ? 10.00 * userCount : 0;
+  
+  // Domain is $12/year, which is $1/month
+  const domainCostMonthly = includeDomain ? 1.00 : 0;
+  
+  // Total recurring monthly cost
+  const totalMonthlyRecurring = monthlyLicenseTotal + voiceTotal + domainCostMonthly;
+  
+  // One-time setup
+  const oneTimeSetupCost = includeMigration ? 49.00 : 0;
+
+  // Yearly calculation
+  const totalYearlyRecurring = totalMonthlyRecurring * 12;
+
+  // Comparison Direct from Google (standard prices are ~15% higher direct with no support)
+  const directGoogleLicensePrice = basePricePerUser * 1.15;
+  const directGoogleMonthlyTotal = (directGoogleLicensePrice * userCount) + (includeVoice ? 12.00 * userCount : 0) + (includeDomain ? 1.25 : 0);
+  const directGoogleYearlyTotal = directGoogleMonthlyTotal * 12 + (includeMigration ? 99.00 : 0);
+
+  const estimatedYearlySavings = Math.max(0, directGoogleYearlyTotal - (totalYearlyRecurring + oneTimeSetupCost));
+
+  return (
+    <section id="workspace-calculator-section" className="px-6 py-12 md:px-10 md:py-20" style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+        
+        {/* Header Title */}
+        <div style={{ textAlign: 'center', marginBottom: 48 }}>
+          <div style={{ display: 'inline-block', background: '#f0fdf4', color: '#16a34a', borderRadius: 99, padding: '4px 14px', fontSize: 13, fontWeight: 700, marginBottom: 16 }}>
+            📊 Investment Planner
+          </div>
+          <h2 style={{ fontSize: 36, fontWeight: 800, margin: '0 0 12px', color: INKL }}>
+            Workspace <span style={{ color: T }}>Cost Configurator</span>
+          </h2>
+          <p style={{ fontSize: 16, color: MUTEL, maxWidth: 700, margin: '0 auto', lineHeight: 1.6 }}>
+            Customize your seat licenses, billing cycle, and professional services to calculate your exact pricing and instant reseller savings.
+          </p>
+        </div>
+
+        {/* Interactive Workspace Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
+          
+          {/* Left Column: Interactive Settings (Col span 7) */}
+          <div className="lg:col-span-7" style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+            
+            {/* Step 1: Select Plan */}
+            <div style={{ background: '#f8fafc', padding: 24, borderRadius: 20, border: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: T, textTransform: 'uppercase', letterSpacing: 0.5 }}>Step 1: Choose Workspace Tier</span>
+                <span style={{ fontSize: 12, color: MUTEL, background: '#e2e8f0', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>Active Tier</span>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {activePlans.map(p => {
+                  const isSelected = p.id === selectedPlanId;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setSelectedPlanId(p.id)}
+                      className="faq-card-interactive"
+                      style={{
+                        background: '#fff',
+                        border: isSelected ? `2px solid ${T}` : '1px solid #cbd5e1',
+                        borderRadius: 12,
+                        padding: '16px',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        minHeight: 110,
+                        boxShadow: isSelected ? '0 4px 12px rgba(15,118,110,0.06)' : 'none'
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: 14, color: isSelected ? T : INKL, marginBottom: 4 }}>
+                          {p.name.replace('Google Workspace ', '')}
+                        </div>
+                        <div style={{ fontSize: 11, color: MUTEL, lineHeight: 1.3 }}>
+                          {p.id === 'starter' ? 'Great for small teams' : p.id === 'standard' ? 'Most popular' : 'Enterprise grade'}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: INKL, marginTop: 12 }}>
+                        ${p.monthlyPrice}<span style={{ fontSize: 11, color: MUTEL, fontWeight: 400 }}>/mo</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Step 2: Select Seat Count */}
+            <div style={{ background: '#f8fafc', padding: 24, borderRadius: 20, border: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: T, textTransform: 'uppercase', letterSpacing: 0.5 }}>Step 2: Account Seats (Users)</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button 
+                    onClick={() => setUserCount(prev => Math.max(1, prev - 1))}
+                    style={{ width: 28, height: 28, borderRadius: 99, border: '1px solid #cbd5e1', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', cursor: 'pointer', fontSize: 16 }}
+                  >-</button>
+                  <input 
+                    type="number" 
+                    value={userCount}
+                    min="1"
+                    max="1000"
+                    onChange={e => setUserCount(Math.max(1, parseInt(e.target.value) || 1))}
+                    style={{ width: 56, height: 28, border: '1px solid #cbd5e1', borderRadius: 6, textAlign: 'center', fontSize: 14, fontWeight: 700 }}
+                  />
+                  <button 
+                    onClick={() => setUserCount(prev => Math.min(1000, prev + 1))}
+                    style={{ width: 28, height: 28, borderRadius: 99, border: '1px solid #cbd5e1', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', cursor: 'pointer', fontSize: 16 }}
+                  >+</button>
+                </div>
+              </div>
+
+              {/* Slider Input */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <input 
+                  type="range"
+                  min="1"
+                  max="100"
+                  value={userCount > 100 ? 100 : userCount}
+                  onChange={e => setUserCount(parseInt(e.target.value))}
+                  style={{ flex: 1, accentColor: T, height: 6, borderRadius: 3, cursor: 'pointer' }}
+                />
+                <span style={{ fontSize: 13, color: MUTEL, fontWeight: 600, minWidth: 60, textAlign: 'right' }}>
+                  {userCount} {userCount === 1 ? 'Seat' : 'Seats'}
+                </span>
+              </div>
+            </div>
+
+            {/* Step 3: Billing Cycle & Optional Add-ons */}
+            <div style={{ background: '#f8fafc', padding: 24, borderRadius: 20, border: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: T, textTransform: 'uppercase', letterSpacing: 0.5 }}>Step 3: Billing & Bundles</span>
+                
+                {/* Switcher Toggle */}
+                <div style={{ display: 'inline-flex', background: '#e2e8f0', padding: 3, borderRadius: 99 }}>
+                  <button
+                    type="button"
+                    onClick={() => setBillingCycle('monthly')}
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      borderRadius: 99,
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: billingCycle === 'monthly' ? T : 'transparent',
+                      color: billingCycle === 'monthly' ? '#fff' : INKL,
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    Monthly
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBillingCycle('annual')}
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      borderRadius: 99,
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: billingCycle === 'annual' ? T : 'transparent',
+                      color: billingCycle === 'annual' ? '#fff' : INKL,
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    Annual (-10%)
+                  </button>
+                </div>
+              </div>
+
+              {/* Addons List checkboxes */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer', userSelect: 'none' }}>
+                  <input 
+                    type="checkbox"
+                    checked={includeDomain}
+                    onChange={e => setIncludeDomain(e.target.checked)}
+                    style={{ width: 18, height: 18, accentColor: T, marginTop: 3 }}
+                  />
+                  <div>
+                    <strong style={{ fontSize: 14, color: INKL, display: 'block' }}>Add New Custom Domain (+$12/year)</strong>
+                    <span style={{ fontSize: 12, color: MUTEL }}>Check and register a new domain with instant DNS Workspace provisioning link.</span>
+                  </div>
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer', userSelect: 'none' }}>
+                  <input 
+                    type="checkbox"
+                    checked={includeVoice}
+                    onChange={e => setIncludeVoice(e.target.checked)}
+                    style={{ width: 18, height: 18, accentColor: T, marginTop: 3 }}
+                  />
+                  <div>
+                    <strong style={{ fontSize: 14, color: INKL, display: 'block' }}>Add Google Voice lines (+$10/user/mo)</strong>
+                    <span style={{ fontSize: 12, color: MUTEL }}>Add cloud-based phone lines, business SMS, and intelligent auto-attendants.</span>
+                  </div>
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer', userSelect: 'none' }}>
+                  <input 
+                    type="checkbox"
+                    checked={includeMigration}
+                    onChange={e => setIncludeMigration(e.target.checked)}
+                    style={{ width: 18, height: 18, accentColor: T, marginTop: 3 }}
+                  />
+                  <div>
+                    <strong style={{ fontSize: 14, color: INKL, display: 'block' }}>Certified Email Migration Support (+$49 Flat Fee)</strong>
+                    <span style={{ fontSize: 12, color: MUTEL }}>Full setup assistance: migration of old IMAP/cPanel emails, SPF, DKIM, DMARC alignment.</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Right Column: Cost Breakdown Receipt (Col span 5) */}
+          <div className="lg:col-span-5">
+            <div style={{
+              background: '#0F2C24', // Deep luxurious green matching GNB branding
+              borderRadius: 24,
+              padding: '30px',
+              color: '#fff',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              boxShadow: '0 12px 30px rgba(15,118,110,0.15)',
+              border: '1px solid rgba(255,255,255,0.08)'
+            }}>
+              <div>
+                <h3 style={{ margin: '0 0 16px', fontSize: 20, fontWeight: 800, borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span>🧾</span> Reseller Setup Quote
+                </h3>
+
+                {/* Selected Details Breakdown */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, fontSize: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#a3b8b1' }}>Plan Subtotal ({userCount} seats):</span>
+                    <strong style={{ fontWeight: 700 }}>${(monthlyLicenseTotal).toFixed(2)}/mo</strong>
+                  </div>
+
+                  {includeVoice && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#a3b8b1' }}>Google Voice integration:</span>
+                      <strong style={{ fontWeight: 700 }}>${voiceTotal.toFixed(2)}/mo</strong>
+                    </div>
+                  )}
+
+                  {includeDomain && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#a3b8b1' }}>Custom Domain configuration:</span>
+                      <strong style={{ fontWeight: 700 }}>$1.00/mo</strong>
+                    </div>
+                  )}
+
+                  {includeMigration && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed rgba(255,255,255,0.1)', paddingTop: 10 }}>
+                      <span style={{ color: '#a3b8b1' }}>One-time Setup Support:</span>
+                      <strong style={{ fontWeight: 700, color: '#f59e0b' }}>$49.00 flat</strong>
+                    </div>
+                  )}
+
+                  {/* Pricing Switcher Summary */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12 }}>
+                    <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Billing Cycle:</span>
+                    <span style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: 6, fontSize: 11, textTransform: 'uppercase', fontWeight: 800, letterSpacing: 0.5 }}>
+                      {billingCycle} billing
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Total Summary Block */}
+              <div style={{ marginTop: 28 }}>
+                
+                {/* Savings Panel */}
+                {estimatedYearlySavings > 0 && (
+                  <div style={{
+                    background: 'rgba(16,185,129,0.15)',
+                    border: '1px solid rgba(16,185,129,0.3)',
+                    padding: '12px 16px',
+                    borderRadius: 14,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    marginBottom: 20
+                  }}>
+                    <span style={{ fontSize: 20 }}>💰</span>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#34d399' }}>Reseller Bundle Discount</div>
+                      <div style={{ fontSize: 11, color: '#cbd5e1' }}>Save ${estimatedYearlySavings.toFixed(2)}/year compared to direct Google list price.</div>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 18, marginBottom: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: '#cbd5e1' }}>Total Recurring:</span>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: 36, fontWeight: 800, color: '#fff', lineHeight: 1 }}>
+                        ${totalMonthlyRecurring.toFixed(2)}<span style={{ fontSize: 14, fontWeight: 400, color: '#cbd5e1' }}>/mo</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: '#a3b8b1', marginTop: 4 }}>
+                        or ${(totalYearlyRecurring).toFixed(2)} per year
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action CTA */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const params = `?plan=${selectedPlanId}&seats=${userCount}&cycle=${billingCycle}&domain=${includeDomain ? '1' : '0'}&voice=${includeVoice ? '1' : '0'}`;
+                    window.location.href = `/register${params}`;
+                  }}
+                  style={{
+                    width: '100%',
+                    background: '#22c55e', // Vibrant premium success green
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 14,
+                    padding: '16px',
+                    fontSize: 16,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    boxShadow: '0 4px 14px rgba(34,197,94,0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8
+                  }}
+                  className="hover:opacity-90"
+                >
+                  🚀 Instant Provision Now
+                </button>
+                <p style={{ margin: '10px 0 0 0', textAlign: 'center', fontSize: 11, color: '#a3b8b1' }}>
+                  No setup commitment. Cancel or upgrade seats anytime.
+                </p>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+  );
+};
+
+
+// ==================== CLIENT SUCCESS STORIES SECTION ====================
+const SuccessStoriesSection = ({ brand, T, INKL, MUTEL }) => {
+  const [activeIndustry, setActiveIndustry] = useState('All');
+  const [userStories, setUserStories] = useState(() => {
+    try {
+      const stored = localStorage.getItem('gnb_customer_success_stories');
+      return stored ? JSON.parse(stored) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  const defaultStories = [
+    {
+      id: 'ds-1',
+      name: 'Sarah Jenkins',
+      role: 'Founder & CEO',
+      company: 'Apex Digital Agency',
+      industry: 'Professional Services',
+      rating: 5,
+      quote: "Switching our company's emails and collaboration tools to Google Workspace through GNB Mentor was completely seamless. They configured all DNS settings, SPF, DKIM, and DMARC correctly, and our email deliverability increased dramatically. Best reseller service out there!",
+      date: 'June 2026',
+      avatarColor: '#0F766E',
+      verified: true
+    },
+    {
+      id: 'ds-2',
+      name: 'Mohammed Al-Fayed',
+      role: 'Operations Director',
+      company: 'Scribe Logistics',
+      industry: 'Local Business',
+      rating: 5,
+      quote: "Our domain transfers and SSL certifications were handled perfectly. The automated provisioning with Google Workspace saved us hours of back-and-forth. The dashboard interface is intuitive, and our staff logins were set up in a flash.",
+      date: 'May 2026',
+      avatarColor: '#D97706',
+      verified: true
+    },
+    {
+      id: 'ds-3',
+      name: 'Elena Rostova',
+      role: 'Co-Founder',
+      company: 'NovaWear Co.',
+      industry: 'E-commerce',
+      rating: 5,
+      quote: "Setting up custom professional business emails for our store support staff was a high-priority task. GNB Mentor made it incredibly simple, from domain registration to security policies setup. Excellent customer service!",
+      date: 'April 2026',
+      avatarColor: '#2563EB',
+      verified: true
+    },
+    {
+      id: 'ds-4',
+      name: 'David Carter',
+      role: 'IT Administrator',
+      company: 'Fintech Spark',
+      industry: 'Tech Startup',
+      rating: 5,
+      quote: "The migration of over 50 legacy cPanel mailboxes to Google Workspace was a massive undertaking, but the reseller portal technical support team did it with zero downtime. Clean process, absolute professionals.",
+      date: 'March 2026',
+      avatarColor: '#7C3AED',
+      verified: true
+    }
+  ];
+
+  const allStories = [...userStories, ...defaultStories];
+
+  // Submission form states
+  const [formName, setFormName] = useState('');
+  const [formCompany, setFormCompany] = useState('');
+  const [formRole, setFormRole] = useState('');
+  const [formIndustry, setFormIndustry] = useState('Professional Services');
+  const [formRating, setFormRating] = useState(5);
+  const [formQuote, setFormQuote] = useState('');
+  const [formStatus, setFormStatus] = useState({ type: '', message: '' });
+  const [hoverRating, setHoverRating] = useState(0);
+
+  const handleSubmitStory = (e) => {
+    e.preventDefault();
+    setFormStatus({ type: '', message: '' });
+
+    const name = formName.trim();
+    const company = formCompany.trim();
+    const role = formRole.trim() || 'Business Owner';
+    const quote = formQuote.trim();
+
+    if (!name) {
+      setFormStatus({ type: 'error', message: '⚠️ Please enter your name.' });
+      return;
+    }
+    if (!company) {
+      setFormStatus({ type: 'error', message: '⚠️ Please enter your company name.' });
+      return;
+    }
+    if (!quote) {
+      setFormStatus({ type: 'error', message: '⚠️ Please write a brief success story or comment.' });
+      return;
+    }
+    if (quote.length < 15) {
+      setFormStatus({ type: 'error', message: '⚠️ Please write a success story of at least 15 characters.' });
+      return;
+    }
+
+    const newStory = {
+      id: `us-${Date.now()}`,
+      name,
+      role,
+      company,
+      industry: formIndustry,
+      rating: formRating,
+      quote,
+      date: 'Just Now',
+      avatarColor: '#0D9488',
+      verified: true
+    };
+
+    const updatedStories = [newStory, ...userStories];
+    setUserStories(updatedStories);
+    try {
+      localStorage.setItem('gnb_customer_success_stories', JSON.stringify(updatedStories));
+    } catch (err) {
+      console.error('Failed to save story to localStorage:', err);
+    }
+
+    // Reset form
+    setFormName('');
+    setFormCompany('');
+    setFormRole('');
+    setFormQuote('');
+    setFormRating(5);
+    setFormStatus({ type: 'success', message: '🎉 Thank you! Your success story has been submitted and added to the wall!' });
+  };
+
+  const industries = ['All', 'Professional Services', 'E-commerce', 'Tech Startup', 'Local Business'];
+
+  const filteredStories = allStories.filter(story => 
+    activeIndustry === 'All' || story.industry === activeIndustry
+  );
+
+  return (
+    <section id="success-stories-section" className="px-6 py-12 md:px-10 md:py-20" style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+      <style>{`
+        .stat-card-interactive {
+          transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+          will-change: transform, box-shadow;
+        }
+        .stat-card-interactive:hover {
+          transform: translateY(-4px) !important;
+          box-shadow: 0 12px 24px rgba(0,0,0,0.04) !important;
+          border-color: ${T} !important;
+        }
+        .success-card-interactive {
+          transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+          will-change: transform, box-shadow;
+        }
+        .success-card-interactive:hover {
+          transform: translateY(-6px) !important;
+          box-shadow: 0 20px 32px rgba(15,118,110,0.06), 0 8px 16px rgba(15,118,110,0.03) !important;
+          border-color: ${T} !important;
+        }
+      `}</style>
+      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+        
+        {/* Header Block */}
+        <div style={{ textAlign: 'center', marginBottom: 48 }}>
+          <div style={{ display: 'inline-block', background: '#e0f2fe', color: '#0369a1', borderRadius: 99, padding: '4px 14px', fontSize: 13, fontWeight: 700, marginBottom: 16 }}>
+            🤝 Customer Success Stories
+          </div>
+          <h2 style={{ fontSize: 36, fontWeight: 800, margin: '0 0 12px', color: INKL }}>
+            Powering business setup <span style={{ color: T }}>worldwide</span>
+          </h2>
+          <p style={{ fontSize: 16, color: MUTEL, maxWidth: 700, margin: '0 auto', lineHeight: 1.6 }}>
+            See how forward-thinking companies established their professional presence, protected domains, and elevated collaboration with our Google Workspace provisioning.
+          </p>
+        </div>
+
+        {/* Social Proof Highlight Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center" style={{ marginBottom: 48 }}>
+          <div className="stat-card-interactive" style={{ background: '#fff', padding: '24px 16px', borderRadius: 16, border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.01)' }}>
+            <div style={{ fontSize: 32, fontWeight: 800, color: T }}>4.9/5</div>
+            <div style={{ fontSize: 13, color: MUTEL, marginTop: 4, fontWeight: 600 }}>★★★★★ Rating</div>
+          </div>
+          <div className="stat-card-interactive" style={{ background: '#fff', padding: '24px 16px', borderRadius: 16, border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.01)' }}>
+            <div style={{ fontSize: 32, fontWeight: 800, color: T }}>10k+</div>
+            <div style={{ fontSize: 13, color: MUTEL, marginTop: 4, fontWeight: 600 }}>Users Provisioned</div>
+          </div>
+          <div className="stat-card-interactive" style={{ background: '#fff', padding: '24px 16px', borderRadius: 16, border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.01)' }}>
+            <div style={{ fontSize: 32, fontWeight: 800, color: T }}>99.9%</div>
+            <div style={{ fontSize: 13, color: MUTEL, marginTop: 4, fontWeight: 600 }}>Uptime & Delivery</div>
+          </div>
+          <div className="stat-card-interactive" style={{ background: '#fff', padding: '24px 16px', borderRadius: 16, border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.01)' }}>
+            <div style={{ fontSize: 32, fontWeight: 800, color: T }}>1-Hr</div>
+            <div style={{ fontSize: 13, color: MUTEL, marginTop: 4, fontWeight: 600 }}>Average DNS Setup</div>
+          </div>
+        </div>
+
+        {/* Industry Filter Tabs */}
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 36 }}>
+          {industries.map(ind => {
+            const isActive = activeIndustry === ind;
+            return (
+              <button
+                key={ind}
+                onClick={() => setActiveIndustry(ind)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 99,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  border: '1px solid',
+                  borderColor: isActive ? T : '#cbd5e1',
+                  background: isActive ? T : '#fff',
+                  color: isActive ? '#fff' : INKL,
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                {ind === 'All' ? '🌐 All Industries' : ind}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Success Stories Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6" style={{ marginBottom: 54 }}>
+          {filteredStories.map((story) => (
+            <div 
+              key={story.id}
+              style={{
+                background: '#fff',
+                borderRadius: 20,
+                border: '1px solid #e2e8f0',
+                padding: '30px',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.015)',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                position: 'relative',
+              }}
+              className="success-card-interactive"
+            >
+              <div>
+                {/* Upper card Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  {/* Rating Stars */}
+                  <div style={{ display: 'flex', gap: 2 }}>
+                    {[...Array(5)].map((_, i) => (
+                      <span key={i} style={{ color: i < story.rating ? '#eab308' : '#e2e8f0', fontSize: 18 }}>★</span>
+                    ))}
+                  </div>
+                  {/* Verified Badge */}
+                  {story.verified && (
+                    <span style={{
+                      background: '#ecfdf5',
+                      color: '#047857',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: '3px 8px',
+                      borderRadius: 99,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}>
+                      ✓ Verified Setup
+                    </span>
+                  )}
+                </div>
+
+                {/* Quote Text */}
+                <p style={{ fontSize: 15, color: INKL, lineHeight: 1.6, fontStyle: 'italic', margin: '0 0 20px 0' }}>
+                  "{story.quote}"
+                </p>
+              </div>
+
+              {/* Author Info */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, borderTop: '1px solid #f1f5f9', paddingTop: 16 }}>
+                <div style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 99,
+                  background: story.avatarColor || T,
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 700,
+                  fontSize: 16
+                }}>
+                  {story.name ? story.name[0].toUpperCase() : 'U'}
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: INKL }}>{story.name}</h4>
+                  <p style={{ margin: 0, fontSize: 12, color: MUTEL }}>
+                    {story.role}, <span style={{ fontWeight: 600, color: '#475569' }}>{story.company}</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Quotes watermark icon */}
+              <span style={{
+                position: 'absolute',
+                right: 24,
+                bottom: 24,
+                fontSize: 60,
+                color: '#f1f5f9',
+                pointerEvents: 'none',
+                fontFamily: 'serif',
+                lineHeight: 1,
+                userSelect: 'none',
+                opacity: 0.6
+              }}>
+                ”
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* Share Your Story Form Form */}
+        <div style={{
+          background: '#fff',
+          borderRadius: 24,
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.02)',
+          maxWidth: 800,
+          margin: '0 auto',
+          overflow: 'hidden'
+        }}>
+          <div className="p-6 sm:p-10">
+            <div style={{ textAlign: 'center', marginBottom: 24 }}>
+              <h3 style={{ margin: '0 0 8px', fontSize: 22, fontWeight: 800, color: INKL }}>Share Your Setup Success Story</h3>
+              <p style={{ color: MUTEL, margin: 0, fontSize: 14, lineHeight: 1.5 }}>
+                Already set up your domain or Google Workspace with us? Share your experience with our prospective clients! Your feedback helps us keep improving.
+              </p>
+            </div>
+
+            {formStatus.message && (
+              <div style={{
+                padding: '12px 16px',
+                borderRadius: 12,
+                fontSize: 14,
+                fontWeight: 600,
+                marginBottom: 20,
+                background: formStatus.type === 'success' ? '#ecfdf5' : '#fef2f2',
+                color: formStatus.type === 'success' ? '#047857' : '#b91c1c',
+                border: '1px solid',
+                borderColor: formStatus.type === 'success' ? '#a7f3d0' : '#fca5a5'
+              }}>
+                {formStatus.message}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmitStory} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Your Name *</label>
+                  <input
+                    type="text"
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                    placeholder="e.g. Robert Vance"
+                    style={{
+                      height: 44,
+                      borderRadius: 10,
+                      border: '1px solid #d8dbe6',
+                      padding: '0 14px',
+                      fontSize: 14,
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Company Name *</label>
+                  <input
+                    type="text"
+                    value={formCompany}
+                    onChange={(e) => setFormCompany(e.target.value)}
+                    placeholder="e.g. Vance Refrigeration"
+                    style={{
+                      height: 44,
+                      borderRadius: 10,
+                      border: '1px solid #d8dbe6',
+                      padding: '0 14px',
+                      fontSize: 14,
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Your Role / Title</label>
+                  <input
+                    type="text"
+                    value={formRole}
+                    onChange={(e) => setFormRole(e.target.value)}
+                    placeholder="e.g. IT Director"
+                    style={{
+                      height: 44,
+                      borderRadius: 10,
+                      border: '1px solid #d8dbe6',
+                      padding: '0 14px',
+                      fontSize: 14,
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Industry</label>
+                  <select
+                    value={formIndustry}
+                    onChange={(e) => setFormIndustry(e.target.value)}
+                    style={{
+                      height: 44,
+                      borderRadius: 10,
+                      border: '1px solid #d8dbe6',
+                      padding: '0 10px',
+                      fontSize: 14,
+                      outline: 'none',
+                      background: '#fff'
+                    }}
+                  >
+                    <option value="Professional Services">Professional Services</option>
+                    <option value="E-commerce">E-commerce</option>
+                    <option value="Tech Startup">Tech Startup</option>
+                    <option value="Local Business">Local Business</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Overall Rating</label>
+                  <div style={{ display: 'flex', alignItems: 'center', height: 44, gap: 4 }}>
+                    {[1, 2, 3, 4, 5].map((star) => {
+                      const isGold = hoverRating ? star <= hoverRating : star <= formRating;
+                      return (
+                        <button
+                          key={star}
+                          type="button"
+                          onClick={() => setFormRating(star)}
+                          onMouseEnter={() => setHoverRating(star)}
+                          onMouseLeave={() => setHoverRating(0)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontSize: 22,
+                            padding: '0 2px',
+                            color: isGold ? '#eab308' : '#e2e8f0',
+                            transition: 'color 0.1s ease',
+                            display: 'inline-flex',
+                            alignItems: 'center'
+                          }}
+                        >
+                          ★
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Your Story / Quote *</label>
+                <textarea
+                  value={formQuote}
+                  onChange={(e) => setFormQuote(e.target.value)}
+                  placeholder="Tell us about your experience (e.g., DNS settings setup, speed of email provisioning, migration support)..."
+                  rows={3}
+                  style={{
+                    borderRadius: 10,
+                    border: '1px solid #d8dbe6',
+                    padding: '12px 14px',
+                    fontSize: 14,
+                    outline: 'none',
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                style={{
+                  background: T,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 12,
+                  padding: '14px',
+                  fontSize: 15,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  marginTop: 8,
+                  transition: 'background 0.2s',
+                  boxShadow: '0 4px 12px rgba(15,118,110,0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8
+                }}
+              >
+                📝 Submit Success Story
+              </button>
+            </form>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  );
+};
+
+
 // ==================== PUBLIC LANDING PAGE ====================
 const LandingPage = () => {
   const brand = useBranding();
@@ -5023,13 +6494,77 @@ const LandingPage = () => {
   const [dResult, setDResult] = useState(null);
   const [dLoading, setDLoading] = useState(false);
   const [dError, setDError] = useState('');
+
+  // Lead Generation state variables
+  const [leadForm, setLeadForm] = useState({
+    fullName: '',
+    email: '',
+    phone: '',
+    businessName: '',
+    domain: '',
+    message: '',
+  });
+  const [selectedServices, setSelectedServices] = useState([]);
+  const [submittingLead, setSubmittingLead] = useState(false);
+  const [leadStatus, setLeadStatus] = useState({ success: false, message: '' });
+
+  const toggleService = (srv) => {
+    setSelectedServices(prev =>
+      prev.includes(srv) ? prev.filter(s => s !== srv) : [...prev, srv]
+    );
+  };
+
+  const handleLeadSubmit = async (e) => {
+    e.preventDefault();
+    const trimmedName = (leadForm.fullName || '').trim();
+    const trimmedEmail = (leadForm.email || '').trim();
+
+    if (!trimmedName) {
+      setLeadStatus({ success: false, message: '⚠️ Please enter your full name.' });
+      return;
+    }
+
+    if (!trimmedEmail) {
+      setLeadStatus({ success: false, message: '⚠️ Please enter your business email address.' });
+      return;
+    }
+
+    // Email format validation regex
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      setLeadStatus({ success: false, message: '⚠️ Please enter a valid email address (e.g. name@company.com).' });
+      return;
+    }
+
+    setSubmittingLead(true);
+    setLeadStatus({ success: false, message: '' });
+    try {
+      const res = await axios.post(`${API_URL}/public/leads`, {
+        ...leadForm,
+        fullName: trimmedName,
+        email: trimmedEmail,
+        services: selectedServices,
+      });
+      setLeadStatus({ success: true, message: `🎉 ${res.data.message}` });
+      setLeadForm({ fullName: '', email: '', phone: '', businessName: '', domain: '', message: '' });
+      setSelectedServices([]);
+    } catch (error) {
+      setLeadStatus({
+        success: false,
+        message: error?.response?.data?.error || '⚠️ Something went wrong. Please try again.',
+      });
+    } finally {
+      setSubmittingLead(false);
+    }
+  };
+
   useEffect(() => {
     (async () => {
       try { const res = await axios.get(`${API_URL}/products`); setPlans(res.data.workspace || []); } catch (_) { }
     })();
   }, []);
 
-  const T = '#0F766E', TD = '#115E56', INKL = '#1f2937', MUTEL = '#6b7280';
+  const T = '#0F766E', TD = '#115E56', INKL = '#111827', MUTEL = '#4b5563';
   const go = (p) => { window.location.href = p; };
 
   const searchDomain = async () => {
@@ -5046,105 +6581,106 @@ const LandingPage = () => {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg,#ffffff 0%,#f0f7f5 60%,#eef4fb 100%)', fontFamily: 'Inter, system-ui, sans-serif', color: INKL }}>
+    <div style={{ minHeight: '100vh', background: '#ffffff', fontFamily: 'Geist, sans-serif', color: INKL }}>
       {/* Nav */}
-      <header className="landing-nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 40px', maxWidth: 1200, margin: '0 auto' }}>
+      <header className="landing-nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1.5rem 4rem', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {brand.logoDataUrl
-            ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 44, maxWidth: 200 }} />
+            ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 40, maxWidth: 200 }} />
             : <>
               <div style={{ width: 40, height: 40, borderRadius: 10, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>{(brand.brandName || 'G')[0]}</div>
-              <strong style={{ fontSize: 22, color: T }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
+              <strong style={{ fontSize: 22, color: INKL, fontWeight: 800 }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
             </>}
         </div>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <button onClick={() => go('/login')} style={{ background: 'transparent', border: 'none', color: INKL, fontSize: 16, cursor: 'pointer', padding: '10px 16px' }}>↪ Login</button>
-          <button onClick={() => go('/register')} style={{ background: T, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 20px', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>+ Sign Up</button>
+        <div style={{ display: 'flex', gap: 24, alignItems: 'center' }} className="nav-links-desktop">
+          <a href="#workspace-calculator-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#0f766e]">Workspace Configurator</a>
+          <a href="#setup-services-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#0f766e]">Services</a>
+          <a href="#success-stories-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#0f766e]">Success Stories</a>
+          <div style={{ display: 'flex', gap: 12, marginLeft: 16 }}>
+            <button onClick={() => go('/login')} className="btn btn-outline" style={{ padding: '0.75rem 1.5rem', borderRadius: 12, fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', border: '1px solid rgba(17, 24, 39, 0.08)', background: '#fff', color: INKL, transition: 'all 0.2s' }}>↪ Login</button>
+            <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '0.75rem 1.5rem', borderRadius: 12, fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', background: T, color: '#fff', transition: 'all 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', border: 'none' }}>+ Sign Up</button>
+          </div>
         </div>
       </header>
 
       {/* Hero */}
-      <section className="landing-hero" style={{ display: 'flex', gap: 40, padding: '40px 40px 60px', maxWidth: 1200, margin: '0 auto', flexWrap: 'wrap', alignItems: 'center' }}>
-        <div style={{ flex: 1, minWidth: 320 }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: '#fff', borderRadius: 999, padding: '8px 18px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
+      <section className="landing-hero" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '4rem', maxWidth: 1400, margin: '0 auto', padding: '4rem', alignItems: 'center' }}>
+        <div style={{ minWidth: 320 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: '#f0fdfa', color: '#0f766e', borderRadius: 99, padding: '0.4rem 1rem', fontSize: '0.8rem', fontWeight: 600, marginBottom: '1.5rem' }}>
             <span style={{ display: 'flex', gap: 4 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 99, background: '#3b82f6' }} />
-              <span style={{ width: 8, height: 8, borderRadius: 99, background: '#ef4444' }} />
-              <span style={{ width: 8, height: 8, borderRadius: 99, background: '#f59e0b' }} />
-              <span style={{ width: 8, height: 8, borderRadius: 99, background: '#22c55e' }} />
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6' }} />
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444' }} />
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b' }} />
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e' }} />
             </span>
-            <strong style={{ fontSize: 14 }}>Business email & apps in one place</strong>
+            Business email & apps in one place
           </div>
-          <h1 className="hero-title" style={{ fontSize: 56, lineHeight: 1.05, margin: '0 0 20px', fontWeight: 800 }}>
+          <h1 className="hero-title" style={{ fontSize: 'clamp(3rem, 5vw, 4.5rem)', lineHeight: 0.95, letterSpacing: '-0.04em', margin: '0 0 1.5rem 0', fontWeight: 800 }}>
             Get <span style={{ color: T }}>professional email</span> for your team
           </h1>
-          <p style={{ fontSize: 18, color: MUTEL, lineHeight: 1.6, margin: '0 0 28px', maxWidth: 520 }}>
-            The same Gmail, Calendar, Drive, and Meet experience you know — set up for your company domain. Choose how many mailboxes you need, pay online, and follow simple steps to go live.
+          <p style={{ fontSize: '1.2rem', color: MUTEL, lineHeight: 1.6, margin: '0 0 2.5rem 0', maxWidth: 540 }}>
+            The same Gmail, Meet, and Drive you love, optimized for your domain. 
+            Scale your business infrastructure with enterprise-grade reliability and reseller support.
           </p>
-          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 28 }}>
-            <div style={tag(T)}><span style={{ fontWeight: 700 }}>G</span> Search & Workspace</div>
-            <div style={tag(T)}>📞 Voice & calling</div>
-            <div style={tag(T)}>📧 Gmail, Meet & Drive</div>
-          </div>
-          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-            <button onClick={() => go('/register')} style={{ background: T, color: '#fff', border: 'none', borderRadius: 12, padding: '16px 28px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>See plans & prices ↓</button>
-            <button onClick={() => go('/register')} style={{ background: '#fff', color: INKL, border: '1px solid #e5e7eb', borderRadius: 12, padding: '16px 28px', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>Create a free account</button>
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+            <button onClick={() => {
+              const el = document.getElementById('workspace-calculator-section');
+              if (el) el.scrollIntoView({ behavior: 'smooth' });
+            }} className="btn btn-primary" style={{ padding: '1.1rem 2.2rem', fontSize: '1rem', borderRadius: 12, fontWeight: 600, cursor: 'pointer', background: T, color: '#fff', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.05)' }}>See plans & prices</button>
+            <button onClick={() => go('/register')} className="btn btn-outline" style={{ padding: '1.1rem 2.2rem', fontSize: '1rem', borderRadius: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid rgba(17, 24, 39, 0.08)', background: '#fff', color: INKL }}>Create free account</button>
           </div>
         </div>
 
-        {/* What you get card */}
-        <div className="landing-card" style={{ flex: '0 0 440px', background: '#fff', borderRadius: 24, padding: 32, boxShadow: '0 10px 40px rgba(0,0,0,0.08)' }}>
-          <h3 style={{ margin: '0 0 4px', fontSize: 22 }}>What you get</h3>
-          <p style={{ color: MUTEL, margin: '0 0 24px' }}>Popular apps for work — explained in plain English.</p>
+        {/* Card Preview */}
+        <div className="card-preview" style={{ background: '#fff', border: '1px solid rgba(17, 24, 39, 0.08)', borderRadius: 24, padding: '2.5rem', boxShadow: '0 20px 50px rgba(0,0,0,0.05)', position: 'relative' }}>
+          <h3 style={{ fontSize: '1.4rem', marginTop: 0, marginBottom: '1.5rem', fontWeight: 800 }}>What's Included</h3>
           {[
-            ['📧', 'Gmail', 'on your own domain — like you@yourbusiness.com'],
-            ['🎥', 'Google Meet', 'for video meetings with teammates and clients'],
-            ['📁', 'Drive', 'to store and share files, plus Calendar to stay organized'],
+            ['📧', 'Custom Business Email', 'Build instant trust with address@yourcompany.com'],
+            ['🎥', 'Enterprise Meetings', 'Google Meet for high-def team & client collaboration'],
+            ['📁', 'Cloud Ecosystem', 'Drive, Docs, Sheets, and Calendar synced across devices'],
           ].map(([ic, t, d], i) => (
-            <div key={i} style={{ display: 'flex', gap: 14, marginBottom: 18 }}>
-              <div style={{ width: 40, height: 40, borderRadius: 10, background: '#f0f7f5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>{ic}</div>
-              <div><strong>{t}</strong> <span style={{ color: MUTEL }}>{d}</span></div>
+            <div key={i} className="benefit-item" style={{ display: 'flex', gap: '1.2rem', marginBottom: i === 2 ? 0 : '1.5rem' }}>
+              <div className="benefit-icon" style={{ width: 48, height: 48, background: '#f9fafb', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0 }}>{ic}</div>
+              <div className="benefit-text">
+                <h4 style={{ margin: '0 0 0.2rem 0', fontSize: '1.1rem', fontWeight: 700, color: INKL }}>{t}</h4>
+                <p style={{ margin: 0, color: MUTEL, fontSize: '0.95rem', lineHeight: 1.4 }}>{d}</p>
+              </div>
             </div>
           ))}
         </div>
       </section>
 
       {/* Business email + domain search */}
-      <section className="landing-band" style={{ background: '#fff', padding: '64px 40px' }}>
-        <div style={{ maxWidth: 820, margin: '0 auto', textAlign: 'center' }}>
-          <h2 style={{ fontSize: 38, margin: '0 0 14px', fontWeight: 800 }}>Get a professional business email</h2>
-          <p style={{ fontSize: 18, color: MUTEL, lineHeight: 1.6, margin: '0 0 28px' }}>
-            Create a custom email address connected to your domain to build instant trust and look credible from the get go.
-          </p>
-          <p style={{ fontWeight: 600, margin: '0 0 14px' }}>Start by finding the right domain — type a name or a full domain</p>
-          <div className="domain-search-row" style={{ display: 'flex', gap: 10, maxWidth: 560, margin: '0 auto' }}>
+      <section className="search-strip" style={{ background: '#f9fafb', borderTop: '1px solid rgba(17, 24, 39, 0.08)', borderBottom: '1px solid rgba(17, 24, 39, 0.08)', padding: '3rem 4rem' }}>
+        <div className="search-container" style={{ maxWidth: 800, margin: '0 auto', textAlign: 'center' }}>
+          <label className="search-label" style={{ fontSize: '0.7rem', fontFamily: 'Geist Mono, monospace', textTransform: 'uppercase', letterSpacing: '0.1em', color: MUTEL, marginBottom: '1rem', display: 'block' }}>Step 1: Secure your identity</label>
+          <h2 style={{ fontSize: '2.2rem', margin: '0 0 1.5rem 0', fontWeight: 800, color: INKL }}>Find your perfect domain</h2>
+          <div className="search-box" style={{ display: 'flex', gap: '0.5rem', background: '#fff', padding: '0.5rem', borderRadius: 16, border: '1px solid rgba(17, 24, 39, 0.08)', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
             <input
               value={dq}
               onChange={e => setDq(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') searchDomain(); }}
-              placeholder="mybusiness  or  mybusiness.com"
-              style={{ flex: 1, height: 52, borderRadius: 12, border: '1px solid #d8dbe6', padding: '0 16px', fontSize: 16 }}
+              placeholder="yourbusiness.com"
+              style={{ flex: 1, border: 'none', padding: '0 1rem', fontSize: '1rem', outline: 'none' }}
             />
-            <button onClick={searchDomain} disabled={dLoading}
-              style={{ background: T, color: '#fff', border: 'none', borderRadius: 12, padding: '0 28px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>
-              {dLoading ? 'Searching…' : 'Search'}
+            <button onClick={searchDomain} disabled={dLoading} className="btn btn-primary" style={{ padding: '0 2rem', borderRadius: 12, fontWeight: 600, cursor: 'pointer', background: T, color: '#fff', border: 'none' }}>
+              {dLoading ? 'Searching...' : 'Search Domains'}
             </button>
           </div>
-          {dError && <div style={{ color: '#b42318', marginTop: 12 }}>{dError}</div>}
+          {dError && <div style={{ color: '#ef4444', marginTop: 14, fontWeight: 600, fontSize: 14 }}>{dError}</div>}
           {dResult && dResult.results && (
             <div style={{ marginTop: 20, maxWidth: 560, margin: '20px auto 0' }}>
               {dResult.results.map((r, i) => (
                 <div key={i} style={{ background: r.available ? '#f0f7f5' : '#fafafa', borderRadius: 12, padding: '14px 18px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, opacity: r.available ? 1 : 0.65 }}>
                   <div style={{ textAlign: 'left' }}>
-                    <span style={{ fontSize: 16, fontWeight: 700 }}>{r.domain}</span>
+                    <span style={{ fontSize: 16, fontWeight: 700, color: INKL }}>{r.domain}</span>
                     {r.isPremium && <span style={{ marginLeft: 8, fontSize: 11, background: '#fde68a', color: '#92600a', padding: '2px 8px', borderRadius: 999 }}>Premium</span>}
                     <div style={{ color: r.available ? '#166534' : '#b45309', fontWeight: 600, fontSize: 13 }}>{r.available ? '✓ Available' : '✗ Taken'}</div>
                   </div>
                   {r.available && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <strong style={{ fontSize: 18, color: T }}>{r.price != null ? `$${Number(r.price).toFixed(2)}/yr` : ''}</strong>
-                      <button onClick={() => go('/register')}
-                        style={{ background: T, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>
+                      <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '10px 18px', borderRadius: 10, fontWeight: 700, cursor: 'pointer', background: T, color: '#fff', border: 'none' }}>
                         Get started
                       </button>
                     </div>
@@ -5157,26 +6693,258 @@ const LandingPage = () => {
       </section>
 
       {/* Plans */}
-      <section style={{ padding: '20px 40px 80px', maxWidth: 1200, margin: '0 auto' }}>
-        <h2 style={{ fontSize: 36, textAlign: 'center', margin: '0 0 8px' }}>Plans & prices</h2>
-        <p style={{ textAlign: 'center', color: MUTEL, margin: '0 0 40px' }}>Pick the Workspace plan that fits your team.</p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 24 }}>
+      <section className="pricing-section" style={{ padding: '5rem 4rem', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
+        <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
+          <h2 style={{ fontSize: '2.8rem', fontWeight: 800, margin: '0 0 1rem 0', color: INKL }}>Ready to scale?</h2>
+          <p style={{ color: MUTEL, fontSize: '1.1rem' }}>Choose the workspace tier that fits your team's current needs.</p>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
           {plans.length === 0 ? (
             <p style={{ textAlign: 'center', color: MUTEL, gridColumn: '1/-1' }}>Loading plans…</p>
-          ) : plans.map((p) => (
-            <div key={p.id} style={{ background: '#fff', borderRadius: 20, padding: 28, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', border: '1px solid #eef2f1' }}>
-              <h3 style={{ margin: '0 0 8px', fontSize: 20 }}>{p.name}</h3>
-              <div style={{ fontSize: 36, fontWeight: 800, color: T }}>${p.monthlyPrice}<span style={{ fontSize: 15, color: MUTEL, fontWeight: 400 }}>/user/mo</span></div>
-              {p.features && (
-                <ul style={{ listStyle: 'none', padding: 0, margin: '18px 0 24px', color: MUTEL }}>
-                  {p.features.slice(0, 5).map((f, i) => <li key={i} style={{ padding: '4px 0' }}>✓ {f}</li>)}
-                </ul>
-              )}
-              <button onClick={() => go('/register')} style={{ width: '100%', background: T, color: '#fff', border: 'none', borderRadius: 12, padding: '14px', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>Get started</button>
-            </div>
-          ))}
+          ) : plans.map((p) => {
+            const isStandard = p.id === 'standard' || p.name.toLowerCase().includes('standard');
+            return (
+              <div key={p.id} className="price-card" style={{
+                background: isStandard ? '#f0fdfa' : '#fff',
+                border: isStandard ? `1.5px solid ${T}` : '1px solid rgba(17, 24, 39, 0.08)',
+                padding: '2rem',
+                borderRadius: 12,
+                transition: 'border-color 0.3s, transform 0.3s',
+                display: 'flex',
+                flexDirection: 'column',
+                boxShadow: isStandard ? '0 10px 25px rgba(15,118,110,0.06)' : 'none'
+              }}>
+                <h3 style={{ fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: MUTEL, margin: '0 0 1rem 0', fontWeight: 700 }}>{p.name.replace('Google Workspace ', '')}</h3>
+                <div style={{ fontSize: '2.5rem', fontWeight: 800, marginBottom: '1.5rem', color: INKL }}>
+                  ${p.monthlyPrice}<span style={{ fontSize: '1rem', fontWeight: 400, color: MUTEL }}>/mo</span>
+                </div>
+                {p.features && (
+                  <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 2rem 0', fontSize: '0.9rem', flexGrow: 1, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {p.features.slice(0, 5).map((f, i) => (
+                      <li key={i} style={{ color: MUTEL, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ color: T, fontWeight: 800 }}>✓</span> {f}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <button onClick={() => go('/register')} className={isStandard ? 'btn btn-primary' : 'btn btn-outline'} style={{
+                  padding: '0.75rem 1.5rem',
+                  borderRadius: 12,
+                  fontWeight: 600,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  border: isStandard ? 'none' : '1px solid rgba(17, 24, 39, 0.08)',
+                  background: isStandard ? T : '#fff',
+                  color: isStandard ? '#fff' : INKL,
+                  width: '100%',
+                  transition: 'all 0.2s'
+                }}>
+                  Choose {p.name.replace('Google Workspace ', '')}
+                </button>
+              </div>
+            );
+          })}
         </div>
       </section>
+
+      {/* Interactive Cost & Plan Calculator Tool */}
+      <WorkspaceCalculator plans={plans} T={T} TD={TD} INKL={INKL} MUTEL={MUTEL} />
+
+      {/* Business Setup Services Lead Gen Form */}
+      <section className="px-6 py-12 md:px-10 md:py-20" style={{ background: '#f8fafc', borderTop: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0' }}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-start" style={{ maxWidth: 1200, margin: '0 auto' }}>
+          
+          {/* Left Side: Services Pitch */}
+          <div>
+            <div style={{ display: 'inline-block', background: '#e0f2fe', color: '#0369a1', borderRadius: 99, padding: '4px 14px', fontSize: 13, fontWeight: 700, marginBottom: 16 }}>
+              🛠️ Business Setup Services
+            </div>
+            <h2 style={{ fontSize: 40, lineHeight: 1.15, fontWeight: 800, margin: '0 0 20px', color: INKL }}>
+              Get your business up &amp; running <span style={{ color: T }}>correctly</span>
+            </h2>
+            <p style={{ fontSize: 17, color: MUTEL, lineHeight: 1.6, margin: '0 0 32px' }}>
+              Setting up Google Workspace, configuring custom domain DNS records (MX, SPF, DKIM, DMARC), securing your website with SSL, and configuring business phones can be tedious. Let our certified setup experts handle everything for you.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {[
+                { title: 'Certified Google Workspace Setup', desc: 'Secure email addresses on your custom domain, custom routing rules, and multi-user team onboarding.', icon: '🏢' },
+                { title: 'DNS & Technical Configuration', desc: 'We configure DNS MX, SPF, DKIM, and DMARC settings to guarantee 100% email deliverability and avoid spam folders.', icon: '⚙️' },
+                { title: 'Google Voice & Business Lines', desc: 'Unified business communication setup for calling, SMS, and custom automated virtual attendants.', icon: '📞' },
+                { title: 'Hosting & Security Provisioning', desc: 'Secure name servers, enterprise-grade SSL certificates, and lightning-fast custom landing page hosting.', icon: '🔒' },
+              ].map((item, idx) => (
+                <div key={idx} style={{ display: 'flex', gap: 16 }}>
+                  <div style={{ width: 44, height: 44, borderRadius: 12, background: '#fff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, boxShadow: '0 1px 2px rgba(0,0,0,0.02)', flexShrink: 0 }}>
+                    {item.icon}
+                  </div>
+                  <div>
+                    <h4 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700, color: INKL }}>{item.title}</h4>
+                    <p style={{ margin: 0, fontSize: 14, color: MUTEL, lineHeight: 1.5 }}>{item.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Right Side: Form Card */}
+          <div className="p-6 sm:p-10" style={{ background: '#fff', borderRadius: 24, border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.03)' }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 800, color: INKL }}>Prospective Client Inquiry</h3>
+            <p style={{ color: MUTEL, margin: '0 0 24px', fontSize: 14, lineHeight: 1.5 }}>Fill out the inquiry form below, select the setup services you require, and our team will get back to you with a customized setup proposal.</p>
+
+            {leadStatus.message && (
+              <div style={{
+                background: leadStatus.success ? '#ecfdf5' : '#fef2f2',
+                color: leadStatus.success ? '#047857' : '#b91c1c',
+                border: `1px solid ${leadStatus.success ? '#a7f3d0' : '#fca5a5'}`,
+                padding: '14px 18px',
+                borderRadius: 12,
+                fontSize: 14,
+                marginBottom: 20,
+                fontWeight: 500,
+              }}>
+                {leadStatus.message}
+              </div>
+            )}
+
+            <form onSubmit={handleLeadSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Full Name *</label>
+                  <input
+                    required
+                    value={leadForm.fullName}
+                    onChange={e => setLeadForm(prev => ({ ...prev, fullName: e.target.value }))}
+                    placeholder="Jane Doe"
+                    style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Business Email *</label>
+                  <input
+                    required
+                    type="email"
+                    value={leadForm.email}
+                    onChange={e => setLeadForm(prev => ({ ...prev, email: e.target.value }))}
+                    placeholder="jane@company.com"
+                    style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Phone Number</label>
+                  <input
+                    value={leadForm.phone}
+                    onChange={e => setLeadForm(prev => ({ ...prev, phone: e.target.value }))}
+                    placeholder="+1 (555) 019-2834"
+                    style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Business Name</label>
+                  <input
+                    value={leadForm.businessName}
+                    onChange={e => setLeadForm(prev => ({ ...prev, businessName: e.target.value }))}
+                    placeholder="Acme Corp"
+                    style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Target Domain or Website (if any)</label>
+                <input
+                  value={leadForm.domain}
+                  onChange={e => setLeadForm(prev => ({ ...prev, domain: e.target.value }))}
+                  placeholder="acme.com"
+                  style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
+                />
+              </div>
+
+              {/* Service Selection Checklist */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Requested Setup Services</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {[
+                    'Google Workspace & Custom Domain Setup',
+                    'Enterprise Security Configuration (DKIM, SPF, DMARC)',
+                    'Google Voice & Business Phone Solutions',
+                    'Corporate Web Hosting & SSL Configuration',
+                    'Complete Turnkey Branding & Logo Setup'
+                  ].map((srv) => {
+                    const isSelected = selectedServices.includes(srv);
+                    return (
+                      <label key={srv} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13, userSelect: 'none' }}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleService(srv)}
+                          style={{ width: 16, height: 16, accentColor: T }}
+                        />
+                        <span style={{ color: isSelected ? INKL : '#4b5563', fontWeight: isSelected ? 600 : 400 }}>{srv}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Project Description / Setup Requirements</label>
+                <textarea
+                  value={leadForm.message}
+                  onChange={e => setLeadForm(prev => ({ ...prev, message: e.target.value }))}
+                  placeholder="Tell us about your team size, expected timeline, and any special configuration requirements..."
+                  style={{ minHeight: 80, borderRadius: 10, border: '1px solid #cbd5e1', padding: 12, fontSize: 14, fontFamily: 'inherit', resize: 'none' }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={submittingLead}
+                style={{
+                  background: submittingLead ? '#0d9488' : T,
+                  opacity: submittingLead ? 0.75 : 1,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 12,
+                  padding: '14px',
+                  fontSize: 16,
+                  fontWeight: 700,
+                  cursor: submittingLead ? 'not-allowed' : 'pointer',
+                  marginTop: 8,
+                  transition: 'all 0.2s ease',
+                  boxShadow: '0 4px 12px rgba(15,118,110,0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 10
+                }}
+              >
+                {submittingLead ? (
+                  <>
+                    <svg className="animate-spin" style={{ width: 18, height: 18 }} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                      <path style={{ opacity: 0.85 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Submitting Inquiry...
+                  </>
+                ) : (
+                  '✉️ Submit Setup Inquiry'
+                )}
+              </button>
+            </form>
+          </div>
+
+        </div>
+      </section>
+
+      {/* Interactive FAQ Section */}
+      <FaqSection brand={brand} T={T} INKL={INKL} MUTEL={MUTEL} />
+
+      {/* Client Success Stories Section */}
+      <SuccessStoriesSection brand={brand} T={T} INKL={INKL} MUTEL={MUTEL} />
 
       {/* CTA band */}
       <section className="landing-band" style={{ background: T, color: '#fff', padding: '64px 40px', textAlign: 'center' }}>
@@ -5189,10 +6957,10 @@ const LandingPage = () => {
       </section>
 
       {/* Footer */}
-      <footer style={{ background: '#10241f', color: '#cbd5d1', padding: '48px 40px 32px' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 40, flexWrap: 'wrap' }}>
+      <footer style={{ background: '#000000', color: 'rgba(255,255,255,0.6)', padding: '4rem' }}>
+        <div style={{ maxWidth: 1400, margin: '0 auto', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '4rem', flexWrap: 'wrap' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '1.5rem' }}>
               {brand.logoDataUrl
                 ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 40, maxWidth: 180, background: '#fff', padding: 6, borderRadius: 8 }} />
                 : <>
@@ -5200,25 +6968,25 @@ const LandingPage = () => {
                   <strong style={{ color: '#fff', fontSize: 18 }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
                 </>}
             </div>
-            <p style={{ maxWidth: 320, lineHeight: 1.6, color: '#9fb4ae' }}>
-              Google Workspace for your domain — simple ordering, secure payment, and support while you get set up.
+            <p style={{ maxWidth: 320, lineHeight: 1.6, color: 'rgba(255,255,255,0.6)', fontSize: '0.9rem' }}>
+              Simplifying infrastructure for modern business. Certified Google Workspace reseller and enterprise setup partners.
             </p>
           </div>
           <div>
-            <div style={{ fontSize: 12, letterSpacing: 1, color: '#7e948e', fontWeight: 700, marginBottom: 14 }}>EXPLORE</div>
+            <div style={{ fontSize: '0.65rem', fontFamily: 'Geist Mono, monospace', letterSpacing: '0.12rem', color: 'rgba(255,255,255,0.4)', fontWeight: 700, marginBottom: '1.5rem', textTransform: 'uppercase' }}>Product</div>
             {[['Plans & pricing', '/register'], ['Why choose us', '/'], ['Create account', '/register'], ['Sign in', '/login']].map(([t, h]) => (
               <div key={t} style={{ marginBottom: 12 }}>
-                <a href={h} style={{ color: '#cbd5d1', textDecoration: 'none' }}>{t}</a>
+                <a href={h} style={{ color: '#fff', textDecoration: 'none', fontSize: '0.9rem' }}>{t}</a>
               </div>
             ))}
           </div>
           <div>
-            <div style={{ fontSize: 12, letterSpacing: 1, color: '#7e948e', fontWeight: 700, marginBottom: 14 }}>ACCOUNT</div>
-            <div style={{ marginBottom: 12 }}><a href="/login" style={{ color: '#cbd5d1', textDecoration: 'none' }}>Customer portal</a></div>
+            <div style={{ fontSize: '0.65rem', fontFamily: 'Geist Mono, monospace', letterSpacing: '0.12rem', color: 'rgba(255,255,255,0.4)', fontWeight: 700, marginBottom: '1.5rem', textTransform: 'uppercase' }}>Account</div>
+            <div style={{ marginBottom: 12 }}><a href="/login" style={{ color: '#fff', textDecoration: 'none', fontSize: '0.9rem' }}>Customer portal</a></div>
           </div>
         </div>
-        <div style={{ maxWidth: 1200, margin: '32px auto 0', paddingTop: 24, borderTop: '1px solid #1e3a33', color: '#7e948e', fontSize: 14 }}>
-          © {new Date().getFullYear()} GNB MENTOR LLC · Google Workspace Reseller
+        <div style={{ maxWidth: 1400, margin: '3rem auto 0', paddingTop: '2rem', borderTop: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.3)', fontSize: '0.75rem' }}>
+          © 2026 {brand.brandName || 'GNB MENTOR LLC'}. All rights reserved. Google Workspace Reseller
         </div>
       </footer>
     </div>
@@ -6024,7 +7792,11 @@ const AdminBrandingSection = () => {
 // Global responsive styles — injected once. Makes the portal adapt to phones/tablets.
 const ResponsiveStyles = () => (
   <style>{`
-    /* ===== Tablet & below ===== */
+    /* ===== Tablets & Desktops under 1024px ===== */
+    @media (max-width: 1024px) {
+      .landing-hero { grid-template-columns: 1fr !important; padding: 3rem 2rem !important; gap: 3rem !important; }
+    }
+    /* ===== Tablet & below (860px) ===== */
     @media (max-width: 860px) {
       /* Customer portal: sidebar becomes a wrapping button row on top */
       .cp-layout { flex-direction: column !important; padding: 14px !important; gap: 14px !important; }
@@ -6037,24 +7809,30 @@ const ResponsiveStyles = () => (
       .sidebar-menu > li { flex: 1 1 auto !important; }
       .dashboard-content { padding: 16px !important; }
       table { display: block !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
-      /* Landing: reduce big paddings, let the card go full width below the text */
-      .landing-nav { padding: 14px 20px !important; flex-wrap: wrap !important; gap: 10px !important; }
-      .landing-hero { padding: 24px 20px 40px !important; gap: 24px !important; }
-      .landing-card { flex: 1 1 100% !important; }
-      .landing-band { padding: 44px 20px !important; }
+      
+      /* Landing Responsive Overrides */
+      .nav-links-desktop > a { display: none !important; }
+      .nav-links-desktop { gap: 10px !important; margin-left: auto !important; }
+      .landing-nav { padding: 1rem 1.5rem !important; }
+      .landing-hero { grid-template-columns: 1fr !important; padding: 2rem 1.5rem !important; gap: 2rem !important; }
+      .card-preview { padding: 1.5rem !important; }
+      .pricing-section { padding: 3rem 1.5rem !important; }
+      .search-strip { padding: 2.5rem 1.5rem !important; }
+      footer { padding: 2.5rem 1.5rem !important; }
+      footer > div { grid-template-columns: 1fr !important; gap: 2.5rem !important; }
     }
     /* ===== Phones ===== */
     @media (max-width: 600px) {
       h1 { font-size: 30px !important; }
       h2 { font-size: 24px !important; }
-      .hero-title { font-size: 32px !important; line-height: 1.1 !important; }
-      .landing-nav { padding: 12px 16px !important; }
-      .landing-hero { padding: 20px 16px 32px !important; }
-      .landing-band { padding: 36px 16px !important; }
-      .landing-card { padding: 22px !important; border-radius: 18px !important; }
+      .hero-title { font-size: 2.2rem !important; line-height: 1.1 !important; }
+      .landing-nav { padding: 1rem !important; }
+      .landing-hero { padding: 1.5rem 1rem !important; gap: 1.5rem !important; }
+      .card-preview { padding: 1.25rem !important; border-radius: 16px !important; }
       /* Search box + button stack on very small screens */
-      .domain-search-row { flex-direction: column !important; }
-      .domain-search-row > * { width: 100% !important; }
+      .search-box { flex-direction: column !important; gap: 0.5rem !important; background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
+      .search-box input { height: 50px !important; border: 1px solid rgba(17, 24, 39, 0.08) !important; border-radius: 12px !important; background: #fff !important; width: 100% !important; padding: 0 1rem !important; }
+      .search-box button { height: 50px !important; border-radius: 12px !important; width: 100% !important; }
     }
     /* ===== Universal niceties ===== */
     img { max-width: 100%; height: auto; }

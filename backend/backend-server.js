@@ -31,10 +31,12 @@ app.use((req, res, next) => {
 });
 
 // ==================== DATABASE CONNECTION ====================
-mongoose.connect(process.env.MONGODB_URI, {
+mongoose.set('bufferCommands', false);
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/workspace-reseller', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-});
+  serverSelectionTimeoutMS: 2000,
+}).catch(err => console.warn('MongoDB not connected — some features may not work: ' + err.message));
 
 mongoose.connection.once('open', () => {
   console.log('✅ MongoDB connected');
@@ -198,6 +200,21 @@ const TicketSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now },
 });
 
+// Lead Schema (Prospective Client Lead Gen)
+const LeadSchema = new mongoose.Schema({
+  fullName: { type: String, required: true },
+  email: { type: String, required: true },
+  phone: String,
+  businessName: String,
+  domain: String,
+  services: [String],
+  message: String,
+  status: { type: String, enum: ['New', 'In Discussion', 'Contacted', 'Qualified', 'Closed'], default: 'New' },
+  notes: String,
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+});
+
 // Models
 const Customer = mongoose.model('Customer', CustomerSchema);
 const Order = mongoose.model('Order', OrderSchema);
@@ -206,6 +223,7 @@ const User = mongoose.model('User', UserSchema);
 const Invoice = mongoose.model('Invoice', InvoiceSchema);
 const Domain = mongoose.model('Domain', DomainSchema);
 const Ticket = mongoose.model('Ticket', TicketSchema);
+const Lead = mongoose.model('Lead', LeadSchema);
 
 // Payment record
 const PaymentSchema = new mongoose.Schema({
@@ -1090,6 +1108,12 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// Endpoint to expose Google Client ID to frontend dynamically
+app.get('/api/auth/google-client-id', (req, res) => {
+  const clientId = process.env.GOOGLE_SIGNIN_CLIENT_ID || process.env.GOOGLE_OAUTH_CLIENT_ID || '';
+  res.json({ clientId });
 });
 
 // Sign in or sign up with Google (Google Identity Services).
@@ -5859,6 +5883,71 @@ app.post('/api/public/domains/search', async (req, res) => {
   }
 });
 
+// ==================== LEAD GENERATION & PROSPECTIVE CLIENTS ====================
+
+// Public Lead Inquiry Submission
+app.post('/api/public/leads', async (req, res) => {
+  try {
+    const { fullName, email, phone, businessName, domain, services, message } = req.body;
+    if (!fullName || !email) {
+      return res.status(400).json({ error: 'Full name and email address are required.' });
+    }
+    const newLead = new Lead({
+      fullName,
+      email,
+      phone,
+      businessName,
+      domain,
+      services: Array.isArray(services) ? services : [],
+      message,
+      status: 'New',
+    });
+    await newLead.save();
+    res.status(201).json({ success: true, message: 'Thank you for your inquiry! We will contact you shortly.', lead: newLead });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: list all leads
+app.get('/api/admin/leads', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const leads = await Lead.find({}).sort({ createdAt: -1 });
+    res.json({ leads, total: leads.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: update lead status or notes
+app.post('/api/admin/leads/:id', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { status, notes } = req.body;
+    const lead = await Lead.findById(req.params.id);
+    if (!lead) return res.status(404).json({ error: 'Lead not found.' });
+
+    if (status) lead.status = status;
+    if (notes !== undefined) lead.notes = notes;
+    lead.updatedAt = new Date();
+    await lead.save();
+
+    res.json({ success: true, message: 'Lead updated successfully.', lead });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: delete lead
+app.delete('/api/admin/leads/:id', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const lead = await Lead.findByIdAndDelete(req.params.id);
+    if (!lead) return res.status(404).json({ error: 'Lead not found.' });
+    res.json({ success: true, message: 'Lead deleted successfully.' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Customer: search domain availability + price
 app.post('/api/customer/domains/search', authenticateCustomer, async (req, res) => {
   try {
@@ -7761,11 +7850,41 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'Server is running' });
 });
 
+const path = require('path');
+// Serve static assets from frontend/build
+const frontendBuildPath = path.join(__dirname, '../frontend/build');
+app.use(express.static(frontendBuildPath));
+
+// Fallback all non-API GET requests to index.html (SPA fallback)
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  res.sendFile(path.join(frontendBuildPath, 'index.html'));
+});
+
+// Database offline / generic error handler
+app.use((err, req, res, next) => {
+  if (err.name === 'MongooseError' || err.name === 'MongoNetworkError' || err.message?.includes('buffering timed out') || err.message?.includes('selection timed out')) {
+    console.warn('[AI Studio] Database offline — returning mock empty response');
+    if (req.method === 'GET') {
+      return res.json(req.path.endsWith('s') || req.path.endsWith('s/') ? [] : {});
+    }
+    return res.status(503).json({ error: 'Service temporarily unavailable (database offline)' });
+  }
+  console.error('Unhandled server error:', err);
+  res.status(500).json({ error: err.message || 'Internal server error' });
+});
+
 // ==================== DAILY BILLING SCHEDULER ====================
 // Runs the billing checks automatically at 12:00 AM every day (in-code backup to external cron).
 // Set TZ env var (e.g. TZ=America/New_York) to control which timezone midnight uses.
 async function runDailyBillingTasks() {
   console.log('⏰ DAILY BILLING TASKS running at', new Date().toISOString());
+  if (mongoose.connection.readyState !== 1) {
+    console.log('🔌 Database not connected yet, skipping daily billing task.');
+    return;
+  }
   try {
     // Sync existing subscriptions from Google (seeds purchase dates + monthly renewal dates),
     // then run the per-subscription monthly-anchored check (renewal = purchase day-of-month,
@@ -7801,6 +7920,9 @@ function scheduleDailyBilling() {
 // Mirrors Nicky's official plugin which polls every 30s. Catches payments even if the
 // customer closed the tab before confirmation.
 async function pollPendingNickyPayments() {
+  if (mongoose.connection.readyState !== 1) {
+    return;
+  }
   try {
     const pending = await Payment.find({
       method: 'nicky',
