@@ -391,6 +391,10 @@ const SubBillingSchema = new mongoose.Schema({
   whitelisted: { type: Boolean, default: false },   // whitelisted = never auto-suspended
   whitelistedAt: Date,
 
+  // New expiration reminder tracking
+  notified7DaysBefore: { type: Boolean, default: false },
+  notifiedOnExpiration: { type: Boolean, default: false },
+
   // Legacy field kept for backward compatibility with older records (mirrors billingCycleStart).
   purchaseDate: Date,
 
@@ -418,6 +422,8 @@ function startNewBillingCycle(rec, start = new Date()) {
   rec.billingStatus = 'active';
   rec.warnedAt = null;
   rec.suspendedAt = null;
+  rec.notified7DaysBefore = false;
+  rec.notifiedOnExpiration = false;
   rec.updatedAt = new Date();
   return rec;
 }
@@ -431,6 +437,8 @@ function advanceToNextCycle(rec) {
   rec.nextBillingDate = addDays(prevNext, BILLING_CYCLE_DAYS);
   rec.currentCycleStatus = 'unpaid';
   rec.warnedAt = null;
+  rec.notified7DaysBefore = false;
+  rec.notifiedOnExpiration = false;
   rec.updatedAt = new Date();
   return rec;
 }
@@ -768,6 +776,16 @@ const DEFAULT_EMAIL_TEMPLATES = {
     subject: 'Payment received for {{domain}}',
     heading: 'Payment received — thank you',
     body: 'Hi,\n\nWe\'ve received your payment of {{amount}} for {{domain}}.\n\nYour subscription is active and your billing cycle has been renewed. No further action is needed.',
+  },
+  expiry_7day: {
+    subject: 'Action required: your {{domain}} subscription expires in 7 days',
+    heading: 'Your subscription expires in 7 days',
+    body: 'Hi,\n\nYour subscription for {{domain}} is set to expire on {{dueDate}} (in 7 days).\n\nTo prevent any disruption or suspension of your emails and services, please complete your payment in the portal before the expiration day.',
+  },
+  expiry_today: {
+    subject: 'Action required: your {{domain}} subscription expires today',
+    heading: 'Your subscription expires today',
+    body: 'Hi,\n\nYour subscription for {{domain}} expires today.\n\nTo avoid immediate interruption to your service, please make your payment in the portal now.',
   },
 };
 
@@ -1333,6 +1351,14 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
     const priceBySku = {};
     planDocs.forEach((p) => { if (p.skuId) priceBySku[String(p.skuId)] = Number(p.monthlyPrice) || 0; });
 
+    // Fetch DB subscriptions for the customer to get auto-renew status
+    const dbSubs = await Subscription.find({ customerId: me._id });
+    const dbSubBySkuOrId = {};
+    dbSubs.forEach(ds => {
+      if (ds.subscriptionId) dbSubBySkuOrId[String(ds.subscriptionId)] = ds;
+      if (ds.googleWorkspaceSkuId) dbSubBySkuOrId[String(ds.googleWorkspaceSkuId)] = ds;
+    });
+
     const rows = subs.map((s) => {
       const created = s.creationTime ? Number(s.creationTime) : null;
       const rec = billingBySku[String(s.skuId)];
@@ -1344,6 +1370,9 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
 
       const daysUntil = renewalMs ? Math.ceil((renewalMs - nowD.getTime()) / 86400000) : null;
       const curSeats = s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null;
+
+      const dbSub = (s.subscriptionId ? dbSubBySkuOrId[String(s.subscriptionId)] : null) || dbSubBySkuOrId[String(s.skuId)];
+      const autoRenew = dbSub ? dbSub.autoRenew !== false : true;
 
       return {
         domain: s.customerDomain || domain,
@@ -1361,6 +1390,7 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
         isPrimary: isPrimarySku(s.skuId),
         billingCycleStart: rec?.billingCycleStart ? new Date(rec.billingCycleStart).getTime() : null,
         subscriptionId: s.subscriptionId || null,
+        autoRenew,
       };
     });
     res.json({ subscriptions: rows, domain, account: foundAccount });
@@ -1739,6 +1769,52 @@ app.post('/api/customer/subscriptions/renew', authenticateCustomer, async (req, 
     } catch (e) {
       return res.status(500).json({ error: 'Crypto checkout not available: ' + e.message });
     }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: Toggle auto-renew status of a subscription (Google Workspace or Voice)
+app.post('/api/customer/subscriptions/toggle-autorenew', authenticateCustomer, async (req, res) => {
+  try {
+    const { skuId, subscriptionId, autoRenew } = req.body;
+    if (!skuId && !subscriptionId) {
+      return res.status(400).json({ error: 'Please specify skuId or subscriptionId.' });
+    }
+
+    // Find the local subscription record
+    let query = { customerId: req.customerId };
+    if (subscriptionId) {
+      query.subscriptionId = subscriptionId;
+    } else {
+      query.googleWorkspaceSkuId = skuId;
+    }
+
+    let sub = await Subscription.findOne(query);
+    if (!sub) {
+      // Create a local Subscription record to track the setting if it doesn't exist
+      const me = await Customer.findById(req.customerId);
+      sub = new Subscription({
+        customerId: req.customerId,
+        subscriptionId: subscriptionId || undefined,
+        googleWorkspaceSkuId: skuId,
+        type: 'workspace',
+        plan: skuId ? skuName(skuId) || skuId : 'Workspace',
+        seats: 1,
+        monthlyPrice: 0,
+        status: 'active',
+        autoRenew: autoRenew,
+      });
+    } else {
+      sub.autoRenew = autoRenew;
+      if (subscriptionId && !sub.subscriptionId) {
+        sub.subscriptionId = subscriptionId;
+      }
+    }
+    sub.updatedAt = new Date();
+    await sub.save();
+
+    res.json({ success: true, autoRenew: sub.autoRenew });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -3021,6 +3097,47 @@ async function runSubscriptionBillingCheck() {
     if (!dueReached) {
       // Not due yet. Optionally warn a few days before, but only if the current cycle is unpaid.
       const daysToDue = (nextBilling.getTime() - now.getTime()) / 86400000;
+
+      // 1. Automated 7-day expiration reminder email
+      if (r.currentCycleStatus !== 'paid' && daysToDue <= 7 && daysToDue > 0 && !r.notified7DaysBefore) {
+        r.notified7DaysBefore = true;
+        await r.save();
+        const email = await emailForDomain(r.domain);
+        if (email) {
+          try {
+            const { subject, html } = await getFilledTemplate('expiry_7day', {
+              domain: r.domain || 'your account',
+              dueDate: nextBilling.toLocaleDateString(),
+              brand: BRAND_NAME
+            });
+            await sendEmail(email, subject, html);
+            console.log(`[7-Day Expiry Notice] Sent to ${email} for domain ${r.domain}`);
+          } catch (err) {
+            console.error(`[7-Day Expiry Notice] Failed to send to ${email} for domain ${r.domain}:`, err.message);
+          }
+        }
+      }
+
+      // 2. Automated expiration day reminder email (secondary reminder on expiration day)
+      if (r.currentCycleStatus !== 'paid' && daysToDue <= 1 && daysToDue > 0 && !r.notifiedOnExpiration) {
+        r.notifiedOnExpiration = true;
+        await r.save();
+        const email = await emailForDomain(r.domain);
+        if (email) {
+          try {
+            const { subject, html } = await getFilledTemplate('expiry_today', {
+              domain: r.domain || 'your account',
+              dueDate: nextBilling.toLocaleDateString(),
+              brand: BRAND_NAME
+            });
+            await sendEmail(email, subject, html);
+            console.log(`[Expiration Day Notice] Sent to ${email} for domain ${r.domain}`);
+          } catch (err) {
+            console.error(`[Expiration Day Notice] Failed to send to ${email} for domain ${r.domain}:`, err.message);
+          }
+        }
+      }
+
       if (r.currentCycleStatus !== 'paid' && daysToDue <= 4 && daysToDue > 0 && r.billingStatus === 'active') {
         r.billingStatus = 'warned';
         r.warnedAt = now;
@@ -3891,11 +4008,180 @@ app.post('/api/admin/billing/sync', authenticateCustomer, requireAdmin, async (r
   }
 });
 
+// Admin: Analytics dashboard for subscription growth, MRR, renewal rates
+app.get('/api/admin/analytics/dashboard', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const now = new Date();
+    // Generate the last 6 months list
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({
+        year: d.getFullYear(),
+        month: d.getMonth(),
+        label: d.toLocaleString('default', { month: 'short', year: 'numeric' }),
+        mrr: 0,
+        revenue: 0,
+        workspace: 0,
+        other: 0,
+        newSubs: 0,
+        activeSubs: 0,
+        renewalsDue: 0,
+        renewalsPaid: 0,
+      });
+    }
+
+    // Fetch all paid payments
+    const payments = await Payment.find({ status: 'paid' }).lean();
+    // Fetch all subBilling records
+    const subBillingRecs = await SubBilling.find().lean();
+    // Fetch all customers
+    const customers = await Customer.find().lean();
+
+    // Group payments into months
+    payments.forEach(p => {
+      const pDate = p.paidAt || p.createdAt;
+      if (!pDate) return;
+      const d = new Date(pDate);
+      const py = d.getFullYear();
+      const pm = d.getMonth();
+      
+      const mBucket = months.find(m => m.year === py && m.month === pm);
+      if (mBucket) {
+        mBucket.revenue += p.amount || 0;
+        if (p.isRenewal || p.orderType === 'workspace' || p.orderType === 'addon') {
+          mBucket.mrr += p.amount || 0;
+          mBucket.workspace += p.amount || 0;
+        } else {
+          mBucket.other += p.amount || 0;
+        }
+      }
+    });
+
+    // Group subscription creation (growth)
+    subBillingRecs.forEach(sub => {
+      const sDate = sub.purchaseDate || sub.billingCycleStart || sub.createdAt;
+      if (!sDate) return;
+      const d = new Date(sDate);
+      const sy = d.getFullYear();
+      const sm = d.getMonth();
+
+      const mBucket = months.find(m => m.year === sy && m.month === sm);
+      if (mBucket) {
+        mBucket.newSubs += 1;
+      }
+    });
+
+    // Calculate cumulative subscription growth month-by-month
+    const firstMonthDate = new Date(months[0].year, months[0].month, 1);
+    let cumulative = 0;
+    subBillingRecs.forEach(sub => {
+      const sDate = sub.purchaseDate || sub.billingCycleStart || sub.createdAt;
+      if (sDate && new Date(sDate) < firstMonthDate) {
+        cumulative += 1;
+      }
+    });
+
+    const growthTrend = months.map(m => {
+      cumulative += m.newSubs;
+      return {
+        month: m.label,
+        newSubscriptions: m.newSubs,
+        totalSubscriptions: cumulative,
+      };
+    });
+
+    // Calculate renewal rates month-by-month based on billing cycle start
+    subBillingRecs.forEach(sub => {
+      const sDate = sub.billingCycleStart;
+      if (!sDate) return;
+      const d = new Date(sDate);
+      const sy = d.getFullYear();
+      const sm = d.getMonth();
+
+      const mBucket = months.find(m => m.year === sy && m.month === sm);
+      if (mBucket) {
+        mBucket.renewalsDue += 1;
+        if (sub.currentCycleStatus === 'paid' || sub.whitelisted) {
+          mBucket.renewalsPaid += 1;
+        }
+      }
+    });
+
+    const renewalRatesTrend = months.map(m => {
+      const rate = m.renewalsDue > 0 ? Math.round((m.renewalsPaid / m.renewalsDue) * 100) : 100;
+      return {
+        month: m.label,
+        due: m.renewalsDue,
+        paid: m.renewalsPaid,
+        rate: rate,
+      };
+    });
+
+    const mrrTrend = months.map(m => ({
+      month: m.label,
+      mrr: Math.round(m.mrr),
+      revenue: Math.round(m.revenue),
+      workspace: Math.round(m.workspace),
+      other: Math.round(m.other),
+    }));
+
+    // Current general statistics (for pie charts or cards)
+    const totalSubs = subBillingRecs.length;
+    const activePaid = subBillingRecs.filter(s => s.billingStatus === 'active' && s.currentCycleStatus === 'paid').length;
+    const activeUnpaid = subBillingRecs.filter(s => s.billingStatus === 'active' && s.currentCycleStatus === 'unpaid').length;
+    const suspended = subBillingRecs.filter(s => s.billingStatus === 'suspended').length;
+    const whitelisted = subBillingRecs.filter(s => s.whitelisted).length;
+
+    const totalTrackedNonWhitelisted = subBillingRecs.filter(s => !s.whitelisted).length;
+    const paidNonWhitelisted = subBillingRecs.filter(s => !s.whitelisted && s.currentCycleStatus === 'paid').length;
+    const overallRenewalRate = totalTrackedNonWhitelisted > 0 
+      ? Math.round((paidNonWhitelisted / totalTrackedNonWhitelisted) * 100) 
+      : 100;
+
+    res.json({
+      mrrTrend,
+      growthTrend,
+      renewalRatesTrend,
+      overallStats: {
+        totalSubscriptions: totalSubs,
+        activePaid,
+        activeUnpaid,
+        suspended,
+        whitelisted,
+        overallRenewalRate,
+        totalCustomers: customers.length,
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Admin: list tracked subscription billing records
 app.get('/api/admin/billing/subscriptions', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
-    const rows = await SubBilling.find().sort({ nextBillingDate: 1 }).limit(1000);
-    res.json({ subscriptions: rows });
+    const rows = await SubBilling.find().sort({ nextBillingDate: 1 }).limit(1000).lean();
+    // Fetch all customers to map their details by domain
+    const customers = await Customer.find({}, 'domain firstName lastName companyName businessEmail username').lean();
+    const customerMap = {};
+    customers.forEach(c => {
+      if (c.domain) {
+        customerMap[c.domain.toLowerCase().trim()] = c;
+      }
+    });
+
+    const enriched = rows.map(r => {
+      const domainKey = r.domain ? r.domain.toLowerCase().trim() : '';
+      const cust = customerMap[domainKey];
+      return {
+        ...r,
+        customerName: cust ? `${cust.firstName || ''} ${cust.lastName || ''}`.trim() || cust.companyName || cust.username || '' : '',
+        customerEmail: cust ? cust.businessEmail || cust.username || '' : '',
+      };
+    });
+
+    res.json({ subscriptions: enriched });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -3936,7 +4222,7 @@ app.get('/api/admin/email/templates', authenticateCustomer, requireAdmin, async 
     const custom = await EmailTemplate.find();
     const byKey = {}; custom.forEach(t => { byKey[t.key] = t; });
     const out = {};
-    for (const key of ['warning', 'suspension', 'payment']) {
+    for (const key of ['warning', 'suspension', 'payment', 'expiry_7day', 'expiry_today']) {
       const def = DEFAULT_EMAIL_TEMPLATES[key];
       const c = byKey[key];
       out[key] = {
@@ -3961,7 +4247,7 @@ app.get('/api/admin/email/templates', authenticateCustomer, requireAdmin, async 
 app.put('/api/admin/email/templates/:key', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const key = req.params.key;
-    if (!['warning', 'suspension', 'payment'].includes(key)) return res.status(400).json({ error: 'Invalid template.' });
+    if (!['warning', 'suspension', 'payment', 'expiry_7day', 'expiry_today'].includes(key)) return res.status(400).json({ error: 'Invalid template.' });
     const { subject, heading, body } = req.body;
     const t = await EmailTemplate.findOneAndUpdate(
       { key },
@@ -6335,6 +6621,408 @@ app.post('/api/admin/workspace-orders/provision-bulk', authenticateCustomer, req
   }
 });
 
+app.post('/api/admin/subscriptions/bulk-attach', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { domains, planId, seats, account } = req.body;
+    if (!domains || !Array.isArray(domains) || domains.length === 0) {
+      return res.status(400).json({ error: 'Please provide an array of domains.' });
+    }
+    if (!planId) {
+      return res.status(400).json({ error: 'Please specify a planId.' });
+    }
+
+    const planDoc = await Plan.findOne({ planId });
+    if (!planDoc || !planDoc.skuId) {
+      return res.status(400).json({ error: `Plan '${planId}' is missing a Google SKU.` });
+    }
+
+    const numSeats = Number(seats) || 1;
+    const resolvedAccount = account || 'pk';
+    const auth = resolvedAccount === 'usa' ? await getUsaAuth() : await getResellerAuth();
+    const reseller = google.reseller({ version: 'v1', auth });
+
+    const results = [];
+
+    for (const rawDomain of domains) {
+      const dom = rawDomain.toLowerCase().trim();
+      if (!dom) continue;
+
+      try {
+        // 1) Find or create customer
+        let cust = await Customer.findOne({ domain: dom });
+        if (!cust) {
+          cust = await Customer.create({
+            username: dom.split('.')[0],
+            businessEmail: `admin@${dom}`,
+            firstName: 'Admin',
+            lastName: 'User',
+            domain: dom,
+            role: 'customer',
+            account: resolvedAccount,
+            passwordHash: 'ADMIN_CREATED_NO_LOGIN',
+          });
+        }
+
+        // 2) Create customer in Google Reseller if not exists
+        let googleCustomerExists = false;
+        try {
+          await reseller.customers.get({ customerId: dom });
+          googleCustomerExists = true;
+        } catch (_) {
+          try {
+            await reseller.customers.insert({
+              requestBody: {
+                customerDomain: dom,
+                alternateEmail: cust.businessEmail,
+                postalAddress: {
+                  contactName: 'Admin User',
+                  locality: cust.city || 'City',
+                  region: cust.state || 'State',
+                  postalCode: cust.postalCode || '10001',
+                  countryCode: cust.country || 'US',
+                  addressLine1: cust.address || '123 Street',
+                }
+              }
+            });
+            googleCustomerExists = true;
+          } catch (insertErr) {
+            throw new Error(`Google Customer creation failed: ${insertErr.message}`);
+          }
+        }
+
+        // 3) Insert subscription in Google
+        let subResp;
+        try {
+          subResp = await reseller.subscriptions.insert({
+            customerId: dom,
+            requestBody: {
+              customerId: dom,
+              skuId: planDoc.skuId,
+              plan: { planName: 'FLEXIBLE' },
+              seats: { numberOfSeats: numSeats, maximumNumberOfSeats: numSeats },
+              purchaseOrderId: `BULK-ATTACH-${Date.now()}`,
+            },
+          });
+        } catch (subErr) {
+          const msg = subErr?.errors?.[0]?.message || subErr?.message || '';
+          if (!/already exists|entity already|duplicate/i.test(msg)) {
+            throw new Error(`Google Subscription creation failed: ${msg}`);
+          }
+          // If already exists, try to list to get the subscriptionId
+          const listResp = await reseller.subscriptions.list({ customerId: dom });
+          const matching = (listResp.data.subscriptions || []).find(s => s.skuId === planDoc.skuId);
+          subResp = { data: matching };
+        }
+
+        const subscriptionId = subResp?.data?.subscriptionId;
+
+        // 4) Create WorkspaceOrder and Subscription database record
+        const orderNumber = `WS-BULK-${Date.now()}`;
+        const order = await WorkspaceOrder.create({
+          customerId: cust._id,
+          orderNumber,
+          type: 'workspace',
+          planType: 'flexible',
+          account: resolvedAccount,
+          plan: { id: planDoc.planId, name: planDoc.name, monthlyPrice: planDoc.monthlyPrice },
+          seats: numSeats,
+          monthlyTotal: planDoc.monthlyPrice * numSeats,
+          organization: { domain: dom, name: dom.split('.')[0] },
+          contact: { firstName: 'Admin', lastName: 'User', email: cust.businessEmail },
+          status: 'provisioned',
+          googleProvisioned: true,
+        });
+
+        const dbSub = await Subscription.create({
+          customerId: cust._id,
+          orderId: order._id,
+          subscriptionId,
+          type: 'workspace',
+          plan: planDoc.name,
+          seats: numSeats,
+          monthlyPrice: planDoc.monthlyPrice,
+          status: 'active',
+          googleWorkspaceSkuId: planDoc.skuId,
+        });
+
+        // 5) Seed/update SubBilling so it's tracked in billing
+        try {
+          let rec = await SubBilling.findOne({ domain: dom, skuId: planDoc.skuId });
+          if (!rec) {
+            rec = new SubBilling({ account: resolvedAccount, domain: dom, skuId: planDoc.skuId, subscriptionId });
+            startNewBillingCycle(rec, new Date());
+          } else if (subscriptionId) {
+            rec.subscriptionId = subscriptionId;
+          }
+          applyPaymentToCurrentCycle(rec, new Date());
+          await rec.save();
+        } catch (billingErr) {
+          console.error(`SubBilling seeding failed for ${dom}:`, billingErr.message);
+        }
+
+        results.push({ ok: true, domain: dom, subscriptionId, dbSubId: dbSub._id });
+      } catch (err) {
+        results.push({ ok: false, domain: dom, error: err.message });
+      }
+    }
+
+    const successCount = results.filter(r => r.ok).length;
+    res.json({
+      success: true,
+      total: domains.length,
+      attached: successCount,
+      failed: domains.length - successCount,
+      results
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/customers/bulk-apply', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { customerIds, planId, seats, actionType } = req.body;
+    if (!customerIds || !Array.isArray(customerIds) || customerIds.length === 0) {
+      return res.status(400).json({ error: 'Please select at least one customer.' });
+    }
+    if (!planId) {
+      return res.status(400).json({ error: 'Please specify a plan.' });
+    }
+
+    const planDoc = await Plan.findOne({ planId });
+    if (!planDoc || !planDoc.skuId) {
+      return res.status(400).json({ error: `Plan '${planId}' is missing a Google SKU.` });
+    }
+
+    const numSeats = Number(seats) || 1;
+    const results = [];
+
+    for (const cId of customerIds) {
+      try {
+        const customer = await Customer.findById(cId);
+        if (!customer) {
+          results.push({ id: cId, ok: false, error: 'Customer not found in DB.' });
+          continue;
+        }
+
+        const domain = customer.domain ? customer.domain.toLowerCase().trim() : '';
+        const resolvedAccount = customer.account || 'pk';
+
+        if (!domain) {
+          // Local creation only
+          const orderNumber = `WS-BULK-APPLY-${Date.now()}`;
+          const order = await WorkspaceOrder.create({
+            customerId: customer._id,
+            orderNumber,
+            type: 'workspace',
+            planType: 'flexible',
+            account: resolvedAccount,
+            plan: { id: planDoc.planId, name: planDoc.name, monthlyPrice: planDoc.monthlyPrice },
+            seats: numSeats,
+            monthlyTotal: planDoc.monthlyPrice * numSeats,
+            status: 'provisioned',
+            googleProvisioned: false,
+          });
+
+          const dbSub = await Subscription.create({
+            customerId: customer._id,
+            orderId: order._id,
+            type: 'workspace',
+            plan: planDoc.name,
+            seats: numSeats,
+            monthlyPrice: planDoc.monthlyPrice,
+            status: 'active',
+            googleWorkspaceSkuId: planDoc.skuId,
+          });
+
+          results.push({
+            id: cId,
+            username: customer.username || '—',
+            email: customer.email,
+            ok: true,
+            note: 'Local DB subscription created (no domain set on customer for Google sync).'
+          });
+          continue;
+        }
+
+        // Reseller flow
+        const auth = resolvedAccount === 'usa' ? await getUsaAuth() : await getResellerAuth();
+        const reseller = google.reseller({ version: 'v1', auth });
+
+        // Ensure customer exists in Google
+        let googleCustomerExists = false;
+        try {
+          await reseller.customers.get({ customerId: domain });
+          googleCustomerExists = true;
+        } catch (_) {
+          try {
+            await reseller.customers.insert({
+              requestBody: {
+                customerDomain: domain,
+                alternateEmail: customer.businessEmail || customer.email,
+                postalAddress: {
+                  contactName: `${customer.firstName || 'Admin'} ${customer.lastName || 'User'}`.trim(),
+                  locality: customer.city || 'City',
+                  region: customer.state || 'State',
+                  postalCode: customer.postalCode || '10001',
+                  countryCode: customer.country || 'US',
+                  addressLine1: customer.address || '123 Street',
+                }
+              }
+            });
+            googleCustomerExists = true;
+          } catch (insertErr) {
+            results.push({ id: cId, username: customer.username || '—', email: customer.email, ok: false, error: `Google customer creation failed: ${insertErr.message}` });
+            continue;
+          }
+        }
+
+        // Check for existing subscription
+        let existingSub = null;
+        try {
+          const listResp = await reseller.subscriptions.list({ customerId: domain });
+          const subs = listResp.data.subscriptions || [];
+          existingSub = subs.find(s => s.skuId === planDoc.skuId || s.skuId.startsWith('Google'));
+        } catch (_) {}
+
+        let subscriptionId;
+        let operationNote = '';
+
+        if (actionType === 'upgrade' && existingSub) {
+          try {
+            if (existingSub.skuId !== planDoc.skuId) {
+              // changePlan
+              const changeResp = await reseller.subscriptions.changePlan({
+                customerId: domain,
+                subscriptionId: existingSub.subscriptionId,
+                requestBody: {
+                  skuId: planDoc.skuId,
+                  planName: 'FLEXIBLE',
+                  seats: { numberOfSeats: numSeats },
+                }
+              });
+              subscriptionId = changeResp?.data?.subscriptionId || existingSub.subscriptionId;
+              operationNote = `Upgraded from ${existingSub.skuId} to ${planDoc.skuId} (${numSeats} seats)`;
+            } else {
+              // changeSeats
+              const changeSeatsResp = await reseller.subscriptions.changeSeats({
+                customerId: domain,
+                subscriptionId: existingSub.subscriptionId,
+                requestBody: {
+                  numberOfSeats: numSeats
+                }
+              });
+              subscriptionId = changeSeatsResp?.data?.subscriptionId || existingSub.subscriptionId;
+              operationNote = `Updated seats to ${numSeats}`;
+            }
+
+            await Subscription.updateMany(
+              { customerId: customer._id, googleWorkspaceSkuId: existingSub.skuId },
+              { plan: planDoc.name, seats: numSeats, monthlyPrice: planDoc.monthlyPrice, googleWorkspaceSkuId: planDoc.skuId, subscriptionId }
+            );
+          } catch (upgradeErr) {
+            results.push({ id: cId, username: customer.username || '—', email: customer.email, ok: false, error: `Google Upgrade failed: ${upgradeErr.message}` });
+            continue;
+          }
+        } else {
+          try {
+            const subResp = await reseller.subscriptions.insert({
+              customerId: domain,
+              requestBody: {
+                customerId: domain,
+                skuId: planDoc.skuId,
+                plan: { planName: 'FLEXIBLE' },
+                seats: { numberOfSeats: numSeats, maximumNumberOfSeats: numSeats },
+                purchaseOrderId: `BULK-APPLY-${Date.now()}`,
+              },
+            });
+            subscriptionId = subResp?.data?.subscriptionId;
+            operationNote = `Provisioned new subscription for ${planDoc.name} with ${numSeats} seats`;
+          } catch (subErr) {
+            const msg = subErr?.errors?.[0]?.message || subErr?.message || '';
+            if (/already exists|duplicate/i.test(msg) && existingSub) {
+              subscriptionId = existingSub.subscriptionId;
+              operationNote = `Linked to existing active subscription (${existingSub.skuId})`;
+            } else {
+              results.push({ id: cId, username: customer.username || '—', email: customer.email, ok: false, error: `Google provisioning failed: ${msg}` });
+              continue;
+            }
+          }
+        }
+
+        const orderNumber = `WS-BULK-APPLY-${Date.now()}`;
+        const order = await WorkspaceOrder.create({
+          customerId: customer._id,
+          orderNumber,
+          type: 'workspace',
+          planType: 'flexible',
+          account: resolvedAccount,
+          plan: { id: planDoc.planId, name: planDoc.name, monthlyPrice: planDoc.monthlyPrice },
+          seats: numSeats,
+          monthlyTotal: planDoc.monthlyPrice * numSeats,
+          organization: { domain, name: domain.split('.')[0] },
+          contact: { firstName: customer.firstName || 'Admin', lastName: customer.lastName || 'User', email: customer.businessEmail || customer.email },
+          status: 'provisioned',
+          googleProvisioned: true,
+          notes: operationNote,
+        });
+
+        const dbSub = await Subscription.findOneAndUpdate(
+          { customerId: customer._id, googleWorkspaceSkuId: planDoc.skuId },
+          {
+            orderId: order._id,
+            subscriptionId,
+            type: 'workspace',
+            plan: planDoc.name,
+            seats: numSeats,
+            monthlyPrice: planDoc.monthlyPrice,
+            status: 'active',
+            updatedAt: new Date(),
+          },
+          { upsert: true, new: true }
+        );
+
+        try {
+          let rec = await SubBilling.findOne({ domain, skuId: planDoc.skuId });
+          if (!rec) {
+            rec = new SubBilling({ account: resolvedAccount, domain, skuId: planDoc.skuId, subscriptionId });
+            startNewBillingCycle(rec, new Date());
+          } else if (subscriptionId) {
+            rec.subscriptionId = subscriptionId;
+          }
+          applyPaymentToCurrentCycle(rec, new Date());
+          await rec.save();
+        } catch (billingErr) {
+          console.error(`SubBilling seeding failed for ${domain}:`, billingErr.message);
+        }
+
+        results.push({
+          id: cId,
+          username: customer.username || '—',
+          email: customer.email,
+          ok: true,
+          note: operationNote,
+          subscriptionId
+        });
+
+      } catch (custErr) {
+        results.push({ id: cId, ok: false, error: custErr.message });
+      }
+    }
+
+    const successCount = results.filter(r => r.ok).length;
+    res.json({
+      success: true,
+      total: customerIds.length,
+      applied: successCount,
+      failed: customerIds.length - successCount,
+      results
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/admin/workspace-orders/provision', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const body = req.body || {};
@@ -7447,6 +8135,120 @@ app.post('/api/orders', authenticateCustomer, async (req, res) => {
       });
     }
 
+    // Auto-attach Workspace/Voice subscriptions to Google Reseller Console if customer has a domain set
+    let attachResults = [];
+    try {
+      const customer = await Customer.findById(req.customerId);
+      const domain = customer?.domain ? customer.domain.toLowerCase().trim() : '';
+      const account = customer?.account || 'pk';
+
+      if (domain) {
+        for (const item of items) {
+          if (item.productType === 'workspace' || item.productType === 'voice') {
+            try {
+              // Find matching plan in database
+              const planDoc = await Plan.findOne({
+                $or: [
+                  { planId: item.productName },
+                  { name: item.productName },
+                  { name: new RegExp('^' + item.productName + '$', 'i') }
+                ]
+              });
+
+              if (planDoc && planDoc.skuId) {
+                const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+                const reseller = google.reseller({ version: 'v1', auth });
+
+                // Verify customer domain exists in Google
+                let googleCustomerExists = false;
+                try {
+                  await reseller.customers.get({ customerId: domain });
+                  googleCustomerExists = true;
+                } catch (_) {
+                  // Attempt to register/insert lightweight customer under reseller
+                  try {
+                    await reseller.customers.insert({
+                      requestBody: {
+                        customerDomain: domain,
+                        alternateEmail: customer.businessEmail,
+                        postalAddress: {
+                          contactName: `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Admin User',
+                          locality: customer.city || 'City',
+                          region: customer.state || 'State',
+                          postalCode: customer.postalCode || '10001',
+                          countryCode: customer.country || 'US',
+                          addressLine1: customer.address || '123 Street',
+                        }
+                      }
+                    });
+                    googleCustomerExists = true;
+                  } catch (insErr) {
+                    console.error(`Auto-create google customer failed for ${domain}:`, insErr.message);
+                  }
+                }
+
+                if (googleCustomerExists) {
+                  // Provision/insert subscription
+                  const subResp = await reseller.subscriptions.insert({
+                    customerId: domain,
+                    requestBody: {
+                      customerId: domain,
+                      skuId: planDoc.skuId,
+                      plan: { planName: 'FLEXIBLE' },
+                      seats: { numberOfSeats: item.quantity, maximumNumberOfSeats: item.quantity },
+                      purchaseOrderId: orderNumber,
+                    },
+                  });
+
+                  const subscriptionId = subResp?.data?.subscriptionId;
+                  if (subscriptionId) {
+                    await Subscription.findOneAndUpdate(
+                      { orderId: order._id, plan: item.productName },
+                      { subscriptionId, updatedAt: new Date() }
+                    );
+
+                    // Sync billing cycle
+                    try {
+                      let rec = await SubBilling.findOne({ domain, skuId: planDoc.skuId });
+                      if (!rec) {
+                        rec = new SubBilling({ account, domain, skuId: planDoc.skuId, subscriptionId });
+                        startNewBillingCycle(rec, new Date());
+                      } else {
+                        rec.subscriptionId = subscriptionId;
+                      }
+                      applyPaymentToCurrentCycle(rec, new Date());
+                      await rec.save();
+                    } catch (billingErr) {
+                      console.error('Auto-attach billing synchronization failed:', billingErr.message);
+                    }
+
+                    attachResults.push({ item: item.productName, status: 'Attached successfully', subscriptionId });
+                  } else {
+                    attachResults.push({ item: item.productName, status: 'Provisioned but no Subscription ID returned' });
+                  }
+                } else {
+                  attachResults.push({ item: item.productName, status: 'Failed to access or create customer in Google Reseller' });
+                }
+              } else {
+                attachResults.push({ item: item.productName, status: 'Plan SKU ID not found' });
+              }
+            } catch (err) {
+              const errMsg = err?.errors?.[0]?.message || err?.message || 'Google API error';
+              console.error(`Auto-attach failed for ${item.productName}:`, errMsg);
+              attachResults.push({ item: item.productName, status: 'Failed', error: errMsg });
+            }
+          }
+        }
+      }
+    } catch (outerErr) {
+      console.error('Outer auto-attach error:', outerErr.message);
+    }
+
+    if (attachResults.length > 0) {
+      order.notes = `Auto-attach results: ${JSON.stringify(attachResults)}`;
+      await order.save();
+    }
+
     // Generate invoice
     const invoice = await Invoice.create({
       customerId: req.customerId,
@@ -7501,8 +8303,8 @@ app.get('/api/subscriptions', authenticateCustomer, async (req, res) => {
 app.patch('/api/subscriptions/:id', authenticateCustomer, async (req, res) => {
   try {
     const { seats, autoRenew } = req.body;
-    const subscription = await Subscription.findByIdAndUpdate(
-      req.params.id,
+    const subscription = await Subscription.findOneAndUpdate(
+      { _id: req.params.id, customerId: req.customerId },
       { seats, autoRenew, updatedAt: new Date() },
       { new: true }
     );

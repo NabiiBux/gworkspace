@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useContext, createContext, useRef } from 'react';
 import axios from 'axios';
+import { ResponsiveContainer, AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from 'recharts';
 import './App.css';
 
 // API Config
@@ -595,11 +596,13 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
 // ==================== DASHBOARD ====================
 const Dashboard = () => {
   const { user, logout } = useAuth();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const initialAdminSection = (typeof window !== 'undefined' && window.location.hash)
     ? window.location.hash.replace('#', '') : 'overview';
   const [activeSection, setActiveSectionState] = useState(initialAdminSection || 'overview');
   const setActiveSection = (s) => {
     setActiveSectionState(s);
+    setSidebarOpen(false);
     if (typeof window !== 'undefined') window.location.hash = s;
   };
   useEffect(() => {
@@ -608,6 +611,23 @@ const Dashboard = () => {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
   const [stats, setStats] = useState(null);
+
+  const sectionLabels = {
+    'overview': '📊 Overview & Analytics',
+    'order-workspace': '✨ Order Workspace',
+    'products': '📦 Products',
+    'addon-pricing': '🧩 Add-on Pricing',
+    'subs-pk': '🇵🇰 Pakistan Workspace',
+    'subs-usa': '🇺🇸 USA Voice',
+    'customers': '👥 Customers',
+    'leads': '💼 Prospective Leads',
+    'tickets': '🎫 Tickets',
+    'payments': '💳 Payments & Settings',
+    'emails': '✉️ Emails',
+    'domains-ssl': '🔒 Domains & SSL',
+    'voice-monitor': '🛡 Abuse Monitor',
+    'branding': '🎨 Branding'
+  };
 
   useEffect(() => {
     fetchDashboard();
@@ -624,15 +644,50 @@ const Dashboard = () => {
 
   return (
     <div className="dashboard">
-      <nav className="sidebar">
-        <div className="sidebar-header">
+      {/* Mobile Top Header - Sticky on small screens */}
+      <div className="mobile-admin-header">
+        <button 
+          id="mobile-hamburger-btn"
+          className="mobile-menu-btn" 
+          onClick={() => setSidebarOpen(true)}
+          aria-label="Toggle Menu"
+        >
+          ☰
+        </button>
+        <span className="mobile-header-title">
+          {sectionLabels[activeSection] || 'Admin Portal'}
+        </span>
+        <div style={{ width: 32 }} /> {/* Balancer */}
+      </div>
+
+      {/* Sidebar Overlay Backdrop on Mobile */}
+      {sidebarOpen && (
+        <div 
+          id="mobile-sidebar-overlay"
+          className="sidebar-overlay" 
+          onClick={() => setSidebarOpen(false)} 
+        />
+      )}
+
+      {/* Admin Sidebar Navigation */}
+      <nav className={`sidebar ${sidebarOpen ? 'open' : ''}`} id="admin-sidebar">
+        <div className="sidebar-header" style={{ position: 'relative' }}>
           <h2>📊 Workspace Portal</h2>
-          <p>{user?.companyName}</p>
+          <p style={{ opacity: 0.75, fontSize: '11px', fontWeight: 500 }}>{user?.companyName || 'Reseller Console'}</p>
+          <button 
+            id="mobile-sidebar-close-btn"
+            className="sidebar-close-btn" 
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close Menu"
+          >
+            ✕
+          </button>
         </div>
 
         <ul className="sidebar-menu">
           <li>
             <button
+              id="menu-overview-btn"
               className={`menu-item ${activeSection === 'overview' ? 'active' : ''}`}
               onClick={() => setActiveSection('overview')}
             >
@@ -641,6 +696,7 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              id="menu-order-btn"
               className={`menu-item ${activeSection === 'order-workspace' ? 'active' : ''}`}
               onClick={() => setActiveSection('order-workspace')}
             >
@@ -649,6 +705,7 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              id="menu-products-btn"
               className={`menu-item ${activeSection === 'products' ? 'active' : ''}`}
               onClick={() => setActiveSection('products')}
             >
@@ -657,6 +714,7 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              id="menu-addon-btn"
               className={`menu-item ${activeSection === 'addon-pricing' ? 'active' : ''}`}
               onClick={() => setActiveSection('addon-pricing')}
             >
@@ -665,22 +723,25 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              id="menu-subspk-btn"
               className={`menu-item ${activeSection === 'subs-pk' ? 'active' : ''}`}
               onClick={() => setActiveSection('subs-pk')}
             >
-              Pakistan Workspace
+              🇵🇰 Pakistan Workspace
             </button>
           </li>
           <li>
             <button
+              id="menu-subsusa-btn"
               className={`menu-item ${activeSection === 'subs-usa' ? 'active' : ''}`}
               onClick={() => setActiveSection('subs-usa')}
             >
-              USA Voice
+              🇺🇸 USA Voice
             </button>
           </li>
           <li>
             <button
+              id="menu-customers-btn"
               className={`menu-item ${activeSection === 'customers' ? 'active' : ''}`}
               onClick={() => setActiveSection('customers')}
             >
@@ -689,6 +750,7 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              id="menu-leads-btn"
               className={`menu-item ${activeSection === 'leads' ? 'active' : ''}`}
               onClick={() => setActiveSection('leads')}
             >
@@ -697,6 +759,7 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              id="menu-tickets-btn"
               className={`menu-item ${activeSection === 'tickets' ? 'active' : ''}`}
               onClick={() => setActiveSection('tickets')}
             >
@@ -705,6 +768,7 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              id="menu-payments-btn"
               className={`menu-item ${activeSection === 'payments' ? 'active' : ''}`}
               onClick={() => setActiveSection('payments')}
             >
@@ -713,6 +777,7 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              id="menu-emails-btn"
               className={`menu-item ${activeSection === 'emails' ? 'active' : ''}`}
               onClick={() => setActiveSection('emails')}
             >
@@ -721,6 +786,7 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              id="menu-ssl-btn"
               className={`menu-item ${activeSection === 'domains-ssl' ? 'active' : ''}`}
               onClick={() => setActiveSection('domains-ssl')}
             >
@@ -729,6 +795,7 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              id="menu-monitor-btn"
               className={`menu-item ${activeSection === 'voice-monitor' ? 'active' : ''}`}
               onClick={() => setActiveSection('voice-monitor')}
             >
@@ -737,6 +804,7 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              id="menu-branding-btn"
               className={`menu-item ${activeSection === 'branding' ? 'active' : ''}`}
               onClick={() => setActiveSection('branding')}
             >
@@ -745,12 +813,12 @@ const Dashboard = () => {
           </li>
         </ul>
 
-        <button onClick={logout} className="btn btn-logout">
+        <button onClick={logout} className="btn btn-logout" id="admin-logout-btn">
           🚪 Logout
         </button>
       </nav>
 
-      <main className="dashboard-content">
+      <main className="dashboard-content" id="admin-dashboard-content">
         {activeSection === 'overview' && <OverviewSection stats={stats} />}
         {activeSection === 'order-workspace' && <AdminOrderWorkspace />}
         {activeSection === 'products' && <ProductsSection />}
@@ -771,9 +839,28 @@ const Dashboard = () => {
 };
 
 // ==================== OVERVIEW SECTION ====================
+const CustomTooltip = ({ active, payload, label, prefix = '$' }) => {
+  if (active && payload && payload.length) {
+    return (
+      <div style={{ background: '#1e293b', color: '#fff', padding: '10px 14px', borderRadius: 8, fontSize: 13, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', border: 'none' }}>
+        <p style={{ margin: '0 0 6px 0', fontWeight: 600, color: '#94a3b8' }}>{label}</p>
+        {payload.map((p, idx) => (
+          <p key={idx} style={{ margin: '4px 0', color: p.color || p.fill, fontSize: 12 }}>
+            <span style={{ fontWeight: 500 }}>{p.name}:</span> {prefix}{p.value.toLocaleString()}
+          </p>
+        ))}
+      </div>
+    );
+  }
+  return null;
+};
+
 const OverviewSection = ({ stats }) => {
   const [live, setLive] = useState(null);
   const [liveErr, setLiveErr] = useState('');
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(true);
+  const [analyticsErr, setAnalyticsErr] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -787,26 +874,237 @@ const OverviewSection = ({ stats }) => {
         setLiveErr(e?.response?.data?.error || 'Could not load live Google data.');
       }
     })();
+
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await axios.get(`${API_URL}/admin/analytics/dashboard`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        setAnalytics(res.data);
+      } catch (e) {
+        setAnalyticsErr(e?.response?.data?.error || 'Could not load analytics data.');
+      } finally {
+        setAnalyticsLoading(false);
+      }
+    })();
   }, []);
 
   if (!stats) return <div className="loading">Loading...</div>;
 
+  const chartCard = { background: '#fff', borderRadius: 14, padding: 22, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', minHeight: 350, border: '1px solid #e5e7eb' };
+
+  // Prepare Pie Chart data
+  const pieData = analytics ? [
+    { name: 'Active & Paid', value: analytics.overallStats?.activePaid || 0, color: '#10b981' },
+    { name: 'Active & Unpaid', value: analytics.overallStats?.activeUnpaid || 0, color: '#f59e0b' },
+    { name: 'Suspended', value: analytics.overallStats?.suspended || 0, color: '#ef4444' },
+    { name: 'Whitelisted', value: analytics.overallStats?.whitelisted || 0, color: '#6366f1' },
+  ].filter(item => item.value > 0) : [];
+
+  // Fallback if pieData is empty (for rendering empty state)
+  const finalPieData = pieData.length > 0 ? pieData : [{ name: 'No Data', value: 1, color: '#e5e7eb' }];
+
+  // Fetch current month MRR
+  const currentMRR = analytics?.mrrTrend && analytics.mrrTrend.length > 0 
+    ? analytics.mrrTrend[analytics.mrrTrend.length - 1].mrr 
+    : 0;
+
   return (
-    <div className="section">
-      <h2>Dashboard Overview</h2>
-
-      {liveErr && <div style={{ background: '#fff7ed', color: '#9a3412', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{liveErr}</div>}
-
-      {/* Combined summary */}
-      <div className="stats-grid" style={{ marginBottom: 20 }}>
-        <div className="stat-card"><h3>Total Customers</h3><p className="stat-value">{live ? (live.combined?.totalCustomers ?? live.totalCustomers) : '…'}</p></div>
-        <div className="stat-card"><h3>Active Subscriptions</h3><p className="stat-value">{live ? (live.combined?.activeSubscriptions ?? live.activeSubscriptions) : '…'}</p></div>
-        <div className="stat-card"><h3>Total Seats</h3><p className="stat-value">{live ? (live.combined?.totalSeats ?? live.totalSeats) : '…'}</p></div>
-        <div className="stat-card"><h3>Suspended</h3><p className="stat-value">{live ? (live.combined?.suspendedSubscriptions ?? live.suspendedSubscriptions) : '…'}</p></div>
+    <div className="section" id="admin-overview-section">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <h2 style={{ margin: 0 }}>📊 Dashboard Analytics</h2>
+        <button 
+          id="refresh-analytics-btn"
+          className="btn btn-secondary" 
+          onClick={async () => {
+            setAnalyticsLoading(true);
+            try {
+              const token = localStorage.getItem('token');
+              const res = await axios.get(`${API_URL}/admin/analytics/dashboard`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              });
+              setAnalytics(res.data);
+            } catch (e) {
+              setAnalyticsErr('Could not reload analytics.');
+            } finally {
+              setAnalyticsLoading(false);
+            }
+          }}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+        >
+          🔄 Refresh
+        </button>
       </div>
 
+      {(liveErr || analyticsErr) && (
+        <div style={{ background: '#fff7ed', color: '#9a3412', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13, border: '1px solid #ffedd5' }}>
+          {liveErr && <div style={{ marginBottom: 4 }}>⚠️ {liveErr}</div>}
+          {analyticsErr && <div>⚠️ {analyticsErr}</div>}
+        </div>
+      )}
+
+      {/* KPI Stats Grid */}
+      <div className="stats-grid" style={{ marginBottom: 20 }}>
+        <div className="stat-card" id="kpi-card-mrr">
+          <h3>Monthly Recurring Revenue (MRR)</h3>
+          <p className="stat-value" style={{ color: '#6366f1' }}>
+            {analyticsLoading ? '…' : `$${currentMRR.toLocaleString()}`}
+          </p>
+          <span style={{ fontSize: 12, color: '#6b7280' }}>Workspace & Addon revenue</span>
+        </div>
+        <div className="stat-card" id="kpi-card-renewal">
+          <h3>Overall Renewal Rate</h3>
+          <p className="stat-value" style={{ color: '#10b981' }}>
+            {analyticsLoading ? '…' : `${analytics?.overallStats?.overallRenewalRate ?? 100}%`}
+          </p>
+          <span style={{ fontSize: 12, color: '#6b7280' }}>Paid cycles / Active, non-whitelisted</span>
+        </div>
+        <div className="stat-card" id="kpi-card-subscriptions">
+          <h3>Tracked Subscriptions</h3>
+          <p className="stat-value" style={{ color: '#0d9488' }}>
+            {analyticsLoading ? '…' : (analytics?.overallStats?.totalSubscriptions ?? 0)}
+          </p>
+          <span style={{ fontSize: 12, color: '#6b7280' }}>Total active and suspended</span>
+        </div>
+        <div className="stat-card" id="kpi-card-customers">
+          <h3>Total Portal Customers</h3>
+          <p className="stat-value" style={{ color: '#1e293b' }}>
+            {analyticsLoading ? '…' : (analytics?.overallStats?.totalCustomers ?? 0)}
+          </p>
+          <span style={{ fontSize: 12, color: '#6b7280' }}>Registered user accounts</span>
+        </div>
+      </div>
+
+      {analyticsLoading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 80, background: '#fff', borderRadius: 14, border: '1px solid #e5e7eb', marginBottom: 20 }}>
+          <div className="loading" style={{ margin: 0 }}>Analyzing financial trends and active accounts...</div>
+        </div>
+      ) : (
+        <>
+          {/* Charts Row 1: MRR & Revenue + Sub Growth */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: 18, marginBottom: 20 }} className="grid-2">
+            <div style={chartCard} id="chart-card-mrr">
+              <div style={{ marginBottom: 14 }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#1e293b' }}>MRR & Revenue Trends</h3>
+                <span style={{ fontSize: 12, color: '#6b7280' }}>Comparison of MRR (Workspace subscriptions) vs. total paid amounts</span>
+              </div>
+              <div style={{ width: '100%', height: 260, flex: 1 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={analytics?.mrrTrend || []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorMRR" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2}/>
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                      </linearGradient>
+                      <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                    <YAxis tickLine={false} axisLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                    <Tooltip content={<CustomTooltip prefix="$" />} />
+                    <Legend verticalAlign="top" height={36} iconType="circle" />
+                    <Area type="monotone" name="MRR (Recurring)" dataKey="mrr" stroke="#6366f1" strokeWidth={2.5} fillOpacity={1} fill="url(#colorMRR)" />
+                    <Area type="monotone" name="Total Revenue" dataKey="revenue" stroke="#10b981" strokeWidth={2.5} fillOpacity={1} fill="url(#colorRevenue)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div style={chartCard} id="chart-card-growth">
+              <div style={{ marginBottom: 14 }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#1e293b' }}>Subscription Growth</h3>
+                <span style={{ fontSize: 12, color: '#6b7280' }}>Cumulative growth in active billing subscriptions and monthly new registrations</span>
+              </div>
+              <div style={{ width: '100%', height: 260, flex: 1 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={analytics?.growthTrend || []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                    <YAxis tickLine={false} axisLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                    <Tooltip content={<CustomTooltip prefix="" />} />
+                    <Legend verticalAlign="top" height={36} iconType="circle" />
+                    <Bar name="New Registrations" dataKey="newSubscriptions" fill="#0d9488" radius={[4, 4, 0, 0]} barSize={24} />
+                    <Line name="Cumulative Total" type="monotone" dataKey="totalSubscriptions" stroke="#4f46e5" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+
+          {/* Charts Row 2: Renewal Rates Trend + Pie Status Breakdown */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: 18, marginBottom: 20 }} className="grid-2">
+            <div style={chartCard} id="chart-card-renewals">
+              <div style={{ marginBottom: 14 }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#1e293b' }}>Monthly Renewal Success Rates</h3>
+                <span style={{ fontSize: 12, color: '#6b7280' }}>Percentage of billing cycles successfully renewed and paid in full</span>
+              </div>
+              <div style={{ width: '100%', height: 260, flex: 1 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={analytics?.renewalRatesTrend || []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                    <YAxis tickLine={false} axisLine={false} tick={{ fill: '#64748b', fontSize: 12 }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                    <Tooltip content={<CustomTooltip prefix="" />} />
+                    <Legend verticalAlign="top" height={36} iconType="circle" />
+                    <Bar name="Renewal Rate (%)" dataKey="rate" fill="#10b981" radius={[4, 4, 0, 0]} barSize={32}>
+                      {(analytics?.renewalRatesTrend || []).map((entry, index) => {
+                        const color = entry.rate >= 90 ? '#10b981' : entry.rate >= 70 ? '#f59e0b' : '#ef4444';
+                        return <Cell key={`cell-${index}`} fill={color} />;
+                      })}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div style={chartCard} id="chart-card-status">
+              <div style={{ marginBottom: 14 }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#1e293b' }}>Active Subscription Status</h3>
+                <span style={{ fontSize: 12, color: '#6b7280' }}>Distribution of current subscription cycles and Whitelist statuses</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 16 }}>
+                <div style={{ width: 180, height: 180 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={finalPieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={4}
+                        dataKey="value"
+                      >
+                        {finalPieData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value, name) => [value, name]} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {finalPieData.map((entry, index) => (
+                    <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                      <div style={{ width: 12, height: 12, borderRadius: '50%', background: entry.color }} />
+                      <span style={{ fontWeight: 500, color: '#334155' }}>{entry.name}:</span>
+                      <span style={{ color: '#64748b' }}>{entry.value} ({analytics?.overallStats?.totalSubscriptions > 0 ? Math.round((entry.value / analytics.overallStats.totalSubscriptions) * 100) : 0}%)</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Per-account breakdown: USA vs Pakistan */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }} className="grid-2">
+      <h3 style={{ marginTop: 24, marginBottom: 12, fontSize: 15, fontWeight: 700, color: '#1e293b' }}>Live Google Reseller Node Breakdown</h3>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }} className="grid-2" id="overview-account-breakdown">
         {[
           { key: 'pk', label: 'Pakistan reseller', sub: 'gnbmentor.com · Workspace', color: '#0F766E', data: live?.pk },
           { key: 'usa', label: 'USA reseller', sub: 'artisandrywallaz.com · Voice', color: '#1d4ed8', data: live?.usa },
@@ -828,7 +1126,7 @@ const OverviewSection = ({ stats }) => {
         ))}
       </div>
 
-      <div className="recent-orders" style={{ marginTop: 24 }}>
+      <div className="recent-orders" style={{ marginTop: 24 }} id="overview-recent-orders">
         <h3>Recent Orders</h3>
         <table className="data-table">
           <thead>
@@ -1927,13 +2225,86 @@ const AdminCustomersSection = () => {
   const [error, setError] = useState('');
   const [resetMsg, setResetMsg] = useState({});
 
+  // Bulk / Batch state
+  const [plans, setPlans] = useState([]);
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState([]);
+  const [bulkActionPlan, setBulkActionPlan] = useState('');
+  const [bulkActionSeats, setBulkActionSeats] = useState(1);
+  const [bulkActionType, setBulkActionType] = useState('upgrade');
+  const [bulkActionMsg, setBulkActionMsg] = useState('');
+  const [bulkActionBusy, setBulkActionBusy] = useState(false);
+  const [bulkActionResults, setBulkActionResults] = useState(null);
+
+  const loadPlans = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/products`);
+      if (res.data?.workspace) {
+        setPlans(res.data.workspace);
+        if (res.data.workspace[0]) {
+          setBulkActionPlan(res.data.workspace[0].id);
+        }
+      }
+    } catch (_) {}
+  };
+
   const load = async () => {
     setLoading(true); setError('');
     try { const res = await axios.get(`${API_URL}/admin/customers`); setCustomers(res.data.customers || []); }
     catch (e) { setError(e?.response?.data?.error || 'Could not load customers.'); }
     finally { setLoading(false); }
   };
-  useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    load();
+    loadPlans();
+  }, []);
+
+  const toggleSelectCustomer = (id) => {
+    setSelectedCustomerIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedCustomerIds.length === customers.length) {
+      setSelectedCustomerIds([]);
+    } else {
+      setSelectedCustomerIds(customers.map(c => c.id || c._id));
+    }
+  };
+
+  const runBulkApply = async () => {
+    if (selectedCustomerIds.length === 0) {
+      setBulkActionMsg('Please select at least one customer account from the list below.');
+      return;
+    }
+    if (!bulkActionPlan) {
+      setBulkActionMsg('Please select a plan to apply.');
+      return;
+    }
+
+    setBulkActionBusy(true);
+    setBulkActionMsg('');
+    setBulkActionResults(null);
+
+    try {
+      const res = await axios.post(`${API_URL}/admin/customers/bulk-apply`, {
+        customerIds: selectedCustomerIds,
+        planId: bulkActionPlan,
+        seats: Number(bulkActionSeats) || 1,
+        actionType: bulkActionType,
+      });
+
+      setBulkActionResults(res.data);
+      setBulkActionMsg(`✓ Successfully processed. Applied successfully to ${res.data.applied} of ${res.data.total} customers.`);
+      setSelectedCustomerIds([]);
+      load();
+    } catch (e) {
+      setBulkActionMsg(e?.response?.data?.error || 'Batch process failed.');
+    } finally {
+      setBulkActionBusy(false);
+    }
+  };
 
   const resetPassword = async (id) => {
     try {
@@ -1965,14 +2336,13 @@ const AdminCustomersSection = () => {
 
   const openAttach = (c) => {
     setAttaching(c);
-    // Pre-fill the domain: use their linked domain, else guess from their email address.
     const emailDom = (c.email || '').split('@')[1] || '';
     const guess = c.domain || emailDom || '';
     setAttachDom(guess);
     setLookup(null); setAttachMsg('');
-    // Auto-look up immediately if we have a domain guess.
     if (guess) setTimeout(() => doLookupFor(guess), 100);
   };
+
   const doLookupFor = async (dom) => {
     const d = (dom || '').toLowerCase().trim();
     if (!d) { setAttachMsg('Enter the customer\'s domain.'); return; }
@@ -1984,7 +2354,9 @@ const AdminCustomersSection = () => {
     } catch (e) { setAttachMsg(e?.response?.data?.error || 'Lookup failed.'); }
     finally { setLookupBusy(false); }
   };
+
   const doLookup = () => doLookupFor(attachDom);
+
   const confirmAttach = async () => {
     setAttachBusy(true); setAttachMsg('');
     try {
@@ -2002,13 +2374,129 @@ const AdminCustomersSection = () => {
       <h2>👥 Customers</h2>
       {error && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
       <p style={{ color: '#5b6075' }}>{customers.length} registered customer{customers.length === 1 ? '' : 's'}</p>
+
+      {/* Bulk Action Interface */}
+      <div style={{ background: '#f8fafc', borderRadius: 14, padding: 20, border: '1px solid #e2e8f0', marginBottom: 24 }}>
+        <h3 style={{ margin: '0 0 4px', fontSize: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
+          ⚡ Batch-Apply License Upgrades / Subscriptions
+        </h3>
+        <p style={{ color: '#64748b', fontSize: 13, marginTop: 0, marginBottom: 16 }}>
+          Select multiple customer accounts in the table below to apply new licenses or upgrade their subscriptions simultaneously.
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.5fr', gap: 12, marginBottom: 16 }} className="grid-2">
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Select Plan</label>
+            <select value={bulkActionPlan} onChange={e => setBulkActionPlan(e.target.value)} style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 12px' }}>
+              <option value="">-- Choose a Workspace Plan --</option>
+              {plans.map(p => <option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}/seat/mo</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Seats</label>
+            <input type="number" min="1" value={bulkActionSeats} onChange={e => setBulkActionSeats(e.target.value)} style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 12px' }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Action Type</label>
+            <select value={bulkActionType} onChange={e => setBulkActionType(e.target.value)} style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 12px' }}>
+              <option value="upgrade">Upgrade Existing License (Change SKU/Seats)</option>
+              <option value="new_subscription">Force Provision New Subscription</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <button 
+            onClick={runBulkApply} 
+            disabled={bulkActionBusy || selectedCustomerIds.length === 0} 
+            className="btn btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            {bulkActionBusy ? 'Applying Batch...' : `Apply to ${selectedCustomerIds.length} Selected Account(s)`}
+          </button>
+          {selectedCustomerIds.length > 0 && (
+            <button 
+              onClick={() => setSelectedCustomerIds([])} 
+              className="btn btn-secondary" 
+              style={{ padding: '8px 14px' }}
+            >
+              Clear Selection
+            </button>
+          )}
+          <span style={{ fontSize: 13, color: '#475569', fontWeight: 500 }}>
+            {selectedCustomerIds.length} of {customers.length} customers selected
+          </span>
+        </div>
+
+        {bulkActionMsg && (
+          <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, fontSize: 14, fontWeight: 500, backgroundColor: bulkActionMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', border: bulkActionMsg.startsWith('✓') ? '1px solid #bbf7d0' : '1px solid #fee2e2', color: bulkActionMsg.startsWith('✓') ? '#15803d' : '#b91c1c' }}>
+            {bulkActionMsg}
+          </div>
+        )}
+
+        {bulkActionResults && bulkActionResults.results && (
+          <div style={{ marginTop: 16, borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
+            <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 14, color: '#1e293b' }}>
+              Batch Results: {bulkActionResults.applied} Succeeded, {bulkActionResults.failed} Failed
+            </div>
+            <div style={{ overflowX: 'auto', maxHeight: 200, border: '1px solid #e2e8f0', borderRadius: 8 }}>
+              <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', background: '#fff' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left', color: '#64748b' }}>
+                    <th style={{ padding: '8px 12px' }}>Email</th>
+                    <th style={{ padding: '8px 12px' }}>Status</th>
+                    <th style={{ padding: '8px 12px' }}>Details / Errors</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bulkActionResults.results.map((r, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '8px 12px', fontWeight: 600 }}>{r.email || '—'}</td>
+                      <td style={{ padding: '8px 12px', color: r.ok ? '#166534' : '#b42318', fontWeight: 600 }}>
+                        {r.ok ? '✓ Success' : '✗ Failed'}
+                      </td>
+                      <td style={{ padding: '8px 12px', color: '#475569' }}>
+                        {r.ok ? (r.note || 'Processed successfully') : (r.error || 'Failed')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
       {customers.length === 0 ? <p>No customers have registered yet.</p> : (
         <div style={{ overflowX: 'auto' }}>
           <table className="data-table">
-            <thead><tr><th>Username</th><th>Email</th><th>Domain</th><th>Account</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead>
+              <tr>
+                <th style={{ width: 40, paddingLeft: 12 }}>
+                  <input 
+                    type="checkbox" 
+                    checked={customers.length > 0 && selectedCustomerIds.length === customers.length} 
+                    onChange={toggleSelectAll} 
+                  />
+                </th>
+                <th>Username</th>
+                <th>Email</th>
+                <th>Domain</th>
+                <th>Account</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
             <tbody>
               {customers.map(c => (
-                <tr key={c.id}>
+                <tr key={c.id || c._id} style={{ backgroundColor: selectedCustomerIds.includes(c.id || c._id) ? '#f0fdf4' : 'transparent' }}>
+                  <td style={{ paddingLeft: 12 }}>
+                    <input 
+                      type="checkbox" 
+                      checked={selectedCustomerIds.includes(c.id || c._id)} 
+                      onChange={() => toggleSelectCustomer(c.id || c._id)} 
+                    />
+                  </td>
                   <td>{c.username || '—'}</td>
                   <td>{c.email}</td>
                   <td>{c.domain || <span style={{ color: '#b45309' }}>none</span>}</td>
@@ -2016,10 +2504,10 @@ const AdminCustomersSection = () => {
                   <td><span className={`status ${c.status}`}>{c.status}</span></td>
                   <td>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => resetPassword(c.id)}>Reset pwd</button>
+                      <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => resetPassword(c.id || c._id)}>Reset pwd</button>
                       <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openAttach(c)}>Attach subscription</button>
                     </div>
-                    {resetMsg[c.id] && <div style={{ fontSize: 12, color: '#166534', marginTop: 4 }}>{resetMsg[c.id]}</div>}
+                    {resetMsg[c.id || c._id] && <div style={{ fontSize: 12, color: '#166534', marginTop: 4 }}>{resetMsg[c.id || c._id]}</div>}
                   </td>
                 </tr>
               ))}
@@ -2886,7 +3374,7 @@ const AdminEmailsSection = () => {
   const card = { background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 16 };
   const inp = { width: '100%', borderRadius: 8, border: '1px solid #d8dbe6', padding: '10px 12px', marginBottom: 12, fontSize: 14, fontFamily: 'inherit' };
 
-  const labels = { warning: 'Renewal warning', suspension: 'Suspension notice', payment: 'Payment confirmation' };
+  const labels = { warning: 'Renewal warning', suspension: 'Suspension notice', payment: 'Payment confirmation', expiry_7day: '7-day Expiry Warning', expiry_today: 'Expiration Day Warning' };
 
   const load = async () => {
     try { const r = await axios.get(`${API_URL}/admin/email/templates`); setData(r.data); pick('warning', r.data); }
@@ -2952,9 +3440,9 @@ const AdminEmailsSection = () => {
       {tab === 'templates' && (
         <>
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-            {['warning', 'suspension', 'payment'].map(k => (
+            {['warning', 'suspension', 'payment', 'expiry_7day', 'expiry_today'].map(k => (
               <button key={k} className={`btn ${editing === k ? 'btn-primary' : 'btn-secondary'}`} onClick={() => pick(k)}>
-                {labels[k]}{data.templates[k].customized ? ' •' : ''}
+                {labels[k]}{data.templates[k] && data.templates[k].customized ? ' •' : ''}
               </button>
             ))}
           </div>
@@ -3027,6 +3515,8 @@ const AdminPaymentsSection = () => {
   const [retryMsg, setRetryMsg] = useState({});
   const [subBilling, setSubBilling] = useState([]);
   const [subBillingMsg, setSubBillingMsg] = useState('');
+  const [subBillingSearch, setSubBillingSearch] = useState('');
+  const [subBillingFilterStatus, setSubBillingFilterStatus] = useState('all');
   const [bulkDomains, setBulkDomains] = useState('');
   const [showBulk, setShowBulk] = useState(false);
   const [testDomain, setTestDomain] = useState('');
@@ -3227,6 +3717,41 @@ const AdminPaymentsSection = () => {
   const card = { background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 18 };
   const inp = { width: '100%', height: 38, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12, fontFamily: 'monospace', fontSize: 13 };
   const chip = (ok) => ({ fontSize: 12, fontWeight: 600, color: ok ? '#166534' : '#b45309' });
+
+  const filteredSubBilling = subBilling.filter(r => {
+    let expiringSoon = false;
+    let diffDays = null;
+    if (r.nextBillingDate && !r.whitelisted) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const nextBill = new Date(r.nextBillingDate);
+      nextBill.setHours(0, 0, 0, 0);
+      const diffTime = nextBill - today;
+      diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      expiringSoon = diffDays !== null && diffDays >= 0 && diffDays <= 7;
+    }
+
+    if (subBillingFilterStatus !== 'all') {
+      if (subBillingFilterStatus === 'whitelisted') {
+        if (!r.whitelisted) return false;
+      } else if (subBillingFilterStatus === 'expiring_soon') {
+        if (!expiringSoon) return false;
+      } else if (['active', 'suspended', 'pending'].includes(subBillingFilterStatus)) {
+        if (r.billingStatus !== subBillingFilterStatus) return false;
+      }
+    }
+
+    if (subBillingSearch.trim()) {
+      const q = subBillingSearch.toLowerCase().trim();
+      const domainMatch = r.domain && r.domain.toLowerCase().includes(q);
+      const nameMatch = r.customerName && r.customerName.toLowerCase().includes(q);
+      const emailMatch = r.customerEmail && r.customerEmail.toLowerCase().includes(q);
+      const skuMatch = r.skuId && r.skuId.toLowerCase().includes(q);
+      return domainMatch || nameMatch || emailMatch || skuMatch;
+    }
+
+    return true;
+  });
 
   if (loading || !s) return <div className="loading">Loading payment settings…</div>;
 
@@ -3506,33 +4031,97 @@ const AdminPaymentsSection = () => {
               <button className="btn btn-secondary" style={{ color: '#166534', borderColor: '#166534' }} onClick={testActivate}>Reactivate</button>
             </div>
           </div>
+          {/* Search and status filters */}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center', background: '#f8fafc', padding: '12px 16px', borderRadius: 10, border: '1px solid #e2e8f0', marginTop: 14 }}>
+            <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
+              <input
+                id="subbilling-search-input"
+                type="text"
+                value={subBillingSearch}
+                onChange={e => setSubBillingSearch(e.target.value)}
+                placeholder="🔍 Search domain, customer name, email, or SKU..."
+                style={{ width: '100%', height: 38, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 12px 0 12px', fontSize: 13, outline: 'none' }}
+              />
+            </div>
+            <div style={{ minWidth: 180 }}>
+              <select
+                id="subbilling-status-select"
+                value={subBillingFilterStatus}
+                onChange={e => setSubBillingFilterStatus(e.target.value)}
+                style={{ width: '100%', height: 38, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 13, background: '#fff', cursor: 'pointer', outline: 'none' }}
+              >
+                <option value="all">All Statuses</option>
+                <option value="active">Active</option>
+                <option value="suspended">Suspended</option>
+                <option value="pending">Pending</option>
+                <option value="whitelisted">Whitelisted</option>
+                <option value="expiring_soon">Expiring soon (≤ 7 days)</option>
+              </select>
+            </div>
+          </div>
+
           {subBilling.length === 0 ? <p>No subscriptions tracked yet. Click "Sync from Google" to load them.</p> : (
-            <table className="data-table">
-              <thead><tr><th>Domain</th><th>SKU</th><th>Acct</th><th>Purchased</th><th>Next bill (29d)</th><th>Status</th><th>Whitelist</th></tr></thead>
-              <tbody>
-                {subBilling.map(r => (
-                  <tr key={r._id} style={r.whitelisted ? { background: '#f0fdf4' } : undefined}>
-                    <td>{r.domain}</td>
-                    <td>{r.skuId}</td>
-                    <td>{(r.account || 'pk').toUpperCase()}</td>
-                    <td>{r.purchaseDate ? new Date(r.purchaseDate).toLocaleDateString() : '—'}</td>
-                    <td>{r.nextBillingDate ? new Date(r.nextBillingDate).toLocaleDateString() : '—'}</td>
-                    <td><span className={`status ${r.billingStatus === 'active' ? 'active' : r.billingStatus === 'suspended' ? 'suspended' : 'pending'}`}>{r.billingStatus}</span></td>
-                    <td>
-                      {r.whitelisted ? (
-                        <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => toggleWhitelist(r._id, false)}>
-                          ✓ Whitelisted — remove
-                        </button>
-                      ) : (
-                        <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px', color: '#166534', borderColor: '#166534' }} onClick={() => toggleWhitelist(r._id, true)}>
-                          Whitelist (renew)
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            filteredSubBilling.length === 0 ? (
+              <p style={{ padding: '24px', textAlign: 'center', color: '#6b7280', background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0' }}>
+                No subscriptions match your search or status filter.
+              </p>
+            ) : (
+              <table className="data-table">
+                <thead><tr><th>Domain / Customer</th><th>SKU</th><th>Acct</th><th>Purchased</th><th>Next bill (29d)</th><th>Status</th><th>Whitelist</th></tr></thead>
+                <tbody>
+                  {filteredSubBilling.map(r => {
+                    let expiringSoon = false;
+                    let diffDays = null;
+                    if (r.nextBillingDate && !r.whitelisted) {
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const nextBill = new Date(r.nextBillingDate);
+                      nextBill.setHours(0, 0, 0, 0);
+                      const diffTime = nextBill - today;
+                      diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                      expiringSoon = diffDays !== null && diffDays >= 0 && diffDays <= 7;
+                    }
+                    return (
+                      <tr key={r._id} style={r.whitelisted ? { background: '#f0fdf4' } : expiringSoon ? { background: '#fffbeb' } : undefined}>
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ fontWeight: 600 }}>{r.domain}</span>
+                              {expiringSoon && (
+                                <span title={`Expiring in ${diffDays} day(s)`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                  <span style={{ fontSize: 14 }}>🚩</span>
+                                  <span style={{ fontSize: 10, fontWeight: 700, background: '#fef3c7', color: '#b45309', padding: '1px 5px', borderRadius: 4, border: '1px solid #fde047', lineHeight: '14px' }}>
+                                    {diffDays === 0 ? 'Today' : `${diffDays}d`}
+                                  </span>
+                                </span>
+                              )}
+                            </div>
+                            {r.customerName && <span style={{ fontSize: 12, color: '#374151', fontWeight: 500 }}>👤 {r.customerName}</span>}
+                            {r.customerEmail && <span style={{ fontSize: 11, color: '#6b7280' }}>✉️ {r.customerEmail}</span>}
+                          </div>
+                        </td>
+                        <td>{r.skuId}</td>
+                        <td>{(r.account || 'pk').toUpperCase()}</td>
+                        <td>{r.purchaseDate ? new Date(r.purchaseDate).toLocaleDateString() : '—'}</td>
+                        <td>{r.nextBillingDate ? new Date(r.nextBillingDate).toLocaleDateString() : '—'}</td>
+                        <td><span className={`status ${r.billingStatus === 'active' ? 'active' : r.billingStatus === 'suspended' ? 'suspended' : 'pending'}`}>{r.billingStatus}</span></td>
+                        <td>
+                          {r.whitelisted ? (
+                            <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => toggleWhitelist(r._id, false)}>
+                              ✓ Whitelisted — remove
+                            </button>
+                          ) : (
+                            <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px', color: '#166534', borderColor: '#166534' }} onClick={() => toggleWhitelist(r._id, true)}>
+                              Whitelist (renew)
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )
           )}
         </>
       )}
@@ -4752,6 +5341,38 @@ const CustomerSubscriptions = () => {
     finally { setRenewBusy(false); }
   };
 
+  const toggleAutoRenew = async (sub, currentVal) => {
+    try {
+      const newVal = !currentVal;
+      setData(prev => {
+        if (!prev || !prev.subscriptions) return prev;
+        return {
+          ...prev,
+          subscriptions: prev.subscriptions.map(item => {
+            if (item.skuId === sub.skuId && item.subscriptionId === sub.subscriptionId) {
+              return { ...item, autoRenew: newVal };
+            }
+            return item;
+          })
+        };
+      });
+
+      await axios.post(`${API_URL}/customer/subscriptions/toggle-autorenew`, {
+        skuId: sub.skuId,
+        subscriptionId: sub.subscriptionId,
+        autoRenew: newVal
+      });
+    } catch (e) {
+      console.error('Failed to toggle auto-renew', e);
+      alert('Could not update auto-renew preference: ' + (e?.response?.data?.error || e.message));
+      // Re-fetch subscriptions
+      try {
+        const subRes = await axios.get(`${API_URL}/customer/my-subscriptions`);
+        if (subRes && subRes.data) setData(subRes.data);
+      } catch (_) {}
+    }
+  };
+
   const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString() : '—';
   const fmtD = (d) => d ? new Date(d).toLocaleDateString() : '—';
   const hasSubs = data?.subscriptions && data.subscriptions.length > 0;
@@ -4772,7 +5393,7 @@ const CustomerSubscriptions = () => {
         </div>
       ) : (
         <table className="data-table" style={{ marginBottom: 24 }}>
-          <thead><tr><th>Product</th><th>Type</th><th>Seats</th><th>Status</th><th>Renews</th><th></th></tr></thead>
+          <thead><tr><th>Product</th><th>Type</th><th>Seats</th><th>Status</th><th>Renews</th><th>Auto-Renew</th><th></th></tr></thead>
           <tbody>
             {data.subscriptions.map((s, i) => {
               const d = s.daysUntilRenewal;
@@ -4820,6 +5441,50 @@ const CustomerSubscriptions = () => {
                       </div>
                     )}
                     {s.cycleStatus === 'paid' && <div style={{ fontSize: 11, color: '#166534', fontWeight: 600 }}>✓ Paid this cycle</div>}
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <button
+                        id={`autorenew-toggle-${i}`}
+                        onClick={() => toggleAutoRenew(s, s.autoRenew)}
+                        style={{
+                          position: 'relative',
+                          display: 'inline-flex',
+                          height: 24,
+                          width: 44,
+                          flexShrink: 0,
+                          cursor: 'pointer',
+                          borderRadius: 9999,
+                          borderWidth: 2,
+                          borderColor: 'transparent',
+                          transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+                          transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+                          transitionDuration: '200ms',
+                          backgroundColor: s.autoRenew ? '#0f766e' : '#d1d5db',
+                          outline: 'none',
+                          padding: 0
+                        }}
+                      >
+                        <span
+                          style={{
+                            pointerEvents: 'none',
+                            display: 'inline-block',
+                            height: 20,
+                            width: 20,
+                            transform: s.autoRenew ? 'translateX(20px)' : 'translateX(0px)',
+                            borderRadius: '9999px',
+                            backgroundColor: '#ffffff',
+                            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+                            transitionProperty: 'transform',
+                            transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+                            transitionDuration: '200ms'
+                          }}
+                        />
+                      </button>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: s.autoRenew ? '#0f766e' : '#4b5563' }}>
+                        {s.autoRenew ? 'On' : 'Off'}
+                      </span>
+                    </div>
                   </td>
                   <td>
                     {s.cycleStatus === 'paid'
@@ -5300,6 +5965,62 @@ const CustomerSettings = () => {
         <button className="btn btn-primary" onClick={changePwd}>Change password</button>
         {pwdMsg && <span style={{ marginLeft: 10, fontSize: 14, color: pwdMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{pwdMsg}</span>}
       </div>
+    </div>
+  );
+};
+
+
+// ==================== SCROLL REVEAL ANIMATION COMPONENT ====================
+const ScrollReveal = ({ children, delay = 0, duration = 800 }) => {
+  const [isVisible, setIsVisible] = useState(false);
+  const domRef = useRef(null);
+
+  useEffect(() => {
+    // Check if IntersectionObserver is supported
+    if (!window.IntersectionObserver) {
+      setIsVisible(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          if (domRef.current) {
+            observer.unobserve(domRef.current);
+          }
+        }
+      },
+      {
+        threshold: 0.05, // triggers when at least 5% of the element is visible
+        rootMargin: '0px 0px -60px 0px', // triggers slightly before entry to look smoother
+      }
+    );
+
+    const currentRef = domRef.current;
+    if (currentRef) {
+      observer.observe(currentRef);
+    }
+
+    return () => {
+      if (currentRef) {
+        observer.unobserve(currentRef);
+      }
+    };
+  }, []);
+
+  return (
+    <div
+      ref={domRef}
+      style={{
+        opacity: isVisible ? 1 : 0,
+        transform: isVisible ? 'translateY(0)' : 'translateY(24px)',
+        transition: `opacity ${duration}ms cubic-bezier(0.16, 1, 0.3, 1), transform ${duration}ms cubic-bezier(0.16, 1, 0.3, 1)`,
+        transitionDelay: `${delay}ms`,
+        willChange: 'opacity, transform',
+      }}
+    >
+      {children}
     </div>
   );
 };
@@ -6507,6 +7228,20 @@ const LandingPage = () => {
   const [selectedServices, setSelectedServices] = useState([]);
   const [submittingLead, setSubmittingLead] = useState(false);
   const [leadStatus, setLeadStatus] = useState({ success: false, message: '' });
+  const [toasts, setToasts] = useState([]);
+
+  const addToast = (message) => {
+    const id = Date.now();
+    const cleanMsg = message.replace(/^🎉\s*/, '');
+    setToasts(prev => [...prev, { id, message: cleanMsg }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 5000);
+  };
+
+  const removeToast = (id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
 
   const toggleService = (srv) => {
     setSelectedServices(prev =>
@@ -6546,6 +7281,7 @@ const LandingPage = () => {
         services: selectedServices,
       });
       setLeadStatus({ success: true, message: `🎉 ${res.data.message}` });
+      addToast(res.data.message || 'Lead submitted successfully!');
       setLeadForm({ fullName: '', email: '', phone: '', businessName: '', domain: '', message: '' });
       setSelectedServices([]);
     } catch (error) {
@@ -6582,379 +7318,505 @@ const LandingPage = () => {
 
   return (
     <div style={{ minHeight: '100vh', background: '#ffffff', fontFamily: 'Geist, sans-serif', color: INKL }}>
-      {/* Nav */}
-      <header className="landing-nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1.5rem 4rem', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {brand.logoDataUrl
-            ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 40, maxWidth: 200 }} />
-            : <>
-              <div style={{ width: 40, height: 40, borderRadius: 10, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>{(brand.brandName || 'G')[0]}</div>
-              <strong style={{ fontSize: 22, color: INKL, fontWeight: 800 }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
-            </>}
-        </div>
-        <div style={{ display: 'flex', gap: 24, alignItems: 'center' }} className="nav-links-desktop">
-          <a href="#workspace-calculator-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#0f766e]">Workspace Configurator</a>
-          <a href="#setup-services-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#0f766e]">Services</a>
-          <a href="#success-stories-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#0f766e]">Success Stories</a>
-          <div style={{ display: 'flex', gap: 12, marginLeft: 16 }}>
-            <button onClick={() => go('/login')} className="btn btn-outline" style={{ padding: '0.75rem 1.5rem', borderRadius: 12, fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', border: '1px solid rgba(17, 24, 39, 0.08)', background: '#fff', color: INKL, transition: 'all 0.2s' }}>↪ Login</button>
-            <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '0.75rem 1.5rem', borderRadius: 12, fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', background: T, color: '#fff', transition: 'all 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', border: 'none' }}>+ Sign Up</button>
+      {/* Persistent Sticky Navigation Bar */}
+      <header style={{
+        position: 'sticky',
+        top: 0,
+        zIndex: 1000,
+        background: 'rgba(255, 255, 255, 0.96)',
+        backdropFilter: 'blur(8px)',
+        borderBottom: '1px solid rgba(17, 24, 39, 0.06)',
+        width: '100%',
+      }}>
+        <div className="landing-nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem 4rem', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {brand.logoDataUrl
+              ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 40, maxWidth: 200 }} />
+              : <>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>{(brand.brandName || 'G')[0]}</div>
+                <strong style={{ fontSize: 22, color: INKL, fontWeight: 800 }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
+              </>}
+          </div>
+          <div style={{ display: 'flex', gap: 24, alignItems: 'center' }} className="nav-links-desktop">
+            <a href="#workspace-calculator-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#0f766e]">Workspace Configurator</a>
+            <a href="#setup-services-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#0f766e]">Services</a>
+            <a href="#faq-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#0f766e]">FAQ</a>
+            <a href="#success-stories-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#0f766e]">Success Stories</a>
+            <div style={{ display: 'flex', gap: 12, marginLeft: 16 }}>
+              <button onClick={() => go('/login')} className="btn btn-outline" style={{ padding: '0.75rem 1.5rem', borderRadius: 12, fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', border: '1px solid rgba(17, 24, 39, 0.08)', background: '#fff', color: INKL, transition: 'all 0.2s' }}>↪ Login</button>
+              <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '0.75rem 1.5rem', borderRadius: 12, fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', background: T, color: '#fff', transition: 'all 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', border: 'none' }}>+ Sign Up</button>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Hero */}
       <section className="landing-hero" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '4rem', maxWidth: 1400, margin: '0 auto', padding: '4rem', alignItems: 'center' }}>
-        <div style={{ minWidth: 320 }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: '#f0fdfa', color: '#0f766e', borderRadius: 99, padding: '0.4rem 1rem', fontSize: '0.8rem', fontWeight: 600, marginBottom: '1.5rem' }}>
-            <span style={{ display: 'flex', gap: 4 }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6' }} />
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444' }} />
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b' }} />
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e' }} />
-            </span>
-            Business email & apps in one place
+        <ScrollReveal duration={1000}>
+          <div style={{ minWidth: 320 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: '#f0fdfa', color: '#0f766e', borderRadius: 99, padding: '0.4rem 1rem', fontSize: '0.8rem', fontWeight: 600, marginBottom: '1.5rem' }}>
+              <span style={{ display: 'flex', gap: 4 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6' }} />
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444' }} />
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b' }} />
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e' }} />
+              </span>
+              Business email & apps in one place
+            </div>
+            <h1 className="hero-title" style={{ fontSize: 'clamp(3rem, 5vw, 4.5rem)', lineHeight: 0.95, letterSpacing: '-0.04em', margin: '0 0 1.5rem 0', fontWeight: 800 }}>
+              Get <span style={{ color: T }}>professional email</span> for your team
+            </h1>
+            <p style={{ fontSize: '1.2rem', color: MUTEL, lineHeight: 1.6, margin: '0 0 2.5rem 0', maxWidth: 540 }}>
+              The same Gmail, Meet, and Drive you love, optimized for your domain. 
+              Scale your business infrastructure with enterprise-grade reliability and reseller support.
+            </p>
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+              <button onClick={() => {
+                const el = document.getElementById('workspace-calculator-section');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }} className="btn btn-primary" style={{ padding: '1.1rem 2.2rem', fontSize: '1rem', borderRadius: 12, fontWeight: 600, cursor: 'pointer', background: T, color: '#fff', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.05)' }}>See plans & prices</button>
+              <button onClick={() => go('/register')} className="btn btn-outline" style={{ padding: '1.1rem 2.2rem', fontSize: '1rem', borderRadius: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid rgba(17, 24, 39, 0.08)', background: '#fff', color: INKL }}>Create free account</button>
+            </div>
           </div>
-          <h1 className="hero-title" style={{ fontSize: 'clamp(3rem, 5vw, 4.5rem)', lineHeight: 0.95, letterSpacing: '-0.04em', margin: '0 0 1.5rem 0', fontWeight: 800 }}>
-            Get <span style={{ color: T }}>professional email</span> for your team
-          </h1>
-          <p style={{ fontSize: '1.2rem', color: MUTEL, lineHeight: 1.6, margin: '0 0 2.5rem 0', maxWidth: 540 }}>
-            The same Gmail, Meet, and Drive you love, optimized for your domain. 
-            Scale your business infrastructure with enterprise-grade reliability and reseller support.
-          </p>
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-            <button onClick={() => {
-              const el = document.getElementById('workspace-calculator-section');
-              if (el) el.scrollIntoView({ behavior: 'smooth' });
-            }} className="btn btn-primary" style={{ padding: '1.1rem 2.2rem', fontSize: '1rem', borderRadius: 12, fontWeight: 600, cursor: 'pointer', background: T, color: '#fff', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.05)' }}>See plans & prices</button>
-            <button onClick={() => go('/register')} className="btn btn-outline" style={{ padding: '1.1rem 2.2rem', fontSize: '1rem', borderRadius: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid rgba(17, 24, 39, 0.08)', background: '#fff', color: INKL }}>Create free account</button>
-          </div>
-        </div>
+        </ScrollReveal>
 
         {/* Card Preview */}
-        <div className="card-preview" style={{ background: '#fff', border: '1px solid rgba(17, 24, 39, 0.08)', borderRadius: 24, padding: '2.5rem', boxShadow: '0 20px 50px rgba(0,0,0,0.05)', position: 'relative' }}>
-          <h3 style={{ fontSize: '1.4rem', marginTop: 0, marginBottom: '1.5rem', fontWeight: 800 }}>What's Included</h3>
-          {[
-            ['📧', 'Custom Business Email', 'Build instant trust with address@yourcompany.com'],
-            ['🎥', 'Enterprise Meetings', 'Google Meet for high-def team & client collaboration'],
-            ['📁', 'Cloud Ecosystem', 'Drive, Docs, Sheets, and Calendar synced across devices'],
-          ].map(([ic, t, d], i) => (
-            <div key={i} className="benefit-item" style={{ display: 'flex', gap: '1.2rem', marginBottom: i === 2 ? 0 : '1.5rem' }}>
-              <div className="benefit-icon" style={{ width: 48, height: 48, background: '#f9fafb', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0 }}>{ic}</div>
-              <div className="benefit-text">
-                <h4 style={{ margin: '0 0 0.2rem 0', fontSize: '1.1rem', fontWeight: 700, color: INKL }}>{t}</h4>
-                <p style={{ margin: 0, color: MUTEL, fontSize: '0.95rem', lineHeight: 1.4 }}>{d}</p>
+        <ScrollReveal delay={150} duration={1000}>
+          <div className="card-preview" style={{ background: '#fff', border: '1px solid rgba(17, 24, 39, 0.08)', borderRadius: 24, padding: '2.5rem', boxShadow: '0 20px 50px rgba(0,0,0,0.05)', position: 'relative' }}>
+            <h3 style={{ fontSize: '1.4rem', marginTop: 0, marginBottom: '1.5rem', fontWeight: 800 }}>What's Included</h3>
+            {[
+              ['📧', 'Custom Business Email', 'Build instant trust with address@yourcompany.com'],
+              ['🎥', 'Enterprise Meetings', 'Google Meet for high-def team & client collaboration'],
+              ['📁', 'Cloud Ecosystem', 'Drive, Docs, Sheets, and Calendar synced across devices'],
+            ].map(([ic, t, d], i) => (
+              <div key={i} className="benefit-item" style={{ display: 'flex', gap: '1.2rem', marginBottom: i === 2 ? 0 : '1.5rem' }}>
+                <div className="benefit-icon" style={{ width: 48, height: 48, background: '#f9fafb', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0 }}>{ic}</div>
+                <div className="benefit-text">
+                  <h4 style={{ margin: '0 0 0.2rem 0', fontSize: '1.1rem', fontWeight: 700, color: INKL }}>{t}</h4>
+                  <p style={{ margin: 0, color: MUTEL, fontSize: '0.95rem', lineHeight: 1.4 }}>{d}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </ScrollReveal>
+      </section>
+
+      {/* Trusted By / Integration Partners */}
+      <ScrollReveal delay={100} duration={800}>
+        <section className="trusted-by-section" style={{ 
+          padding: '2.5rem 4rem', 
+          maxWidth: 1400, 
+          margin: '0 auto', 
+          width: '100%', 
+          borderTop: '1px solid rgba(17, 24, 39, 0.05)', 
+          background: '#ffffff'
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ 
+              fontSize: '0.7rem', 
+              fontFamily: 'Geist Mono, monospace', 
+              textTransform: 'uppercase', 
+              letterSpacing: '0.12em', 
+              color: MUTEL, 
+              marginBottom: '1.5rem',
+              opacity: 0.85
+            }}>
+              Integrated with standard-setting platforms & payment providers
+            </p>
+            <div className="logos-grid" style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              gap: '3.5rem', 
+              flexWrap: 'wrap',
+              color: 'rgba(17, 24, 39, 0.35)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', transition: 'color 0.2s' }} className="hover:text-[#0f766e]">
+                <svg viewBox="0 0 60 25" fill="currentColor" style={{ height: 18, pointerEvents: 'none' }}><path d="M54.12 11.23c0-3.32-1.63-5.32-4.63-5.32-3.1 0-5.11 2.37-5.11 5.48 0 3.86 2.5 5.34 5.38 5.34 1.48 0 2.82-.36 3.69-.87v-2.31c-.82.4-1.92.68-2.97.68-1.57 0-2.61-.59-2.73-1.85h8.33c.02-.32.04-.71.04-1.15zm-6.38-1.58c0-1.11.75-1.74 1.73-1.74 1.01 0 1.63.63 1.63 1.74h-3.36zm-8.23-3.65c-1.34 0-2.29.61-2.72 1.15l-.16-.95h-2.9v15.2h3.33v-3.41c.45.38 1.25.83 2.45.83 2.52 0 4.41-1.91 4.41-5.06-.01-4.04-2.1-7.76-4.41-7.76zm-.97 10.15c-1.28 0-1.85-.68-1.85-1.9v-2.73c0-1.11.57-1.85 1.85-1.85 1.15 0 1.82.83 1.82 2.05v2.54c0 1.23-.67 1.89-1.82 1.89zm-10.22-4.14c0-1.56-.91-2.11-2.45-2.11-1.3 0-2.53.4-3.33.87v-2.65c.99-.41 2.42-.71 3.55-.71 3.32 0 5.56 1.44 5.56 4.67v8.52h-2.94l-.16-.95c-.53.67-1.5 1.15-2.82 1.15-2.27 0-3.9-1.34-3.9-3.43 0-3.21 2.8-3.9 6.27-3.9l.22.51zm-.24 1.78c-1.5 0-2.42.22-2.42 1.15 0 .69.51 1.05 1.34 1.05 1.23 0 1.89-.79 1.89-1.93l-.81-.27zm-11.45-7.79h3.33v11.4h-3.33zm0-4.02h3.33v2.85h-3.33zm-2.8 5.76c-.53-.59-1.42-1.03-2.63-1.03-2.6 0-4.51 2.13-4.51 5.34 0 3.75 2.11 5.36 4.7 5.36 1.03 0 1.95-.36 2.41-.83v3.13l-3.23.68v2.57l3.23-.68h3.36V6.15H7.07zm-.26 7.42c-.41.4-1.05.67-1.74.67-1.25 0-1.97-.83-1.97-2.11v-2.31c0-1.25.75-2.09 1.97-2.09.73 0 1.3.26 1.74.75v5.09z" /></svg>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Stripe</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#0f766e]">
+                <svg viewBox="0 0 60 25" fill="currentColor" style={{ height: 18, pointerEvents: 'none' }}><path d="M51.8 7.3h-7.1c-.5 0-.9.3-1 .8L40 20.8c-.1.3.1.6.4.6h3.4c.4 0 .8-.3.9-.8l.8-5c.1-.4.4-.7.9-.7h2.2c3.5 0 5.8-1.7 6.5-5.5.3-1.7.1-3-.9-3.8-.8-.7-2-1.2-3.4-1.2zm.4 4.5c-.3 2-1.7 2.8-3.7 2.8h-1.5l.8-4.8c0-.2.2-.4.4-.4h1c1.2 0 2 .2 2.5.6.5.4.7 1 .5 1.8zM24.8 7.3h-7.1c-.5 0-.9.3-1 .8l-3.7 12.7c-.1.3.1.6.4.6h3.4c.4 0 .8-.3.9-.8l.8-5c.1-.4.4-.7.9-.7h2.2c3.5 0 5.8-1.7 6.5-5.5.3-1.7.1-3-.9-3.8-.8-.7-2-1.2-3.4-1.2zm.4 4.5c-.3 2-1.7 2.8-3.7 2.8h-1.5l.8-4.8c0-.2.2-.4.4-.4h1c1.2 0 2 .2 2.5.6.5.4.7 1 .5 1.8zm11.2-4.5h-3.3c-.3 0-.6.2-.7.5l-5.3 7.7-2.3-7.5c-.1-.3-.4-.5-.7-.5h-3.3c-.4 0-.6.4-.4.7l4.3 12.3-3.6 5.1c-.2.3 0 .8.4.8h3.3c.3 0 .6-.2.7-.5l11.3-16.1c.3-.4 0-.9-.4-.9z" /></svg>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>PayPal</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#0f766e]">
+                <svg viewBox="0 0 100 25" fill="currentColor" style={{ height: 16, pointerEvents: 'none' }}><path d="M12.5 10c0-1.4-1.1-2.5-2.5-2.5S7.5 8.6 7.5 10v2.5H10c1.4 0 2.5-1.1 2.5-2.5zm-5 0V5c0-1.4-1.1-2.5-2.5-2.5S2.5 3.6 2.5 5v5c0 1.4 1.1 2.5 2.5 2.5h2.5V10zM10 12.5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5H7.5V15c0-1.4 1.1-2.5 2.5-2.5zm0 5h5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5h-5c-1.4 0-2.5-1.1-2.5-2.5s1.1-2.5 2.5-2.5zm5-5c0 1.4 1.1 2.5 2.5 2.5s2.5-1.1 2.5-2.5V10H15v2.5zm5 0V5c0-1.4-1.1-2.5-2.5-2.5S15 3.6 15 5v5c0 1.4 1.1 2.5 2.5 2.5H20V12.5zm-2.5 2.5c-1.4 0-2.5-1.1-2.5-2.5V10H15v2.5c0 1.4 1.1 2.5 2.5 2.5h2.5V15c0-1.4-1.1-2.5-2.5-2.5zm0-5h-5c-1.4 0-2.5-1.1-2.5-2.5S11.1 2.5 12.5 2.5h5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5zM29 7.5c-2.3 0-4.1 1.2-5 3V3H21v14.5h3v-6c0-2.2 1.8-4 4-4s4 1.8 4 4v6h3V11.5c0-2.2-1.8-4-4-4zm15.5 0c-3 0-5.5 2.5-5.5 5.5s2.5 5.5 5.5 5.5 5.5-2.5 5.5-5.5-2.5-5.5-5.5-5.5zm0 8c-1.4 0-2.5-1.1-2.5-2.5s1.1-2.5 2.5-2.5 2.5 1.1 2.5 2.5-1.1 2.5-2.5 2.5zm16-8c-2.2 0-4.1 1.2-5 3v-2.5h-3v11h3v-6c0-2.2 1.8-4 4-4s4 1.8 4 4v6h3V11.5c0-2.2-1.8-4-4-4z" /></svg>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Slack</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#0f766e]">
+                <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>💬</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Workspace</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#0f766e]">
+                <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>🛍️</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Shopify</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#0f766e]">
+                <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>📦</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Salesforce</span>
               </div>
             </div>
-          ))}
-        </div>
-      </section>
+          </div>
+        </section>
+      </ScrollReveal>
 
       {/* Business email + domain search */}
-      <section className="search-strip" style={{ background: '#f9fafb', borderTop: '1px solid rgba(17, 24, 39, 0.08)', borderBottom: '1px solid rgba(17, 24, 39, 0.08)', padding: '3rem 4rem' }}>
-        <div className="search-container" style={{ maxWidth: 800, margin: '0 auto', textAlign: 'center' }}>
-          <label className="search-label" style={{ fontSize: '0.7rem', fontFamily: 'Geist Mono, monospace', textTransform: 'uppercase', letterSpacing: '0.1em', color: MUTEL, marginBottom: '1rem', display: 'block' }}>Step 1: Secure your identity</label>
-          <h2 style={{ fontSize: '2.2rem', margin: '0 0 1.5rem 0', fontWeight: 800, color: INKL }}>Find your perfect domain</h2>
-          <div className="search-box" style={{ display: 'flex', gap: '0.5rem', background: '#fff', padding: '0.5rem', borderRadius: 16, border: '1px solid rgba(17, 24, 39, 0.08)', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-            <input
-              value={dq}
-              onChange={e => setDq(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') searchDomain(); }}
-              placeholder="yourbusiness.com"
-              style={{ flex: 1, border: 'none', padding: '0 1rem', fontSize: '1rem', outline: 'none' }}
-            />
-            <button onClick={searchDomain} disabled={dLoading} className="btn btn-primary" style={{ padding: '0 2rem', borderRadius: 12, fontWeight: 600, cursor: 'pointer', background: T, color: '#fff', border: 'none' }}>
-              {dLoading ? 'Searching...' : 'Search Domains'}
-            </button>
-          </div>
-          {dError && <div style={{ color: '#ef4444', marginTop: 14, fontWeight: 600, fontSize: 14 }}>{dError}</div>}
-          {dResult && dResult.results && (
-            <div style={{ marginTop: 20, maxWidth: 560, margin: '20px auto 0' }}>
-              {dResult.results.map((r, i) => (
-                <div key={i} style={{ background: r.available ? '#f0f7f5' : '#fafafa', borderRadius: 12, padding: '14px 18px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, opacity: r.available ? 1 : 0.65 }}>
-                  <div style={{ textAlign: 'left' }}>
-                    <span style={{ fontSize: 16, fontWeight: 700, color: INKL }}>{r.domain}</span>
-                    {r.isPremium && <span style={{ marginLeft: 8, fontSize: 11, background: '#fde68a', color: '#92600a', padding: '2px 8px', borderRadius: 999 }}>Premium</span>}
-                    <div style={{ color: r.available ? '#166534' : '#b45309', fontWeight: 600, fontSize: 13 }}>{r.available ? '✓ Available' : '✗ Taken'}</div>
-                  </div>
-                  {r.available && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <strong style={{ fontSize: 18, color: T }}>{r.price != null ? `$${Number(r.price).toFixed(2)}/yr` : ''}</strong>
-                      <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '10px 18px', borderRadius: 10, fontWeight: 700, cursor: 'pointer', background: T, color: '#fff', border: 'none' }}>
-                        Get started
-                      </button>
+      <ScrollReveal duration={850}>
+        <section className="search-strip" style={{ background: '#f9fafb', borderTop: '1px solid rgba(17, 24, 39, 0.08)', borderBottom: '1px solid rgba(17, 24, 39, 0.08)', padding: '3rem 4rem' }}>
+          <div className="search-container" style={{ maxWidth: 800, margin: '0 auto', textAlign: 'center' }}>
+            <label className="search-label" style={{ fontSize: '0.7rem', fontFamily: 'Geist Mono, monospace', textTransform: 'uppercase', letterSpacing: '0.1em', color: MUTEL, marginBottom: '1rem', display: 'block' }}>Step 1: Secure your identity</label>
+            <h2 style={{ fontSize: '2.2rem', margin: '0 0 1.5rem 0', fontWeight: 800, color: INKL }}>Find your perfect domain</h2>
+            <div className="search-box" style={{ display: 'flex', gap: '0.5rem', background: '#fff', padding: '0.5rem', borderRadius: 16, border: '1px solid rgba(17, 24, 39, 0.08)', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+              <input
+                value={dq}
+                onChange={e => setDq(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') searchDomain(); }}
+                placeholder="yourbusiness.com"
+                style={{ flex: 1, border: 'none', padding: '0 1rem', fontSize: '1rem', outline: 'none' }}
+              />
+              <button onClick={searchDomain} disabled={dLoading} className="btn btn-primary" style={{ padding: '0 2rem', borderRadius: 12, fontWeight: 600, cursor: 'pointer', background: T, color: '#fff', border: 'none' }}>
+                {dLoading ? 'Searching...' : 'Search Domains'}
+              </button>
+            </div>
+            {dError && <div style={{ color: '#ef4444', marginTop: 14, fontWeight: 600, fontSize: 14 }}>{dError}</div>}
+            {dResult && dResult.results && (
+              <div style={{ marginTop: 20, maxWidth: 560, margin: '20px auto 0' }}>
+                {dResult.results.map((r, i) => (
+                  <div key={i} style={{ background: r.available ? '#f0f7f5' : '#fafafa', borderRadius: 12, padding: '14px 18px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, opacity: r.available ? 1 : 0.65 }}>
+                    <div style={{ textAlign: 'left' }}>
+                      <span style={{ fontSize: 16, fontWeight: 700, color: INKL }}>{r.domain}</span>
+                      {r.isPremium && <span style={{ marginLeft: 8, fontSize: 11, background: '#fde68a', color: '#92600a', padding: '2px 8px', borderRadius: 999 }}>Premium</span>}
+                      <div style={{ color: r.available ? '#166534' : '#b45309', fontWeight: 600, fontSize: 13 }}>{r.available ? '✓ Available' : '✗ Taken'}</div>
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* Plans */}
-      <section className="pricing-section" style={{ padding: '5rem 4rem', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
-        <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
-          <h2 style={{ fontSize: '2.8rem', fontWeight: 800, margin: '0 0 1rem 0', color: INKL }}>Ready to scale?</h2>
-          <p style={{ color: MUTEL, fontSize: '1.1rem' }}>Choose the workspace tier that fits your team's current needs.</p>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
-          {plans.length === 0 ? (
-            <p style={{ textAlign: 'center', color: MUTEL, gridColumn: '1/-1' }}>Loading plans…</p>
-          ) : plans.map((p) => {
-            const isStandard = p.id === 'standard' || p.name.toLowerCase().includes('standard');
-            return (
-              <div key={p.id} className="price-card" style={{
-                background: isStandard ? '#f0fdfa' : '#fff',
-                border: isStandard ? `1.5px solid ${T}` : '1px solid rgba(17, 24, 39, 0.08)',
-                padding: '2rem',
-                borderRadius: 12,
-                transition: 'border-color 0.3s, transform 0.3s',
-                display: 'flex',
-                flexDirection: 'column',
-                boxShadow: isStandard ? '0 10px 25px rgba(15,118,110,0.06)' : 'none'
-              }}>
-                <h3 style={{ fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: MUTEL, margin: '0 0 1rem 0', fontWeight: 700 }}>{p.name.replace('Google Workspace ', '')}</h3>
-                <div style={{ fontSize: '2.5rem', fontWeight: 800, marginBottom: '1.5rem', color: INKL }}>
-                  ${p.monthlyPrice}<span style={{ fontSize: '1rem', fontWeight: 400, color: MUTEL }}>/mo</span>
-                </div>
-                {p.features && (
-                  <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 2rem 0', fontSize: '0.9rem', flexGrow: 1, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                    {p.features.slice(0, 5).map((f, i) => (
-                      <li key={i} style={{ color: MUTEL, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <span style={{ color: T, fontWeight: 800 }}>✓</span> {f}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <button onClick={() => go('/register')} className={isStandard ? 'btn btn-primary' : 'btn btn-outline'} style={{
-                  padding: '0.75rem 1.5rem',
-                  borderRadius: 12,
-                  fontWeight: 600,
-                  fontSize: '0.9rem',
-                  cursor: 'pointer',
-                  border: isStandard ? 'none' : '1px solid rgba(17, 24, 39, 0.08)',
-                  background: isStandard ? T : '#fff',
-                  color: isStandard ? '#fff' : INKL,
-                  width: '100%',
-                  transition: 'all 0.2s'
-                }}>
-                  Choose {p.name.replace('Google Workspace ', '')}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* Interactive Cost & Plan Calculator Tool */}
-      <WorkspaceCalculator plans={plans} T={T} TD={TD} INKL={INKL} MUTEL={MUTEL} />
-
-      {/* Business Setup Services Lead Gen Form */}
-      <section className="px-6 py-12 md:px-10 md:py-20" style={{ background: '#f8fafc', borderTop: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0' }}>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-start" style={{ maxWidth: 1200, margin: '0 auto' }}>
-          
-          {/* Left Side: Services Pitch */}
-          <div>
-            <div style={{ display: 'inline-block', background: '#e0f2fe', color: '#0369a1', borderRadius: 99, padding: '4px 14px', fontSize: 13, fontWeight: 700, marginBottom: 16 }}>
-              🛠️ Business Setup Services
-            </div>
-            <h2 style={{ fontSize: 40, lineHeight: 1.15, fontWeight: 800, margin: '0 0 20px', color: INKL }}>
-              Get your business up &amp; running <span style={{ color: T }}>correctly</span>
-            </h2>
-            <p style={{ fontSize: 17, color: MUTEL, lineHeight: 1.6, margin: '0 0 32px' }}>
-              Setting up Google Workspace, configuring custom domain DNS records (MX, SPF, DKIM, DMARC), securing your website with SSL, and configuring business phones can be tedious. Let our certified setup experts handle everything for you.
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-              {[
-                { title: 'Certified Google Workspace Setup', desc: 'Secure email addresses on your custom domain, custom routing rules, and multi-user team onboarding.', icon: '🏢' },
-                { title: 'DNS & Technical Configuration', desc: 'We configure DNS MX, SPF, DKIM, and DMARC settings to guarantee 100% email deliverability and avoid spam folders.', icon: '⚙️' },
-                { title: 'Google Voice & Business Lines', desc: 'Unified business communication setup for calling, SMS, and custom automated virtual attendants.', icon: '📞' },
-                { title: 'Hosting & Security Provisioning', desc: 'Secure name servers, enterprise-grade SSL certificates, and lightning-fast custom landing page hosting.', icon: '🔒' },
-              ].map((item, idx) => (
-                <div key={idx} style={{ display: 'flex', gap: 16 }}>
-                  <div style={{ width: 44, height: 44, borderRadius: 12, background: '#fff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, boxShadow: '0 1px 2px rgba(0,0,0,0.02)', flexShrink: 0 }}>
-                    {item.icon}
+                    {r.available && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <strong style={{ fontSize: 18, color: T }}>{r.price != null ? `$${Number(r.price).toFixed(2)}/yr` : ''}</strong>
+                        <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '10px 18px', borderRadius: 10, fontWeight: 700, cursor: 'pointer', background: T, color: '#fff', border: 'none' }}>
+                          Get started
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <h4 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700, color: INKL }}>{item.title}</h4>
-                    <p style={{ margin: 0, fontSize: 14, color: MUTEL, lineHeight: 1.5 }}>{item.desc}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Right Side: Form Card */}
-          <div className="p-6 sm:p-10" style={{ background: '#fff', borderRadius: 24, border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.03)' }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 800, color: INKL }}>Prospective Client Inquiry</h3>
-            <p style={{ color: MUTEL, margin: '0 0 24px', fontSize: 14, lineHeight: 1.5 }}>Fill out the inquiry form below, select the setup services you require, and our team will get back to you with a customized setup proposal.</p>
-
-            {leadStatus.message && (
-              <div style={{
-                background: leadStatus.success ? '#ecfdf5' : '#fef2f2',
-                color: leadStatus.success ? '#047857' : '#b91c1c',
-                border: `1px solid ${leadStatus.success ? '#a7f3d0' : '#fca5a5'}`,
-                padding: '14px 18px',
-                borderRadius: 12,
-                fontSize: 14,
-                marginBottom: 20,
-                fontWeight: 500,
-              }}>
-                {leadStatus.message}
+                ))}
               </div>
             )}
+          </div>
+        </section>
+      </ScrollReveal>
 
-            <form onSubmit={handleLeadSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Full Name *</label>
-                  <input
-                    required
-                    value={leadForm.fullName}
-                    onChange={e => setLeadForm(prev => ({ ...prev, fullName: e.target.value }))}
-                    placeholder="Jane Doe"
-                    style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
-                  />
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Business Email *</label>
-                  <input
-                    required
-                    type="email"
-                    value={leadForm.email}
-                    onChange={e => setLeadForm(prev => ({ ...prev, email: e.target.value }))}
-                    placeholder="jane@company.com"
-                    style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Phone Number</label>
-                  <input
-                    value={leadForm.phone}
-                    onChange={e => setLeadForm(prev => ({ ...prev, phone: e.target.value }))}
-                    placeholder="+1 (555) 019-2834"
-                    style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
-                  />
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Business Name</label>
-                  <input
-                    value={leadForm.businessName}
-                    onChange={e => setLeadForm(prev => ({ ...prev, businessName: e.target.value }))}
-                    placeholder="Acme Corp"
-                    style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Target Domain or Website (if any)</label>
-                <input
-                  value={leadForm.domain}
-                  onChange={e => setLeadForm(prev => ({ ...prev, domain: e.target.value }))}
-                  placeholder="acme.com"
-                  style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
-                />
-              </div>
-
-              {/* Service Selection Checklist */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Requested Setup Services</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {[
-                    'Google Workspace & Custom Domain Setup',
-                    'Enterprise Security Configuration (DKIM, SPF, DMARC)',
-                    'Google Voice & Business Phone Solutions',
-                    'Corporate Web Hosting & SSL Configuration',
-                    'Complete Turnkey Branding & Logo Setup'
-                  ].map((srv) => {
-                    const isSelected = selectedServices.includes(srv);
-                    return (
-                      <label key={srv} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13, userSelect: 'none' }}>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleService(srv)}
-                          style={{ width: 16, height: 16, accentColor: T }}
-                        />
-                        <span style={{ color: isSelected ? INKL : '#4b5563', fontWeight: isSelected ? 600 : 400 }}>{srv}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Project Description / Setup Requirements</label>
-                <textarea
-                  value={leadForm.message}
-                  onChange={e => setLeadForm(prev => ({ ...prev, message: e.target.value }))}
-                  placeholder="Tell us about your team size, expected timeline, and any special configuration requirements..."
-                  style={{ minHeight: 80, borderRadius: 10, border: '1px solid #cbd5e1', padding: 12, fontSize: 14, fontFamily: 'inherit', resize: 'none' }}
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={submittingLead}
-                style={{
-                  background: submittingLead ? '#0d9488' : T,
-                  opacity: submittingLead ? 0.75 : 1,
-                  color: '#fff',
-                  border: 'none',
+      {/* Plans */}
+      <ScrollReveal duration={900}>
+        <section className="pricing-section" style={{ padding: '5rem 4rem', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
+          <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
+            <h2 style={{ fontSize: '2.8rem', fontWeight: 800, margin: '0 0 1rem 0', color: INKL }}>Ready to scale?</h2>
+            <p style={{ color: MUTEL, fontSize: '1.1rem' }}>Choose the workspace tier that fits your team's current needs.</p>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
+            {plans.length === 0 ? (
+              <p style={{ textAlign: 'center', color: MUTEL, gridColumn: '1/-1' }}>Loading plans…</p>
+            ) : plans.map((p) => {
+              const isStandard = p.id === 'standard' || p.name.toLowerCase().includes('standard');
+              return (
+                <div key={p.id} className="price-card" style={{
+                  background: isStandard ? '#f0fdfa' : '#fff',
+                  border: isStandard ? `1.5px solid ${T}` : '1px solid rgba(17, 24, 39, 0.08)',
+                  padding: '2rem',
                   borderRadius: 12,
-                  padding: '14px',
-                  fontSize: 16,
-                  fontWeight: 700,
-                  cursor: submittingLead ? 'not-allowed' : 'pointer',
-                  marginTop: 8,
-                  transition: 'all 0.2s ease',
-                  boxShadow: '0 4px 12px rgba(15,118,110,0.15)',
+                  transition: 'border-color 0.3s, transform 0.3s',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  boxShadow: isStandard ? '0 10px 25px rgba(15,118,110,0.06)' : 'none'
+                }}>
+                  <h3 style={{ fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: MUTEL, margin: '0 0 1rem 0', fontWeight: 700 }}>{p.name.replace('Google Workspace ', '')}</h3>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 800, marginBottom: '1.5rem', color: INKL }}>
+                    ${p.monthlyPrice}<span style={{ fontSize: '1rem', fontWeight: 400, color: MUTEL }}>/mo</span>
+                  </div>
+                  {p.features && (
+                    <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 2rem 0', fontSize: '0.9rem', flexGrow: 1, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      {p.features.slice(0, 5).map((f, i) => (
+                        <li key={i} style={{ color: MUTEL, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{ color: T, fontWeight: 800 }}>✓</span> {f}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <button onClick={() => go('/register')} className={isStandard ? 'btn btn-primary' : 'btn btn-outline'} style={{
+                    padding: '0.75rem 1.5rem',
+                    borderRadius: 12,
+                    fontWeight: 600,
+                    fontSize: '0.9rem',
+                    cursor: 'pointer',
+                    border: isStandard ? 'none' : '1px solid rgba(17, 24, 39, 0.08)',
+                    background: isStandard ? T : '#fff',
+                    color: isStandard ? '#fff' : INKL,
+                    width: '100%',
+                    transition: 'all 0.2s'
+                  }}>
+                    Choose {p.name.replace('Google Workspace ', '')}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </ScrollReveal>
+
+      {/* Interactive Cost & Plan Calculator Tool */}
+      <ScrollReveal duration={900}>
+        <WorkspaceCalculator plans={plans} T={T} TD={TD} INKL={INKL} MUTEL={MUTEL} />
+      </ScrollReveal>
+
+      {/* Business Setup Services Lead Gen Form */}
+      <ScrollReveal duration={900}>
+        <section id="setup-services-section" className="px-6 py-12 md:px-10 md:py-20" style={{ background: '#f8fafc', borderTop: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0' }}>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-start" style={{ maxWidth: 1200, margin: '0 auto' }}>
+            
+            {/* Left Side: Services Pitch */}
+            <div>
+              <div style={{ display: 'inline-block', background: '#e0f2fe', color: '#0369a1', borderRadius: 99, padding: '4px 14px', fontSize: 13, fontWeight: 700, marginBottom: 16 }}>
+                🛠️ Business Setup Services
+              </div>
+              <h2 style={{ fontSize: 40, lineHeight: 1.15, fontWeight: 800, margin: '0 0 20px', color: INKL }}>
+                Get your business up &amp; running <span style={{ color: T }}>correctly</span>
+              </h2>
+              <p style={{ fontSize: 17, color: MUTEL, lineHeight: 1.6, margin: '0 0 32px' }}>
+                Setting up Google Workspace, configuring custom domain DNS records (MX, SPF, DKIM, DMARC), securing your website with SSL, and configuring business phones can be tedious. Let our certified setup experts handle everything for you.
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {[
+                  { title: 'Certified Google Workspace Setup', desc: 'Secure email addresses on your custom domain, custom routing rules, and multi-user team onboarding.', icon: '🏢' },
+                  { title: 'DNS & Technical Configuration', desc: 'We configure DNS MX, SPF, DKIM, and DMARC settings to guarantee 100% email deliverability and avoid spam folders.', icon: '⚙️' },
+                  { title: 'Google Voice & Business Lines', desc: 'Unified business communication setup for calling, SMS, and custom automated virtual attendants.', icon: '📞' },
+                  { title: 'Hosting & Security Provisioning', desc: 'Secure name servers, enterprise-grade SSL certificates, and lightning-fast custom landing page hosting.', icon: '🔒' },
+                ].map((item, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: 16 }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: '#fff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, boxShadow: '0 1px 2px rgba(0,0,0,0.02)', flexShrink: 0 }}>
+                      {item.icon}
+                    </div>
+                    <div>
+                      <h4 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700, color: INKL }}>{item.title}</h4>
+                      <p style={{ margin: 0, fontSize: 14, color: MUTEL, lineHeight: 1.5 }}>{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Right Side: Form Card */}
+            <div className="p-6 sm:p-10" style={{ background: '#fff', borderRadius: 24, border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.03)' }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 800, color: INKL }}>Prospective Client Inquiry</h3>
+              <p style={{ color: MUTEL, margin: '0 0 24px', fontSize: 14, lineHeight: 1.5 }}>Fill out the inquiry form below, select the setup services you require, and our team will get back to you with a customized setup proposal.</p>
+
+              {leadStatus.message && (
+                <div style={{
+                  background: leadStatus.success ? '#ecfdf5' : '#fef2f2',
+                  color: leadStatus.success ? '#047857' : '#b91c1c',
+                  border: `1px solid ${leadStatus.success ? '#a7f3d0' : '#fca5a5'}`,
+                  padding: '14px 18px',
+                  borderRadius: 12,
+                  fontSize: 14,
+                  marginBottom: 20,
+                  fontWeight: 500,
+                }}>
+                  {leadStatus.message}
+                </div>
+              )}
+
+              <form onSubmit={handleLeadSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Full Name *</label>
+                    <input
+                      required
+                      value={leadForm.fullName}
+                      onChange={e => setLeadForm(prev => ({ ...prev, fullName: e.target.value }))}
+                      placeholder="Jane Doe"
+                      style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Business Email *</label>
+                    <input
+                      required
+                      type="email"
+                      value={leadForm.email}
+                      onChange={e => setLeadForm(prev => ({ ...prev, email: e.target.value }))}
+                      placeholder="jane@company.com"
+                      style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Phone Number</label>
+                    <input
+                      value={leadForm.phone}
+                      onChange={e => setLeadForm(prev => ({ ...prev, phone: e.target.value }))}
+                      placeholder="+1 (555) 019-2834"
+                      style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Business Name</label>
+                    <input
+                      value={leadForm.businessName}
+                      onChange={e => setLeadForm(prev => ({ ...prev, businessName: e.target.value }))}
+                      placeholder="Acme Corp"
+                      style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Target Domain or Website (if any)</label>
+                  <input
+                    value={leadForm.domain}
+                    onChange={e => setLeadForm(prev => ({ ...prev, domain: e.target.value }))}
+                    placeholder="acme.com"
+                    style={{ height: 42, borderRadius: 10, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 14 }}
+                  />
+                </div>
+
+                {/* Service Selection Checklist */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Requested Setup Services</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {[
+                      'Google Workspace & Custom Domain Setup',
+                      'Enterprise Security Configuration (DKIM, SPF, DMARC)',
+                      'Google Voice & Business Phone Solutions',
+                      'Corporate Web Hosting & SSL Configuration',
+                      'Complete Turnkey Branding & Logo Setup'
+                    ].map((srv) => {
+                      const isSelected = selectedServices.includes(srv);
+                      return (
+                        <label key={srv} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13, userSelect: 'none' }}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleService(srv)}
+                            style={{ width: 16, height: 16, accentColor: T }}
+                          />
+                          <span style={{ color: isSelected ? INKL : '#4b5563', fontWeight: isSelected ? 600 : 400 }}>{srv}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5 }}>Project Description / Setup Requirements</label>
+                  <textarea
+                    value={leadForm.message}
+                    onChange={e => setLeadForm(prev => ({ ...prev, message: e.target.value }))}
+                    placeholder="Tell us about your team size, expected timeline, and any special configuration requirements..."
+                    style={{ minHeight: 80, borderRadius: 10, border: '1px solid #cbd5e1', padding: 12, fontSize: 14, fontFamily: 'inherit', resize: 'none' }}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={submittingLead}
+                  style={{
+                    background: submittingLead ? '#0d9488' : T,
+                    opacity: submittingLead ? 0.75 : 1,
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 12,
+                    padding: '14px',
+                    fontSize: 16,
+                    fontWeight: 700,
+                    cursor: submittingLead ? 'not-allowed' : 'pointer',
+                    marginTop: 8,
+                    transition: 'all 0.2s ease',
+                    boxShadow: '0 4px 12px rgba(15,118,110,0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 10
+                  }}
+                >
+                  {submittingLead ? (
+                    <>
+                      <svg className="animate-spin" style={{ width: 18, height: 18 }} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                        <path style={{ opacity: 0.85 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Submitting Inquiry...
+                    </>
+                  ) : (
+                    '✉️ Submit Setup Inquiry'
+                  )}
+                </button>
+              </form>
+            </div>
+
+            {/* Back to Top Navigation Assist */}
+            <div className="col-span-1 lg:col-span-2 flex flex-col items-center justify-center gap-3 mt-10 pt-8 border-t border-slate-100">
+              <p style={{ fontSize: '0.85rem', color: MUTEL, fontWeight: 500 }}>Finished reading?</p>
+              <button
+                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                style={{
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 10
+                  gap: '8px',
+                  background: '#ffffff',
+                  border: '1px solid #e2e8f0',
+                  color: '#4b5563',
+                  padding: '10px 24px',
+                  borderRadius: '99px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.25s ease',
+                  boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.borderColor = T;
+                  e.currentTarget.style.color = T;
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 10px 15px -3px rgba(15,118,110,0.1), 0 4px 6px -2px rgba(15,118,110,0.05)';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.borderColor = '#e2e8f0';
+                  e.currentTarget.style.color = '#4b5563';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)';
                 }}
               >
-                {submittingLead ? (
-                  <>
-                    <svg className="animate-spin" style={{ width: 18, height: 18 }} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                      <path style={{ opacity: 0.85 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Submitting Inquiry...
-                  </>
-                ) : (
-                  '✉️ Submit Setup Inquiry'
-                )}
+                <span>↑</span>
+                <span>Scroll to Top</span>
               </button>
-            </form>
-          </div>
+            </div>
 
-        </div>
-      </section>
+          </div>
+        </section>
+      </ScrollReveal>
 
       {/* Interactive FAQ Section */}
-      <FaqSection brand={brand} T={T} INKL={INKL} MUTEL={MUTEL} />
+      <ScrollReveal duration={900}>
+        <FaqSection brand={brand} T={T} INKL={INKL} MUTEL={MUTEL} />
+      </ScrollReveal>
 
       {/* Client Success Stories Section */}
-      <SuccessStoriesSection brand={brand} T={T} INKL={INKL} MUTEL={MUTEL} />
+      <ScrollReveal duration={900}>
+        <SuccessStoriesSection brand={brand} T={T} INKL={INKL} MUTEL={MUTEL} />
+      </ScrollReveal>
 
       {/* CTA band */}
-      <section className="landing-band" style={{ background: T, color: '#fff', padding: '64px 40px', textAlign: 'center' }}>
-        <h2 style={{ fontSize: 44, margin: '0 0 12px', fontWeight: 800 }}>Ready when you are</h2>
-        <p style={{ fontSize: 18, opacity: 0.95, margin: '0 0 32px' }}>Sign up to save your orders, or browse plans first — whatever is easier for you.</p>
-        <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
-          <button onClick={() => go('/register')} style={{ background: '#fff', color: T, border: 'none', borderRadius: 12, padding: '16px 32px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Compare plans</button>
-          <button onClick={() => go('/login')} style={{ background: 'transparent', color: '#fff', border: '2px solid rgba(255,255,255,0.7)', borderRadius: 12, padding: '16px 32px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Sign in</button>
-        </div>
-      </section>
+      <ScrollReveal duration={900}>
+        <section className="landing-band" style={{ background: T, color: '#fff', padding: '64px 40px', textAlign: 'center' }}>
+          <h2 style={{ fontSize: 44, margin: '0 0 12px', fontWeight: 800 }}>Ready when you are</h2>
+          <p style={{ fontSize: 18, opacity: 0.95, margin: '0 0 32px' }}>Sign up to save your orders, or browse plans first — whatever is easier for you.</p>
+          <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button onClick={() => go('/register')} style={{ background: '#fff', color: T, border: 'none', borderRadius: 12, padding: '16px 32px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Compare plans</button>
+            <button onClick={() => go('/login')} style={{ background: 'transparent', color: '#fff', border: '2px solid rgba(255,255,255,0.7)', borderRadius: 12, padding: '16px 32px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Sign in</button>
+          </div>
+        </section>
+      </ScrollReveal>
 
       {/* Footer */}
       <footer style={{ background: '#000000', color: 'rgba(255,255,255,0.6)', padding: '4rem' }}>
@@ -6989,6 +7851,109 @@ const LandingPage = () => {
           © 2026 {brand.brandName || 'GNB MENTOR LLC'}. All rights reserved. Google Workspace Reseller
         </div>
       </footer>
+
+      {/* Toast Notification Styles and Layout */}
+      <style>{`
+        @keyframes slideIn {
+          from {
+            transform: translateX(120%) translateY(0);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0) translateY(0);
+            opacity: 1;
+          }
+        }
+        @keyframes shrinkProgress {
+          from { width: 100%; }
+          to { width: 0%; }
+        }
+      `}</style>
+
+      <div style={{
+        position: 'fixed',
+        bottom: 24,
+        right: 24,
+        zIndex: 99999,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        pointerEvents: 'none'
+      }}>
+        {toasts.map(t => (
+          <div
+            key={t.id}
+            style={{
+              pointerEvents: 'auto',
+              background: '#ffffff',
+              borderLeft: '4px solid #0F766E',
+              borderTop: '1px solid #e5e7eb',
+              borderRight: '1px solid #e5e7eb',
+              borderBottom: '1px solid #e5e7eb',
+              borderRadius: '12px',
+              padding: '16px',
+              boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 12,
+              width: '360px',
+              animation: 'slideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+              position: 'relative',
+              overflow: 'hidden'
+            }}
+          >
+            <div style={{
+              background: '#f0fdf4',
+              color: '#0f766e',
+              width: 28,
+              height: 28,
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 14,
+              flexShrink: 0
+            }}>
+              ✓
+            </div>
+            <div style={{ flex: 1, paddingRight: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: '14px', color: '#111827', marginBottom: '2px' }}>
+                Success!
+              </div>
+              <div style={{ fontSize: '13px', color: '#4b5563', lineHeight: '1.4' }}>
+                {t.message}
+              </div>
+            </div>
+            <button
+              onClick={() => removeToast(t.id)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#9ca3af',
+                cursor: 'pointer',
+                fontSize: '18px',
+                lineHeight: 1,
+                padding: '0px 4px',
+                alignSelf: 'flex-start',
+                transition: 'color 0.2s'
+              }}
+              onMouseOver={(e) => e.currentTarget.style.color = '#374151'}
+              onMouseOut={(e) => e.currentTarget.style.color = '#9ca3af'}
+            >
+              ×
+            </button>
+            <div style={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              height: '3px',
+              background: '#0F766E',
+              animation: 'shrinkProgress 5s linear forwards',
+              width: '100%'
+            }} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
@@ -7816,6 +8781,8 @@ const ResponsiveStyles = () => (
       .landing-nav { padding: 1rem 1.5rem !important; }
       .landing-hero { grid-template-columns: 1fr !important; padding: 2rem 1.5rem !important; gap: 2rem !important; }
       .card-preview { padding: 1.5rem !important; }
+      .trusted-by-section { padding: 1.75rem 1.5rem !important; }
+      .logos-grid { gap: 1.75rem !important; }
       .pricing-section { padding: 3rem 1.5rem !important; }
       .search-strip { padding: 2.5rem 1.5rem !important; }
       footer { padding: 2.5rem 1.5rem !important; }
@@ -7829,6 +8796,8 @@ const ResponsiveStyles = () => (
       .landing-nav { padding: 1rem !important; }
       .landing-hero { padding: 1.5rem 1rem !important; gap: 1.5rem !important; }
       .card-preview { padding: 1.25rem !important; border-radius: 16px !important; }
+      .trusted-by-section { padding: 1.25rem 1rem !important; }
+      .logos-grid { gap: 1.25rem !important; }
       /* Search box + button stack on very small screens */
       .search-box { flex-direction: column !important; gap: 0.5rem !important; background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
       .search-box input { height: 50px !important; border: 1px solid rgba(17, 24, 39, 0.08) !important; border-radius: 12px !important; background: #fff !important; width: 100% !important; padding: 0 1rem !important; }
@@ -8090,6 +9059,39 @@ const AdminOrderWorkspace = () => {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResults, setBulkResults] = useState(null);
 
+  // Bulk attach subscriptions state
+  const [attachText, setAttachText] = useState('');
+  const [attachPlan, setAttachPlan] = useState('');
+  const [attachSeats, setAttachSeats] = useState(1);
+  const [attachAccount, setAttachAccount] = useState('pk');
+  const [attachBusy, setAttachBusy] = useState(false);
+  const [attachResults, setAttachResults] = useState(null);
+  const [attachMsg, setAttachMsg] = useState('');
+
+  const runBulkAttach = async () => {
+    setAttachResults(null);
+    setAttachMsg('');
+    const domains = attachText.split(/[\s,\n]+/).map(l => l.trim()).filter(Boolean);
+    if (domains.length === 0) { setAttachMsg('Paste at least one domain.'); return; }
+    if (!attachPlan) { setAttachMsg('Choose a plan for attachment.'); return; }
+
+    setAttachBusy(true);
+    try {
+      const response = await axios.post(`${API_URL}/admin/subscriptions/bulk-attach`, {
+        domains,
+        planId: attachPlan,
+        seats: Number(attachSeats) || 1,
+        account: attachAccount,
+      });
+      setAttachResults(response.data);
+      setAttachMsg(`✓ Attached subscriptions for ${response.data.attached} of ${response.data.total} domains.`);
+    } catch (e) {
+      setAttachMsg(e?.response?.data?.error || 'Bulk attachment failed.');
+    } finally {
+      setAttachBusy(false);
+    }
+  };
+
   const runBulk = async () => {
     setBulkResults(null);
     const lines = bulkText.split('\n').map(l => l.trim()).filter(Boolean);
@@ -8124,7 +9126,7 @@ const AdminOrderWorkspace = () => {
   const [retryBusy, setRetryBusy] = useState('');
 
   const loadPlans = async () => {
-    try { const r = await axios.get(`${API_URL}/products`); if (r.data?.workspace) { setPlans(r.data.workspace); if (r.data.workspace[0]) { setForm(f => ({ ...f, planId: r.data.workspace[0].id })); setBulkPlan(r.data.workspace[0].id); } } } catch (_) { }
+    try { const r = await axios.get(`${API_URL}/products`); if (r.data?.workspace) { setPlans(r.data.workspace); if (r.data.workspace[0]) { setForm(f => ({ ...f, planId: r.data.workspace[0].id })); setBulkPlan(r.data.workspace[0].id); setAttachPlan(r.data.workspace[0].id); } } } catch (_) { }
   };
   const loadOrders = async () => {
     try { const r = await axios.get(`${API_URL}/admin/workspace-orders${q ? `?q=${encodeURIComponent(q)}` : ''}`); setOrders(r.data.orders || []); } catch (_) { }
@@ -8298,6 +9300,65 @@ example3.com, 3, Acme Inc, admin`}</pre>
                       <td style={{ padding: '6px 0', fontWeight: 600 }}>{r.domain}</td>
                       <td style={{ color: r.ok ? '#166534' : '#b42318' }}>{r.ok ? '✓ Provisioned' : '✗ ' + (r.error || 'failed')}{r.provisionNote ? ` (${r.provisionNote})` : ''}</td>
                       <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{r.orderNumber || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <h2>🔗 Bulk Attach Subscriptions</h2>
+      <p style={{ color: '#5b6075' }}>Attach Workspace or Voice subscriptions to existing domains in bulk. One domain per line or comma-separated list.</p>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #e5e7eb', marginBottom: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }} className="grid-2">
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Plan to Attach *</label>
+            <select value={attachPlan} onChange={e => setAttachPlan(e.target.value)} style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }}>
+              {plans.map(p => <option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}/seat/mo</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Seats per Domain</label>
+            <input type="number" min="1" value={attachSeats} onChange={e => setAttachSeats(e.target.value)} style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Reseller Account</label>
+            <select value={attachAccount} onChange={e => setAttachAccount(e.target.value)} style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }}>
+              <option value="pk">Pakistan</option>
+              <option value="usa">USA</option>
+            </select>
+          </div>
+        </div>
+        <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Domains (one per line, or comma-separated)</label>
+        <textarea value={attachText} onChange={e => setAttachText(e.target.value)} rows={6}
+          placeholder={"domain1.com\ndomain2.com\ndomain3.com"}
+          style={{ width: '100%', borderRadius: 8, border: '1px solid #d8dbe6', padding: 12, fontFamily: 'monospace', fontSize: 13, boxSizing: 'border-box' }} />
+        <button onClick={runBulkAttach} disabled={attachBusy} className="btn btn-primary" style={{ marginTop: 12 }}>
+          {attachBusy ? 'Attaching… (this can take a while)' : `Attach to ${attachText.split(/[\s,\n]+/).filter(Boolean).length || ''} Domain(s)`}
+        </button>
+
+        {attachMsg && (
+          <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, fontSize: 14, fontWeight: 500, backgroundColor: attachMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', border: attachMsg.startsWith('✓') ? '1px solid #bbf7d0' : '1px solid #fee2e2', color: attachMsg.startsWith('✓') ? '#15803d' : '#b91c1c' }}>
+            {attachMsg}
+          </div>
+        )}
+
+        {attachResults && attachResults.results && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>
+              {attachResults.attached} attached, {attachResults.failed} failed
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}><th style={{ padding: '6px 0' }}>Domain</th><th>Status</th><th>Google Subscription ID</th></tr></thead>
+                <tbody>
+                  {attachResults.results.map((r, i) => (
+                    <tr key={i} style={{ borderTop: '1px solid #f0f0f0' }}>
+                      <td style={{ padding: '6px 0', fontWeight: 600 }}>{r.domain}</td>
+                      <td style={{ color: r.ok ? '#166534' : '#b42318' }}>{r.ok ? '✓ Attached Successfully' : '✗ ' + (r.error || 'failed')}</td>
+                      <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{r.subscriptionId || '—'}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -1051,3 +1051,226 @@ body {
   to { transform: rotate(360deg); }
 }
 
+/* ==================== HIGH-FIDELITY RESPONSIVE ADMIN STYLING ==================== */
+
+/* Sidebar Close Button (only visible on mobile drawer) */
+.sidebar-close-btn {
+  display: none;
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: #94a3b8;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.sidebar-close-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  transform: scale(1.05);
+}
+
+/* Mobile Top Navigation Bar */
+.mobile-admin-header {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background-color: #0f172a;
+  color: #ffffff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  position: sticky;
+  top: 0;
+  z-index: 99;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  height: 64px;
+}
+
+.mobile-menu-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.mobile-menu-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.mobile-header-title {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  color: #f8fafc;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 60%;
+  text-align: center;
+}
+
+/* Slide-over backdrop overlay on Mobile */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(5px);
+  z-index: 999;
+  animation: overlayFadeIn 0.25s ease-out;
+}
+
+@keyframes overlayFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Base style enhancement for Sidebar */
+.sidebar {
+  background-color: #0f172a !important; /* Premium deep slate */
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 24px 18px !important;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.sidebar-header h2 {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #f8fafc;
+}
+
+.sidebar-menu {
+  gap: 4px !important;
+}
+
+.menu-item {
+  color: #94a3b8 !important;
+  padding: 10px 14px !important;
+  border-radius: 8px !important;
+  font-size: 13.5px !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.menu-item:hover {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  color: #ffffff !important;
+  transform: translateX(3px);
+}
+
+.menu-item.active {
+  background-color: rgba(15, 118, 110, 0.12) !important;
+  color: #2dd4bf !important;
+  font-weight: 600 !important;
+  border-left: 3px solid #0f766e !important;
+  border-radius: 0 8px 8px 0 !important;
+}
+
+/* Table container styling to allow side scroll without squishing columns */
+.section:has(.data-table),
+div:has(> .data-table),
+.recent-orders {
+  width: 100% !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Standardize table minimum widths for gorgeous column layouts */
+.data-table {
+  min-width: 850px !important;
+  width: 100% !important;
+}
+
+/* Modern styling for table heads */
+.data-table th {
+  background-color: #f8fafc;
+  font-weight: 700;
+  color: #475569;
+  letter-spacing: 0.03em;
+  padding: 14px 16px;
+}
+
+/* Make KPI numbers stand out */
+.stat-value {
+  font-family: 'Geist Mono', monospace !important;
+  letter-spacing: -0.04em !important;
+  font-weight: 800 !important;
+}
+
+/* Responsive Overrides (Up to 1024px) */
+@media (max-width: 1024px) {
+  .dashboard {
+    grid-template-columns: 1fr !important;
+  }
+
+  .mobile-admin-header {
+    display: flex !important;
+  }
+
+  .sidebar-overlay {
+    display: block !important;
+  }
+
+  .sidebar {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    bottom: 0 !important;
+    width: 285px !important;
+    height: 100vh !important;
+    z-index: 1000 !important;
+    transform: translateX(-100%);
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    box-shadow: 15px 0 40px rgba(0, 0, 0, 0.3) !important;
+  }
+
+  .sidebar.open {
+    transform: translateX(0) !important;
+  }
+
+  .sidebar-close-btn {
+    display: flex !important;
+  }
+
+  .dashboard-content {
+    padding: 24px 16px !important;
+  }
+  
+  .section {
+    padding: 20px !important;
+    border-radius: 12px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .dashboard-content {
+    padding: 16px 12px !important;
+  }
+
+  .section {
+    padding: 16px !important;
+  }
+}
+
