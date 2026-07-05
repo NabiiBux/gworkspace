@@ -2469,54 +2469,6 @@ const AdminCustomersSection = () => {
     }
   };
 
-  // Bulk attach with login state
-  const [bulkText, setBulkText] = useState('');
-  const [bulkAttachBusy, setBulkAttachBusy] = useState(false);
-  const [bulkAttachMsg, setBulkAttachMsg] = useState('');
-  const [bulkAttachResults, setBulkAttachResults] = useState(null);
-
-  const runBulkAttachWithLogin = async () => {
-    if (!bulkText.trim()) {
-      setBulkAttachMsg('Please enter at least one line of domain, email, password.');
-      return;
-    }
-
-    setBulkAttachBusy(true);
-    setBulkAttachMsg('');
-    setBulkAttachResults(null);
-
-    const lines = bulkText.split('\n');
-    const rows = [];
-    for (let line of lines) {
-      line = line.trim();
-      if (!line) continue;
-
-      const parts = line.split(',').map(p => p.trim());
-      const domain = parts[0] || '';
-      const email = parts[1] || '';
-      const password = parts[2] || '';
-
-      rows.push({ domain, email, password });
-    }
-
-    if (rows.length === 0) {
-      setBulkAttachMsg('Could not parse any valid lines. Format: domain, email, password');
-      setBulkAttachBusy(false);
-      return;
-    }
-
-    try {
-      const res = await axios.post(`${API_URL}/admin/customers/bulk-attach-with-login`, { rows });
-      setBulkAttachResults(res.data);
-      setBulkAttachMsg(`✓ Processed bulk attachment. Succeeded: ${res.data.attached}, Failed: ${res.data.failed}`);
-      load();
-    } catch (e) {
-      setBulkAttachMsg(e?.response?.data?.error || 'Bulk attachment process failed.');
-    } finally {
-      setBulkAttachBusy(false);
-    }
-  };
-
   const resetPassword = async (id) => {
     try {
       const res = await axios.post(`${API_URL}/admin/customers/${id}/reset-password`, {});
@@ -2533,9 +2485,6 @@ const AdminCustomersSection = () => {
   const [lookupBusy, setLookupBusy] = useState(false);
   const [attachBusy, setAttachBusy] = useState(false);
   const [attachMsg, setAttachMsg] = useState('');
-  const [forceAcct, setForceAcct] = useState('pk');
-  const [modalPlan, setModalPlan] = useState('');
-  const [modalSeats, setModalSeats] = useState(1);
 
   // New bulk lookup and attach states inside the modal
   const [modalTab, setModalTab] = useState('single'); // 'single' | 'bulk'
@@ -2544,31 +2493,13 @@ const AdminCustomersSection = () => {
   const [bulkLookupBusy, setBulkLookupBusy] = useState(false);
   const [bulkSelectedSubs, setBulkSelectedSubs] = useState([]);
 
-  const forceLink = async () => {
-    setAttachBusy(true); setAttachMsg('');
-    try {
-      const r = await axios.post(`${API_URL}/admin/customers/${attaching.id}/force-link-domain`, { 
-        domain: attachDom.toLowerCase().trim(), 
-        account: forceAcct,
-        planId: modalPlan,
-        seats: Number(modalSeats) || 1
-      });
-      setAttachMsg('✓ ' + r.data.message);
-      setAttaching(null); load();
-    } catch (e) { setAttachMsg(e?.response?.data?.error || 'Could not force link.'); }
-    finally { setAttachBusy(false); }
-  };
-
   const openAttach = (c) => {
     setAttaching(c);
     const emailDom = (c.email || '').split('@')[1] || '';
     const guess = c.domain || emailDom || '';
     setAttachDom(guess);
     setLookup(null); setAttachMsg('');
-    setForceAcct('pk');
-    setModalPlan(plans[0]?.id || '');
-    setModalSeats(1);
-    
+
     // Reset bulk states
     setModalTab('single');
     setBulkAttachDoms('');
@@ -2688,91 +2619,6 @@ const AdminCustomersSection = () => {
       {error && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
       <p style={{ color: '#5b6075' }}>{customers.length} registered customer{customers.length === 1 ? '' : 's'}</p>
 
-      {/* Bulk Attach Interface */}
-      <div style={{ background: '#f8fafc', borderRadius: 14, padding: 20, border: '1px solid #e2e8f0', marginBottom: 24 }}>
-        <h3 style={{ margin: '0 0 4px', fontSize: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
-          🔗 Bulk Attach Subscriptions (Auto-Lookup & Customer Accounts Creation)
-        </h3>
-        <p style={{ color: '#64748b', fontSize: 13, marginTop: 0, marginBottom: 16 }}>
-          Enter Google Workspace domains alongside the customer portal email and password.
-          The system will automatically look up each domain across Pakistan and USA reseller accounts, verify the active Google subscription, find or create the customer portal account with the specified email/password, and link the subscription to their dashboard.
-        </p>
-
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 6 }}>
-            Enter Rows (Format: <code>domain, email, password</code> — one per line)
-          </label>
-          <textarea
-            value={bulkText}
-            onChange={e => setBulkText(e.target.value)}
-            placeholder="example.com, customer@gmail.com, Password123!&#10;anotherdomain.site, user@email.com, SecretPass456"
-            style={{ width: '100%', height: 120, borderRadius: 8, border: '1px solid #cbd5e1', padding: '10px 12px', fontSize: 13, fontFamily: 'monospace', lineHeight: '1.5' }}
-          />
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <button 
-            onClick={runBulkAttachWithLogin} 
-            disabled={bulkAttachBusy || !bulkText.trim()} 
-            className="btn btn-primary"
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            {bulkAttachBusy ? 'Processing Bulk Attachments…' : '⚡ Click to Bulk Attach Subscriptions'}
-          </button>
-          {bulkText.trim() && (
-            <button 
-              onClick={() => setBulkText('')} 
-              className="btn btn-secondary" 
-              style={{ padding: '8px 14px' }}
-            >
-              Clear Input
-            </button>
-          )}
-        </div>
-
-        {bulkAttachMsg && (
-          <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, fontSize: 14, fontWeight: 500, backgroundColor: bulkAttachMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', border: bulkAttachMsg.startsWith('✓') ? '1px solid #bbf7d0' : '1px solid #fee2e2', color: bulkAttachMsg.startsWith('✓') ? '#15803d' : '#b91c1c' }}>
-            {bulkAttachMsg}
-          </div>
-        )}
-
-        {bulkAttachResults && (
-          <div style={{ marginTop: 16, borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
-            <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 14, color: '#1e293b' }}>
-              Bulk Run Results: {bulkAttachResults.attached} Succeeded, {bulkAttachResults.failed} Failed
-            </div>
-            <div style={{ overflowX: 'auto', maxHeight: 250, border: '1px solid #e2e8f0', borderRadius: 8 }}>
-              <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', background: '#fff' }}>
-                <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left', color: '#64748b' }}>
-                    <th style={{ padding: '8px 12px' }}>Domain</th>
-                    <th style={{ padding: '8px 12px' }}>Email</th>
-                    <th style={{ padding: '8px 12px' }}>Account</th>
-                    <th style={{ padding: '8px 12px' }}>Status</th>
-                    <th style={{ padding: '8px 12px' }}>Details / Errors</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bulkAttachResults.results.map((r, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '8px 12px', fontWeight: 600 }}>{r.domain}</td>
-                      <td style={{ padding: '8px 12px' }}>{r.email}</td>
-                      <td style={{ padding: '8px 12px', fontWeight: 600, color: '#0369a1' }}>{r.account || '—'}</td>
-                      <td style={{ padding: '8px 12px', color: r.ok ? '#166534' : '#b42318', fontWeight: 600 }}>
-                        {r.ok ? '✓ Success' : '✗ Failed'}
-                      </td>
-                      <td style={{ padding: '8px 12px', color: '#475569' }}>
-                        {r.ok ? (r.note || 'Linked successfully') : (r.error || 'Failed')}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
-
       {customers.length === 0 ? <p>No customers have registered yet.</p> : (
         <div style={{ overflowX: 'auto' }}>
           <table className="data-table">
@@ -2885,8 +2731,11 @@ const AdminCustomersSection = () => {
                         )}
                       </div>
                     ) : (
-                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, opacity: 0.7 }}>
-                        <div style={{ fontWeight: 600, color: '#64748b', fontSize: 12 }}>🇵🇰 Pakistan Account (PK) — Not Found</div>
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, opacity: 0.85 }}>
+                        <div style={{ fontWeight: 600, color: '#64748b', fontSize: 12 }}>🇵🇰 Pakistan Account (PK) — Not Found{lookup.accounts?.pk?.authType ? ` · via ${lookup.accounts.pk.authType}` : ''}</div>
+                        {(lookup.accounts?.pk?.reason || lookup.accounts?.pk?.error) && (
+                          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: '1.4' }}>{lookup.accounts.pk.reason || lookup.accounts.pk.error}</div>
+                        )}
                       </div>
                     )}
 
@@ -2915,8 +2764,11 @@ const AdminCustomersSection = () => {
                         )}
                       </div>
                     ) : (
-                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, opacity: 0.7 }}>
-                        <div style={{ fontWeight: 600, color: '#64748b', fontSize: 12 }}>🇺🇸 USA Account (USA) — Not Found</div>
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, opacity: 0.85 }}>
+                        <div style={{ fontWeight: 600, color: '#64748b', fontSize: 12 }}>🇺🇸 USA Account (USA) — Not Found{lookup.accounts?.usa?.authType ? ` · via ${lookup.accounts.usa.authType}` : ''}</div>
+                        {(lookup.accounts?.usa?.reason || lookup.accounts?.usa?.error) && (
+                          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: '1.4' }}>{lookup.accounts.usa.reason || lookup.accounts.usa.error}</div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2943,18 +2795,6 @@ const AdminCustomersSection = () => {
                   </div>
                 )}
 
-                {lookup && !lookup.found && (
-                  <div style={{ marginTop: 12, borderTop: '1px solid #eee', paddingTop: 12 }}>
-                    <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 8px' }}>Manage this domain manually (not in your reseller console)? Link it anyway:</p>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <select value={forceAcct} onChange={e => setForceAcct(e.target.value)} style={{ height: 36, borderRadius: 6, border: '1px solid #d8dbe6', fontSize: 13, padding: '0 8px' }}>
-                        <option value="pk">Pakistan</option>
-                        <option value="usa">USA</option>
-                      </select>
-                      <button onClick={forceLink} disabled={attachBusy} className="btn btn-secondary" style={{ fontSize: 13, padding: '8px 14px' }}>Force link to {forceAcct.toUpperCase()}</button>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
 
@@ -2983,7 +2823,13 @@ const AdminCustomersSection = () => {
                       <div key={domain} style={{ marginBottom: 12, borderBottom: '1px dashed #e2e8f0', paddingBottom: 8 }}>
                         <div style={{ fontWeight: 700, fontSize: 13, color: '#1e293b' }}>🌐 {domain}</div>
                         {!res.found ? (
-                          <div style={{ fontSize: 11, color: '#94a3b8', marginLeft: 12 }}>No subscription found on either PK or USA accounts.</div>
+                          <div style={{ marginLeft: 12 }}>
+                            <div style={{ fontSize: 11, color: '#94a3b8' }}>No subscription found on either PK or USA accounts.</div>
+                            {['pk', 'usa'].map(acct => {
+                              const why = res[acct]?.reason || res[acct]?.error;
+                              return why ? <div key={acct} style={{ fontSize: 10, color: '#cbd5e1', marginTop: 2 }}>{acct.toUpperCase()}: {why}</div> : null;
+                            })}
+                          </div>
                         ) : (
                           <div style={{ marginLeft: 12, marginTop: 4 }}>
                             {['pk', 'usa'].map(acct => {
