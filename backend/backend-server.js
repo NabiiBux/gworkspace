@@ -2195,9 +2195,11 @@ async function checkResellerAuthHealth(account, reseller) {
   try {
     await reseller.subscriptions.list({ maxResults: 1 });
     result = { ok: true, at: Date.now() };
+    console.log(`[auth-health] ${account.toUpperCase()}: credentials OK (own subscriptions listable)`);
   } catch (e) {
     const msg = e?.errors?.[0]?.message || e?.message || 'unknown error';
     result = { ok: false, error: msg, at: Date.now() };
+    console.warn(`[auth-health] ${account.toUpperCase()}: credentials FAILED — ${msg}`);
   }
   resellerAuthHealthCache[account] = result;
   return result;
@@ -2238,16 +2240,22 @@ app.get('/api/admin/lookup-domain', authenticateCustomer, requireAdmin, async (r
     const errors = [];
     const accountsInfo = {};
     let foundAny = false;
+    console.log(`[lookup] ${dom} — querying PK + USA reseller accounts…`);
 
     for (const account of ['pk', 'usa']) {
       let auth;
       try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
-      catch (e) { errors.push(`${account.toUpperCase()}: not connected (${e.message})`); continue; }
+      catch (e) {
+        console.warn(`[lookup] ${dom} ${account.toUpperCase()}: auth unavailable — ${e.message}`);
+        errors.push(`${account.toUpperCase()}: not connected (${e.message})`);
+        continue;
+      }
       const reseller = google.reseller({ version: 'v1', auth });
 
       try {
         const resp = await reseller.subscriptions.list({ customerId: dom });
         const subs = resp.data.subscriptions || [];
+        console.log(`[lookup] ${dom} ${account.toUpperCase()} (${auth.isServiceAccount ? 'SA' : 'OAuth'}): OK — ${subs.length} subscription(s)`);
         if (subs.length > 0) {
           foundAny = true;
           accountsInfo[account] = {
@@ -2275,6 +2283,7 @@ app.get('/api/admin/lookup-domain', authenticateCustomer, requireAdmin, async (r
           }
         }
       } catch (e) {
+        console.warn(`[lookup] ${dom} ${account.toUpperCase()} (${auth.isServiceAccount ? 'SA' : 'OAuth'}): HTTP ${e?.code || '?'} — ${e?.errors?.[0]?.message || e?.message || 'unknown error'}`);
         // A bare 403 "Forbidden" here usually just means the domain is not under this reseller
         // account — verify the credentials before reporting it as a system error.
         const verdict = await classifyResellerLookupError(account, reseller, e);
@@ -2369,6 +2378,7 @@ app.post('/api/admin/bulk-lookup-domains', authenticateCustomer, requireAdmin, a
             }
           }
         } catch (e) {
+          console.warn(`[bulk-lookup] ${dom} ${account.toUpperCase()}: HTTP ${e?.code || '?'} — ${e?.errors?.[0]?.message || e?.message || 'unknown error'}`);
           // Bare 403 "Forbidden" = domain not under this reseller account (Google quirk).
           // Only report an error when the credentials themselves fail the health check.
           const verdict = await classifyResellerLookupError(account, reseller, e);

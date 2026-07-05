@@ -2515,8 +2515,14 @@ const AdminCustomersSection = () => {
     setLookupBusy(true); setAttachMsg(''); setLookup(null);
     try {
       const r = await axios.get(`${API_URL}/admin/lookup-domain`, { params: { domain: d } });
-      setLookup(r.data);
-      if (!r.data.found) setAttachMsg(r.data.note || 'No subscription found for this domain. Try a different domain.');
+      const data = r.data || {};
+      // Backward compatibility: older backends reply { found, account, subscriptions } without
+      // the per-account breakdown. Synthesize `accounts` so the PK/USA cards render correctly.
+      if (data.found && !data.accounts && data.account) {
+        data.accounts = { [data.account]: { found: true, subscriptions: data.subscriptions || [], note: data.note } };
+      }
+      setLookup(data);
+      if (!data.found) setAttachMsg(data.note || 'No subscription found for this domain. Try a different domain.');
     } catch (e) { setAttachMsg(e?.response?.data?.error || 'Lookup failed.'); }
     finally { setLookupBusy(false); }
   };
