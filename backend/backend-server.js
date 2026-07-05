@@ -1334,6 +1334,29 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
     // If the domain isn't on any reseller account, return an empty (not an error) so the
     // dashboard shows "no subscriptions" cleanly instead of a scary message.
     if (foundAccount === null && subs.length === 0) {
+      const dbSubs = await Subscription.find({ customerId: me._id });
+      if (dbSubs.length > 0) {
+        const manualRows = dbSubs.map(ds => {
+          return {
+            domain: domain,
+            skuId: ds.googleWorkspaceSkuId || 'manual',
+            skuName: ds.plan || 'Workspace Subscription',
+            planName: ds.plan || 'Workspace Subscription',
+            seats: ds.seats || 1,
+            seatPrice: ds.monthlyPrice || 6.00,
+            status: ds.status === 'active' ? 'ACTIVE' : 'SUSPENDED',
+            creationTime: ds.createdAt ? ds.createdAt.getTime() : Date.now(),
+            renewalDate: ds.nextBillingDate ? ds.nextBillingDate.getTime() : addDays(new Date(), BILLING_CYCLE_DAYS).getTime(),
+            daysUntilRenewal: ds.nextBillingDate ? Math.ceil((new Date(ds.nextBillingDate).getTime() - Date.now()) / 86400000) : 30,
+            cycleStatus: 'paid', // manual subs
+            category: 'workspace',
+            isPrimary: true,
+            subscriptionId: ds.subscriptionId || null,
+            autoRenew: ds.autoRenew !== false,
+          };
+        });
+        return res.json({ subscriptions: manualRows, domain, account: me.account || 'pk' });
+      }
       return res.json({ subscriptions: [], domain, note: 'No active Workspace subscription found for your domain yet.' });
     }
 
@@ -2102,6 +2125,7 @@ app.post('/api/admin/customers/:id/attach-domain', authenticateCustomer, require
     const tryAccounts = forceAccount ? [forceAccount] : ['pk', 'usa'];
     let account = null, subCount = 0;
     const errors = [];
+    let googleSubs = [];
     for (const acct of tryAccounts) {
       let auth;
       try { auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
@@ -2111,7 +2135,7 @@ app.post('/api/admin/customers/:id/attach-domain', authenticateCustomer, require
         // subscriptions.list is the most reliable existence check.
         const resp = await reseller.subscriptions.list({ customerId: dom });
         const subs = resp.data.subscriptions || [];
-        if (subs.length > 0) { account = acct; subCount = subs.length; break; }
+        if (subs.length > 0) { account = acct; subCount = subs.length; googleSubs = subs; break; }
         // No subs but customer may exist:
         try { await reseller.customers.get({ customerId: dom }); account = acct; subCount = 0; break; } catch (_) { }
       } catch (e) {
@@ -2130,6 +2154,50 @@ app.post('/api/admin/customers/:id/attach-domain', authenticateCustomer, require
     cust.account = account;
     await cust.save();
     try { await syncSubscriptionsForBilling(account); } catch (_) { }
+
+    // Sync subscriptions to MongoDB so they appear in customer's portal
+    for (const s of googleSubs) {
+      let planDoc = await Plan.findOne({ skuId: String(s.skuId) });
+      const planName = planDoc ? planDoc.name : (skuName(s.skuId) || s.skuId);
+      const monthlyPrice = planDoc ? planDoc.monthlyPrice : 6.00;
+      const numSeats = s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? 1;
+
+      const orderNumber = `WS-ATTACH-${Date.now()}`;
+      const order = await WorkspaceOrder.create({
+        customerId: cust._id,
+        orderNumber,
+        type: 'workspace',
+        planType: 'flexible',
+        account: account,
+        plan: { id: planDoc ? planDoc.planId : 'business_starter', name: planName, monthlyPrice: monthlyPrice },
+        seats: numSeats,
+        monthlyTotal: monthlyPrice * numSeats,
+        organization: { domain: dom, name: dom.split('.')[0] },
+        contact: { firstName: cust.firstName || 'Admin', lastName: cust.lastName || 'User', email: cust.businessEmail || cust.email },
+        status: 'provisioned',
+        googleProvisioned: true,
+      });
+
+      await Subscription.findOneAndUpdate(
+        { customerId: cust._id, googleWorkspaceSkuId: String(s.skuId) },
+        {
+          customerId: cust._id,
+          orderId: order._id,
+          subscriptionId: s.subscriptionId,
+          type: 'workspace',
+          plan: planName,
+          seats: numSeats,
+          monthlyPrice: monthlyPrice,
+          status: s.status === 'ACTIVE' ? 'active' : 'suspended',
+          googleWorkspaceSkuId: String(s.skuId),
+          autoRenew: true,
+          nextBillingDate: addDays(new Date(), BILLING_CYCLE_DAYS),
+          updatedAt: new Date()
+        },
+        { upsert: true, new: true }
+      );
+    }
+
     res.json({ success: true, domain: dom, account, subscriptions: subCount, message: `Attached ${dom} on the ${account.toUpperCase()} account${subCount ? ` (${subCount} subscription${subCount === 1 ? '' : 's'})` : ''}.` });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -2139,7 +2207,7 @@ app.post('/api/admin/customers/:id/attach-domain', authenticateCustomer, require
 // Admin: force-link a domain to a customer WITHOUT Google verification (for manually-managed domains).
 app.post('/api/admin/customers/:id/force-link-domain', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
-    const { domain, account } = req.body;
+    const { domain, account, planId, seats } = req.body;
     const dom = (domain || '').toLowerCase().trim();
     if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) return res.status(400).json({ error: 'Enter a valid domain like example.com' });
     const acct = account === 'usa' ? 'usa' : 'pk';
@@ -2148,7 +2216,51 @@ app.post('/api/admin/customers/:id/force-link-domain', authenticateCustomer, req
     cust.domain = dom;
     cust.account = acct;
     await cust.save();
-    res.json({ success: true, domain: dom, account: acct, message: `Force-linked ${dom} to ${cust.businessEmail} on the ${acct.toUpperCase()} account. (Not verified against Google.)` });
+
+    let extraMsg = '';
+    if (planId) {
+      const planDoc = await Plan.findOne({ planId });
+      if (planDoc) {
+        const numSeats = Number(seats) || 1;
+        const orderNumber = `WS-FORCE-${Date.now()}`;
+        const order = await WorkspaceOrder.create({
+          customerId: cust._id,
+          orderNumber,
+          type: 'workspace',
+          planType: 'flexible',
+          account: acct,
+          plan: { id: planDoc.planId, name: planDoc.name, monthlyPrice: planDoc.monthlyPrice },
+          seats: numSeats,
+          monthlyTotal: planDoc.monthlyPrice * numSeats,
+          organization: { domain: dom, name: dom.split('.')[0] },
+          contact: { firstName: cust.firstName || 'Admin', lastName: cust.lastName || 'User', email: cust.businessEmail || cust.email },
+          status: 'provisioned',
+          googleProvisioned: false,
+        });
+
+        await Subscription.findOneAndUpdate(
+          { customerId: cust._id, googleWorkspaceSkuId: planDoc.skuId || 'unknown' },
+          {
+            customerId: cust._id,
+            orderId: order._id,
+            subscriptionId: `FORCE-${Date.now()}`,
+            type: 'workspace',
+            plan: planDoc.name,
+            seats: numSeats,
+            monthlyPrice: planDoc.monthlyPrice,
+            status: 'active',
+            googleWorkspaceSkuId: planDoc.skuId || 'unknown',
+            autoRenew: true,
+            nextBillingDate: addDays(new Date(), BILLING_CYCLE_DAYS),
+            updatedAt: new Date()
+          },
+          { upsert: true, new: true }
+        );
+        extraMsg = ` and created manual subscription for ${planDoc.name} (${numSeats} seats)`;
+      }
+    }
+
+    res.json({ success: true, domain: dom, account: acct, message: `Force-linked ${dom} to ${cust.businessEmail} on the ${acct.toUpperCase()} account${extraMsg}. (Not verified against Google.)` });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

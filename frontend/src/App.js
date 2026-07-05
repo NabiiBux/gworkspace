@@ -39,12 +39,34 @@ const COUNTRIES = [
   "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom", "United States", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela", "Vietnam", "Yemen", "Zambia", "Zimbabwe"
 ];
 
+const COUNTRY_TO_CODE = {
+  "Afghanistan": "af", "Albania": "al", "Algeria": "dz", "Andorra": "ad", "Angola": "ao", "Antigua and Barbuda": "ag", "Argentina": "ar", "Armenia": "am", "Australia": "au", "Austria": "at", "Azerbaijan": "az",
+  "Bahamas": "bs", "Bahrain": "bh", "Bangladesh": "bd", "Barbados": "bb", "Belarus": "by", "Belgium": "be", "Belize": "bz", "Benin": "bj", "Bhutan": "bt", "Bolivia": "bo", "Bosnia and Herzegovina": "ba", "Botswana": "bw", "Brazil": "br", "Brunei": "bn", "Bulgaria": "bg", "Burkina Faso": "bf", "Burundi": "bi",
+  "Cabo Verde": "cv", "Cambodia": "kh", "Cameroon": "cm", "Canada": "ca", "Central African Republic": "cf", "Chad": "td", "Chile": "cl", "China": "cn", "Colombia": "co", "Comoros": "km", "Congo": "cg", "Costa Rica": "cr", "Côte d'Ivoire": "ci", "Croatia": "hr", "Cuba": "cu", "Cyprus": "cy", "Czechia": "cz",
+  "Denmark": "dk", "Djibouti": "dj", "Dominica": "dm", "Dominican Republic": "do", "Ecuador": "ec", "Egypt": "eg", "El Salvador": "sv", "Equatorial Guinea": "gq", "Eritrea": "er", "Estonia": "ee", "Eswatini": "sz", "Ethiopia": "et",
+  "Fiji": "fj", "Finland": "fi", "France": "fr", "Gabon": "ga", "Gambia": "gm", "Georgia": "ge", "Germany": "de", "Ghana": "gh", "Greece": "gr", "Grenada": "gd", "Guatemala": "gt", "Guinea": "gn", "Guinea-Bissau": "gw", "Guyana": "gy",
+  "Haiti": "ht", "Honduras": "hn", "Hungary": "hu", "Iceland": "is", "India": "in", "Indonesia": "id", "Iran": "ir", "Iraq": "iq", "Ireland": "ie", "Italy": "it", "Jamaica": "jm", "Japan": "jp", "Jordan": "jo",
+  "Kazakhstan": "kz", "Kenya": "ke", "Kiribati": "ki", "Kuwait": "kw", "Kyrgyzstan": "kg", "Laos": "la", "Latvia": "lv", "Lebanon": "lb", "Lesotho": "ls", "Liberia": "lr", "Libya": "ly", "Liechtenstein": "li", "Lithuania": "lt", "Luxembourg": "lu",
+  "Madagascar": "mg", "Malawi": "mw", "Malaysia": "my", "Maldives": "mv", "Mali": "ml", "Malta": "mt", "Marshall Islands": "mh", "Mauritania": "mr", "Mauritius": "mu", "Mexico": "mx", "Micronesia": "fm", "Moldova": "md", "Monaco": "mc", "Mongolia": "mn", "Montenegro": "me", "Morocco": "ma", "Mozambique": "mz", "Myanmar": "mm",
+  "Namibia": "na", "Nauru": "nr", "Nepal": "np", "Netherlands": "nl", "New Zealand": "nz", "Nicaragua": "ni", "Niger": "ne", "Nigeria": "ng", "North Korea": "kp", "North Macedonia": "mk", "Norway": "no", "Oman": "om",
+  "Pakistan": "pk", "Palau": "pw", "Palestine": "ps", "Panama": "pa", "Papua New Guinea": "pg", "Paraguay": "py", "Peru": "pe", "Philippines": "ph", "Poland": "pl", "Portugal": "pt", "Qatar": "qa",
+  "Romania": "ro", "Russia": "ru", "Rwanda": "rw", "Saint Kitts and Nevis": "kn", "Saint Lucia": "lc", "Saint Vincent and the Grenadines": "vc", "Samoa": "ws", "San Marino": "sm", "Sao Tome and Principe": "st", "Saudi Arabia": "sa", "Senegal": "sn", "Serbia": "rs", "Seychelles": "sc", "Sierra Leone": "sl", "Singapore": "sg", "Slovakia": "sk", "Slovenia": "si", "Solomon Islands": "sb", "Somalia": "so", "South Africa": "za", "South Korea": "kr", "South Sudan": "ss", "Spain": "es", "Sri Lanka": "lk", "Sudan": "sd", "Suriname": "sr", "Sweden": "se", "Switzerland": "ch", "Syria": "sy",
+  "Taiwan": "tw", "Tajikistan": "tj", "Tanzania": "tz", "Thailand": "th", "Timor-Leste": "tl", "Togo": "tg", "Tonga": "to", "Trinidad and Tobago": "tt", "Tunisia": "tn", "Turkey": "tr", "Turkmenistan": "tm", "Tuvalu": "tv",
+  "Uganda": "ug", "Ukraine": "ua", "United Arab Emirates": "ae", "United Kingdom": "gb", "United States": "us", "Uruguay": "uy", "Uzbekistan": "uz", "Vanuatu": "vu", "Vatican City": "va", "Venezuela": "ve", "Vietnam": "vn", "Yemen": "ye", "Zambia": "zm", "Zimbabwe": "zw"
+};
+
+const getCountryCode = (name) => {
+  if (!name) return undefined;
+  const lower = name.toLowerCase().trim();
+  const found = Object.entries(COUNTRY_TO_CODE).find(([k]) => k.toLowerCase() === lower);
+  return found ? found[1] : undefined;
+};
+
 // Reusable Google Maps Places address autocomplete.
 // Renders an input; on selection, calls onPick({ street, city, state, zip }).
 const ALLOWED_COUNTRIES_DEFAULT = ['us'];
 const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) => {
   const containerRef = useRef(null);
-  const mountedRef = useRef(false);
   const [mapsReady, setMapsReady] = useState(false);
 
   // Load the Google Maps JavaScript API (with Places) once — same as the customer form.
@@ -72,7 +94,6 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
   // Mount the PlaceAutocompleteElement when maps is ready — identical to the customer form.
   useEffect(() => {
     if (!mapsReady || !containerRef.current) return;
-    if (mountedRef.current) return; // already mounted
     let cancelled = false;
 
     (async () => {
@@ -87,11 +108,14 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
         }
         if (cancelled || !containerRef.current) return;
 
-        const el = new PlaceAutocompleteElement({
-          componentRestrictions: { country: countries },
-        });
+        const options = {};
+        if (countries) {
+          // Can accept string or array
+          options.componentRestrictions = { country: countries };
+        }
+
+        const el = new PlaceAutocompleteElement(options);
         el.style.width = '100%';
-        mountedRef.current = true;
 
         const container = containerRef.current;
         container.innerHTML = '';
@@ -120,7 +144,7 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
     })();
 
     return () => { cancelled = true; };
-  }, [mapsReady]);
+  }, [mapsReady, JSON.stringify(countries)]);
 
   if (!MAPS_KEY) return null;
   return <div ref={containerRef} style={{ width: '100%', minHeight: 44 }} />;
@@ -834,6 +858,34 @@ const Dashboard = () => {
         {activeSection === 'voice-monitor' && <AdminVoiceMonitorSection />}
         {activeSection === 'branding' && <AdminBrandingSection />}
       </main>
+
+      {/* Mobile Bottom Navigation Bar */}
+      <div className="mobile-bottom-nav" id="admin-mobile-bottom-nav">
+        <button
+          id="bottom-nav-dashboard"
+          className={`bottom-nav-item ${activeSection === 'overview' ? 'active' : ''}`}
+          onClick={() => setActiveSection('overview')}
+        >
+          <span className="bottom-nav-icon">📊</span>
+          <span className="bottom-nav-label">Dashboard</span>
+        </button>
+        <button
+          id="bottom-nav-subs"
+          className={`bottom-nav-item ${(activeSection === 'subs-pk' || activeSection === 'subs-usa') ? 'active' : ''}`}
+          onClick={() => setActiveSection('subs-pk')}
+        >
+          <span className="bottom-nav-icon">📋</span>
+          <span className="bottom-nav-label">Subscriptions</span>
+        </button>
+        <button
+          id="bottom-nav-settings"
+          className={`bottom-nav-item ${activeSection === 'payments' ? 'active' : ''}`}
+          onClick={() => setActiveSection('payments')}
+        >
+          <span className="bottom-nav-icon">⚙️</span>
+          <span className="bottom-nav-label">Settings</span>
+        </button>
+      </div>
     </div>
   );
 };
@@ -1661,11 +1713,61 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
   const [vMsg, setVMsg] = useState('');
   const [vBusy, setVBusy] = useState(false);
 
+  // Bulk Attach states
+  const [showBulk, setShowBulk] = useState(false);
+  const [bulkPlans, setBulkPlans] = useState([]);
+  const [attachPlan, setAttachPlan] = useState('');
+  const [attachSeats, setAttachSeats] = useState(1);
+  const [attachText, setAttachText] = useState('');
+  const [attachBusy, setAttachBusy] = useState(false);
+  const [attachMsg, setAttachMsg] = useState('');
+  const [attachResults, setAttachResults] = useState(null);
+
   const isUSA = account === 'USA';
 
   useEffect(() => { setPage(1); }, [account]);
   useEffect(() => { fetchSubs(); }, [account, page]);
   useEffect(() => { if (isUSA) fetchVoicePlans(); }, [isUSA]);
+
+  useEffect(() => {
+    const loadProducts = async () => {
+      try {
+        const res = await axios.get(`${API_URL}/products`);
+        const combined = [
+          ...(res.data.workspace || []),
+          ...(res.data.voice || [])
+        ];
+        setBulkPlans(combined);
+        if (combined.length) setAttachPlan(combined[0].id);
+      } catch (_) {}
+    };
+    loadProducts();
+  }, []);
+
+  const runBulkAttach = async () => {
+    setAttachResults(null);
+    setAttachMsg('');
+    const domains = attachText.split(/[\s,\n]+/).map(l => l.trim().toLowerCase()).filter(Boolean);
+    if (domains.length === 0) { setAttachMsg('Paste at least one domain.'); return; }
+    if (!attachPlan) { setAttachMsg('Choose a plan for attachment.'); return; }
+
+    setAttachBusy(true);
+    try {
+      const response = await axios.post(`${API_URL}/admin/subscriptions/bulk-attach`, {
+        domains,
+        planId: attachPlan,
+        seats: Number(attachSeats) || 1,
+        account: account.toLowerCase(),
+      });
+      setAttachResults(response.data);
+      setAttachMsg(`✓ Attached subscriptions for ${response.data.attached} of ${response.data.total} domains.`);
+      fetchSubs(); // Refresh current list of subscriptions immediately
+    } catch (e) {
+      setAttachMsg(e?.response?.data?.error || 'Bulk attachment failed.');
+    } finally {
+      setAttachBusy(false);
+    }
+  };
 
   const fetchVoicePlans = async () => {
     try {
@@ -1793,7 +1895,68 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
         </div>
       )}
 
-      <button className="btn btn-secondary" onClick={fetchSubs} style={{ marginBottom: 12 }}>↻ Refresh</button>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <button className="btn btn-secondary" onClick={fetchSubs}>↻ Refresh</button>
+        <button className="btn btn-secondary" onClick={() => setShowBulk(!showBulk)}>
+          {showBulk ? 'Close Bulk Attach' : '🔗 Bulk Attach Subscriptions'}
+        </button>
+      </div>
+
+      {showBulk && (
+        <div style={{ background: '#fff', borderRadius: 12, padding: 20, border: '1px solid #e2e8f0', marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <h3 style={{ marginTop: 0, marginBottom: 4 }}>🔗 Bulk Attach Subscriptions ({account} Account)</h3>
+          <p style={{ color: '#5b6075', fontSize: 13, marginTop: 0, marginBottom: 16 }}>
+            Attach Workspace or Voice subscriptions to existing domains in bulk for the {account} reseller account. One domain per line or comma-separated list.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }} className="grid-2">
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Plan to Attach *</label>
+              <select value={attachPlan} onChange={e => setAttachPlan(e.target.value)} style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }}>
+                {bulkPlans.map(p => <option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}/seat/mo</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Seats per Domain</label>
+              <input type="number" min="1" value={attachSeats} onChange={e => setAttachSeats(e.target.value)} style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }} />
+            </div>
+          </div>
+          <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Domains (one per line, or comma-separated)</label>
+          <textarea value={attachText} onChange={e => setAttachText(e.target.value)} rows={5}
+            placeholder={"domain1.com\ndomain2.com\ndomain3.com"}
+            style={{ width: '100%', borderRadius: 8, border: '1px solid #d8dbe6', padding: 12, fontFamily: 'monospace', fontSize: 13, boxSizing: 'border-box' }} />
+          <button onClick={runBulkAttach} disabled={attachBusy} className="btn btn-primary" style={{ marginTop: 12 }}>
+            {attachBusy ? 'Attaching… (this can take a while)' : `Attach to ${attachText.split(/[\s,\n]+/).filter(Boolean).length || ''} Domain(s)`}
+          </button>
+
+          {attachMsg && (
+            <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, fontSize: 14, fontWeight: 500, backgroundColor: attachMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', border: attachMsg.startsWith('✓') ? '1px solid #bbf7d0' : '1px solid #fee2e2', color: attachMsg.startsWith('✓') ? '#15803d' : '#b91c1c' }}>
+              {attachMsg}
+            </div>
+          )}
+
+          {attachResults && attachResults.results && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 14 }}>
+                {attachResults.attached} attached successfully, {attachResults.failed} failed
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                  <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}><th style={{ padding: '6px 0' }}>Domain</th><th>Status</th><th>Google Subscription ID</th></tr></thead>
+                  <tbody>
+                    {attachResults.results.map((r, i) => (
+                      <tr key={i} style={{ borderTop: '1px solid #f0f0f0' }}>
+                        <td style={{ padding: '6px 0', fontWeight: 600 }}>{r.domain}</td>
+                        <td style={{ color: r.ok ? '#166534' : '#b42318' }}>{r.ok ? '✓ Attached Successfully' : '✗ ' + (r.error || 'failed')}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{r.subscriptionId || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {rows.length === 0 ? (
         <p>No subscriptions found on this account.</p>
@@ -2323,11 +2486,18 @@ const AdminCustomersSection = () => {
   const [attachBusy, setAttachBusy] = useState(false);
   const [attachMsg, setAttachMsg] = useState('');
   const [forceAcct, setForceAcct] = useState('pk');
+  const [modalPlan, setModalPlan] = useState('');
+  const [modalSeats, setModalSeats] = useState(1);
 
   const forceLink = async () => {
     setAttachBusy(true); setAttachMsg('');
     try {
-      const r = await axios.post(`${API_URL}/admin/customers/${attaching.id}/force-link-domain`, { domain: attachDom.toLowerCase().trim(), account: forceAcct });
+      const r = await axios.post(`${API_URL}/admin/customers/${attaching.id}/force-link-domain`, { 
+        domain: attachDom.toLowerCase().trim(), 
+        account: forceAcct,
+        planId: modalPlan,
+        seats: Number(modalSeats) || 1
+      });
       setAttachMsg('✓ ' + r.data.message);
       setAttaching(null); load();
     } catch (e) { setAttachMsg(e?.response?.data?.error || 'Could not force link.'); }
@@ -2340,6 +2510,9 @@ const AdminCustomersSection = () => {
     const guess = c.domain || emailDom || '';
     setAttachDom(guess);
     setLookup(null); setAttachMsg('');
+    setForceAcct('pk');
+    setModalPlan(plans[0]?.id || '');
+    setModalSeats(1);
     if (guess) setTimeout(() => doLookupFor(guess), 100);
   };
 
@@ -2560,24 +2733,46 @@ const AdminCustomersSection = () => {
 
             {attachMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: attachMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: attachMsg.startsWith('✓') ? '#166534' : '#b42318', fontSize: 14 }}>{attachMsg}</div>}
 
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button onClick={confirmAttach} disabled={attachBusy || !lookup?.found} className="btn btn-primary">
-                {attachBusy ? 'Attaching…' : 'Attach to this customer'}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+              <button onClick={confirmAttach} disabled={attachBusy || !lookup?.found} className="btn btn-primary" style={{ flex: 1 }}>
+                {attachBusy ? 'Attaching…' : 'Attach Verified Google Subscription'}
               </button>
               <button onClick={() => setAttaching(null)} disabled={attachBusy} className="btn btn-secondary">Cancel</button>
             </div>
-            {lookup && !lookup.found && (
-              <div style={{ marginTop: 12, borderTop: '1px solid #eee', paddingTop: 12 }}>
-                <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 8px' }}>Manage this domain manually (not in your reseller console)? Link it anyway:</p>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <select value={forceAcct} onChange={e => setForceAcct(e.target.value)} style={{ height: 36, borderRadius: 6, border: '1px solid #d8dbe6', fontSize: 13 }}>
-                    <option value="pk">Pakistan</option><option value="usa">USA</option>
+
+            <div style={{ marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: '#374151' }}>
+                Or Manual Attachment (Force Link without Google Lookup)
+              </div>
+              <p style={{ color: '#6b7280', fontSize: 12, margin: '0 0 10px' }}>
+                Use this to attach a manual subscription when the domain is not managed in your reseller console.
+              </p>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 2 }}>Plan *</label>
+                  <select value={modalPlan} onChange={e => setModalPlan(e.target.value)} style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #d8dbe6', padding: '0 8px', fontSize: 12 }}>
+                    {plans.map(p => <option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}</option>)}
                   </select>
-                  <button onClick={forceLink} disabled={attachBusy} className="btn btn-secondary" style={{ fontSize: 13 }}>Force link to {forceAcct.toUpperCase()}</button>
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 2 }}>Seats</label>
+                  <input type="number" min="1" value={modalSeats} onChange={e => setModalSeats(e.target.value)} style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #d8dbe6', padding: '0 8px', fontSize: 12 }} />
                 </div>
               </div>
-            )}
-            <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 10, marginBottom: 0 }}>The account (Pakistan/USA) is detected automatically from where the subscription lives.</p>
+
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <select value={forceAcct} onChange={e => setForceAcct(e.target.value)} style={{ height: 36, borderRadius: 6, border: '1px solid #d8dbe6', fontSize: 12, padding: '0 8px' }}>
+                  <option value="pk">Pakistan Account</option>
+                  <option value="usa">USA Account</option>
+                </select>
+                <button onClick={forceLink} disabled={attachBusy} className="btn btn-secondary" style={{ fontSize: 12, padding: '8px 14px' }}>
+                  Force Link & Create Manual Subscription
+                </button>
+              </div>
+            </div>
+
+            <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 14, marginBottom: 0 }}>The account (Pakistan/USA) is detected automatically from where the subscription lives on Google reseller lookup.</p>
           </div>
         </div>
       )}
@@ -8206,7 +8401,10 @@ function WorkspaceOrderFlow() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      autocompleteRef.current = null;
+    };
   }, [step, mapsReady]);
 
   // Debounced domain availability check
@@ -8472,7 +8670,7 @@ function WorkspaceOrderFlow() {
           <div className="wof-field">
             <label>Street address *</label>
             <div ref={streetInputRef} className="wof-autocomplete-mount">
-              {!MAPS_KEY && (
+              {(!MAPS_KEY || !mapsReady) && (
                 <input value={form.streetAddress} onChange={set('streetAddress')} placeholder="Enter your street address" />
               )}
             </div>
@@ -9059,39 +9257,6 @@ const AdminOrderWorkspace = () => {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResults, setBulkResults] = useState(null);
 
-  // Bulk attach subscriptions state
-  const [attachText, setAttachText] = useState('');
-  const [attachPlan, setAttachPlan] = useState('');
-  const [attachSeats, setAttachSeats] = useState(1);
-  const [attachAccount, setAttachAccount] = useState('pk');
-  const [attachBusy, setAttachBusy] = useState(false);
-  const [attachResults, setAttachResults] = useState(null);
-  const [attachMsg, setAttachMsg] = useState('');
-
-  const runBulkAttach = async () => {
-    setAttachResults(null);
-    setAttachMsg('');
-    const domains = attachText.split(/[\s,\n]+/).map(l => l.trim()).filter(Boolean);
-    if (domains.length === 0) { setAttachMsg('Paste at least one domain.'); return; }
-    if (!attachPlan) { setAttachMsg('Choose a plan for attachment.'); return; }
-
-    setAttachBusy(true);
-    try {
-      const response = await axios.post(`${API_URL}/admin/subscriptions/bulk-attach`, {
-        domains,
-        planId: attachPlan,
-        seats: Number(attachSeats) || 1,
-        account: attachAccount,
-      });
-      setAttachResults(response.data);
-      setAttachMsg(`✓ Attached subscriptions for ${response.data.attached} of ${response.data.total} domains.`);
-    } catch (e) {
-      setAttachMsg(e?.response?.data?.error || 'Bulk attachment failed.');
-    } finally {
-      setAttachBusy(false);
-    }
-  };
-
   const runBulk = async () => {
     setBulkResults(null);
     const lines = bulkText.split('\n').map(l => l.trim()).filter(Boolean);
@@ -9126,7 +9291,7 @@ const AdminOrderWorkspace = () => {
   const [retryBusy, setRetryBusy] = useState('');
 
   const loadPlans = async () => {
-    try { const r = await axios.get(`${API_URL}/products`); if (r.data?.workspace) { setPlans(r.data.workspace); if (r.data.workspace[0]) { setForm(f => ({ ...f, planId: r.data.workspace[0].id })); setBulkPlan(r.data.workspace[0].id); setAttachPlan(r.data.workspace[0].id); } } } catch (_) { }
+    try { const r = await axios.get(`${API_URL}/products`); if (r.data?.workspace) { setPlans(r.data.workspace); if (r.data.workspace[0]) { setForm(f => ({ ...f, planId: r.data.workspace[0].id })); setBulkPlan(r.data.workspace[0].id); } } } catch (_) { }
   };
   const loadOrders = async () => {
     try { const r = await axios.get(`${API_URL}/admin/workspace-orders${q ? `?q=${encodeURIComponent(q)}` : ''}`); setOrders(r.data.orders || []); } catch (_) { }
@@ -9228,10 +9393,13 @@ const AdminOrderWorkspace = () => {
               {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <label style={lab}>Address lookup (Google Maps)</label>
-            <AddressAutocomplete onPick={({ street, city, state, zip }) => setForm(f => ({ ...f, streetAddress: street || f.streetAddress, city: city || f.city, state: state || f.state, zip: zip || f.zip }))} />
-          </div>
+           <div style={{ gridColumn: '1 / -1' }}>
+             <label style={lab}>Address lookup (Google Maps)</label>
+             <AddressAutocomplete
+               countries={getCountryCode(form.country)}
+               onPick={({ street, city, state, zip }) => setForm(f => ({ ...f, streetAddress: street || f.streetAddress, city: city || f.city, state: state || f.state, zip: zip || f.zip }))}
+             />
+           </div>
           <div><label style={lab}>Street address</label><input style={inp} value={form.streetAddress} onChange={e => set('streetAddress', e.target.value)} /></div>
           <div><label style={lab}>Street address 2 (optional)</label><input style={inp} value={form.streetAddress2} onChange={e => set('streetAddress2', e.target.value)} /></div>
           <div><label style={lab}>City</label><input style={inp} value={form.city} onChange={e => set('city', e.target.value)} /></div>
@@ -9300,65 +9468,6 @@ example3.com, 3, Acme Inc, admin`}</pre>
                       <td style={{ padding: '6px 0', fontWeight: 600 }}>{r.domain}</td>
                       <td style={{ color: r.ok ? '#166534' : '#b42318' }}>{r.ok ? '✓ Provisioned' : '✗ ' + (r.error || 'failed')}{r.provisionNote ? ` (${r.provisionNote})` : ''}</td>
                       <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{r.orderNumber || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <h2>🔗 Bulk Attach Subscriptions</h2>
-      <p style={{ color: '#5b6075' }}>Attach Workspace or Voice subscriptions to existing domains in bulk. One domain per line or comma-separated list.</p>
-      <div style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #e5e7eb', marginBottom: 20 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }} className="grid-2">
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Plan to Attach *</label>
-            <select value={attachPlan} onChange={e => setAttachPlan(e.target.value)} style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }}>
-              {plans.map(p => <option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}/seat/mo</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Seats per Domain</label>
-            <input type="number" min="1" value={attachSeats} onChange={e => setAttachSeats(e.target.value)} style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }} />
-          </div>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Reseller Account</label>
-            <select value={attachAccount} onChange={e => setAttachAccount(e.target.value)} style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }}>
-              <option value="pk">Pakistan</option>
-              <option value="usa">USA</option>
-            </select>
-          </div>
-        </div>
-        <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Domains (one per line, or comma-separated)</label>
-        <textarea value={attachText} onChange={e => setAttachText(e.target.value)} rows={6}
-          placeholder={"domain1.com\ndomain2.com\ndomain3.com"}
-          style={{ width: '100%', borderRadius: 8, border: '1px solid #d8dbe6', padding: 12, fontFamily: 'monospace', fontSize: 13, boxSizing: 'border-box' }} />
-        <button onClick={runBulkAttach} disabled={attachBusy} className="btn btn-primary" style={{ marginTop: 12 }}>
-          {attachBusy ? 'Attaching… (this can take a while)' : `Attach to ${attachText.split(/[\s,\n]+/).filter(Boolean).length || ''} Domain(s)`}
-        </button>
-
-        {attachMsg && (
-          <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, fontSize: 14, fontWeight: 500, backgroundColor: attachMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', border: attachMsg.startsWith('✓') ? '1px solid #bbf7d0' : '1px solid #fee2e2', color: attachMsg.startsWith('✓') ? '#15803d' : '#b91c1c' }}>
-            {attachMsg}
-          </div>
-        )}
-
-        {attachResults && attachResults.results && (
-          <div style={{ marginTop: 16 }}>
-            <div style={{ fontWeight: 700, marginBottom: 8 }}>
-              {attachResults.attached} attached, {attachResults.failed} failed
-            </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
-                <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}><th style={{ padding: '6px 0' }}>Domain</th><th>Status</th><th>Google Subscription ID</th></tr></thead>
-                <tbody>
-                  {attachResults.results.map((r, i) => (
-                    <tr key={i} style={{ borderTop: '1px solid #f0f0f0' }}>
-                      <td style={{ padding: '6px 0', fontWeight: 600 }}>{r.domain}</td>
-                      <td style={{ color: r.ok ? '#166534' : '#b42318' }}>{r.ok ? '✓ Attached Successfully' : '✗ ' + (r.error || 'failed')}</td>
-                      <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{r.subscriptionId || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
