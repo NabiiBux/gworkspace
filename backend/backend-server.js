@@ -2209,8 +2209,8 @@ app.get('/api/admin/customers', authenticateCustomer, requireAdmin, async (req, 
   }
 });
 
-// Temporary test lookup route for troubleshooting reseller API errors
-app.get('/api/test-lookup', async (req, res) => {
+// Admin-only test lookup route for troubleshooting reseller API errors (raw Google responses)
+app.get('/api/test-lookup', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const dom = (req.query.domain || 'swiftvoice24.site').toLowerCase().trim();
     const results = {};
@@ -2264,12 +2264,18 @@ async function checkResellerAuthHealth(account, reseller) {
 // credential/config problem. Returns { notInReseller: true } or { error: <actionable message> }.
 async function classifyResellerLookupError(account, reseller, e) {
   const msg = e?.errors?.[0]?.message || e?.message || '';
+  const httpCode = e?.code || e?.response?.status || '?';
   const isNotOwned = e?.code === 404 || /does not have access to this customer|not exist|customer not found|domain not found|customer was not found|not found/i.test(msg);
-  if (isNotOwned) return { notInReseller: true };
+  if (isNotOwned) {
+    return { notInReseller: true, reason: `Google (HTTP ${httpCode}): ${msg || 'customer not found'} — this domain is not a customer in the ${account.toUpperCase()} reseller console.` };
+  }
   const isForbidden = e?.code === 403 || e?.code === 401 || /forbidden|permission denied|unauthorized/i.test(msg);
   if (isForbidden) {
     const health = await checkResellerAuthHealth(account, reseller);
-    if (health.ok) return { notInReseller: true }; // creds are fine → domain just isn't ours on this account
+    if (health.ok) {
+      // Creds verified working → Google is refusing access to THIS customer specifically.
+      return { notInReseller: true, reason: `Google (HTTP ${httpCode}): ${msg || 'Forbidden'} — ${account.toUpperCase()} credentials are working, but Google refused access to this specific customer. Usually the domain is not (or no longer) under this reseller console, or it is not the customer's PRIMARY domain (secondary domains cannot be looked up).` };
+    }
     return { error: `Google rejected the ${account.toUpperCase()} credentials (${health.error || msg}). Check the service account's domain-wide delegation scopes and the reseller admin email (RESELLER_ADMIN_EMAIL${account === 'usa' ? '_USA' : ''}), or reconnect OAuth for this account.` };
   }
   return { error: msg };
@@ -2326,11 +2332,14 @@ app.get('/api/admin/lookup-domain', authenticateCustomer, requireAdmin, async (r
         // account — verify the credentials before reporting it as a system error.
         const verdict = await classifyResellerLookupError(account, reseller, e);
         if (verdict.notInReseller) {
-          accountsInfo[account] = { found: false, notInReseller: true };
+          accountsInfo[account] = { found: false, notInReseller: true, reason: verdict.reason };
         } else {
           errors.push(`${account.toUpperCase()}: ${verdict.error}`);
           accountsInfo[account] = { found: false, error: verdict.error };
         }
+      }
+      if (accountsInfo[account]) {
+        accountsInfo[account].authType = auth.isServiceAccount ? 'Service Account' : 'OAuth';
       }
     }
 
@@ -2417,7 +2426,7 @@ app.post('/api/admin/bulk-lookup-domains', authenticateCustomer, requireAdmin, a
           // Only report an error when the credentials themselves fail the health check.
           const verdict = await classifyResellerLookupError(account, reseller, e);
           if (verdict.notInReseller) {
-            results[dom][account] = { found: false, notInReseller: true };
+            results[dom][account] = { found: false, notInReseller: true, reason: verdict.reason };
           } else {
             results[dom][account] = { found: false, error: verdict.error };
             results[dom].errors.push(`${account.toUpperCase()}: ${verdict.error}`);

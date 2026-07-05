@@ -2885,8 +2885,11 @@ const AdminCustomersSection = () => {
                         )}
                       </div>
                     ) : (
-                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, opacity: 0.7 }}>
-                        <div style={{ fontWeight: 600, color: '#64748b', fontSize: 12 }}>🇵🇰 Pakistan Account (PK) — Not Found</div>
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, opacity: 0.85 }}>
+                        <div style={{ fontWeight: 600, color: '#64748b', fontSize: 12 }}>🇵🇰 Pakistan Account (PK) — Not Found{lookup.accounts?.pk?.authType ? ` · via ${lookup.accounts.pk.authType}` : ''}</div>
+                        {(lookup.accounts?.pk?.reason || lookup.accounts?.pk?.error) && (
+                          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: '1.4' }}>{lookup.accounts.pk.reason || lookup.accounts.pk.error}</div>
+                        )}
                       </div>
                     )}
 
@@ -2915,8 +2918,11 @@ const AdminCustomersSection = () => {
                         )}
                       </div>
                     ) : (
-                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, opacity: 0.7 }}>
-                        <div style={{ fontWeight: 600, color: '#64748b', fontSize: 12 }}>🇺🇸 USA Account (USA) — Not Found</div>
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, opacity: 0.85 }}>
+                        <div style={{ fontWeight: 600, color: '#64748b', fontSize: 12 }}>🇺🇸 USA Account (USA) — Not Found{lookup.accounts?.usa?.authType ? ` · via ${lookup.accounts.usa.authType}` : ''}</div>
+                        {(lookup.accounts?.usa?.reason || lookup.accounts?.usa?.error) && (
+                          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: '1.4' }}>{lookup.accounts.usa.reason || lookup.accounts.usa.error}</div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2983,7 +2989,13 @@ const AdminCustomersSection = () => {
                       <div key={domain} style={{ marginBottom: 12, borderBottom: '1px dashed #e2e8f0', paddingBottom: 8 }}>
                         <div style={{ fontWeight: 700, fontSize: 13, color: '#1e293b' }}>🌐 {domain}</div>
                         {!res.found ? (
-                          <div style={{ fontSize: 11, color: '#94a3b8', marginLeft: 12 }}>No subscription found on either PK or USA accounts.</div>
+                          <div style={{ marginLeft: 12 }}>
+                            <div style={{ fontSize: 11, color: '#94a3b8' }}>No subscription found on either PK or USA accounts.</div>
+                            {['pk', 'usa'].map(acct => {
+                              const why = res[acct]?.reason || res[acct]?.error;
+                              return why ? <div key={acct} style={{ fontSize: 10, color: '#cbd5e1', marginTop: 2 }}>{acct.toUpperCase()}: {why}</div> : null;
+                            })}
+                          </div>
                         ) : (
                           <div style={{ marginLeft: 12, marginTop: 4 }}>
                             {['pk', 'usa'].map(acct => {
