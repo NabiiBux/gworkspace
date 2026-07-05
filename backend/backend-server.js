@@ -624,6 +624,86 @@ const GoogleConnectionSchema = new mongoose.Schema(
 );
 const GoogleConnection = mongoose.model('GoogleConnection', GoogleConnectionSchema);
 
+// Safe GoogleConnection helpers with a JSON file fallback if MongoDB is not connected
+async function dbGetGoogleConnection(account) {
+  const fs = require('fs');
+  const path = require('path');
+  
+  // If MongoDB is connected, try to read from DB first
+  if (mongoose.connection && mongoose.connection.readyState === 1) {
+    try {
+      const conn = await GoogleConnection.findOne({ account });
+      if (conn) return conn;
+    } catch (_) {}
+  }
+  
+  // Local JSON file fallback
+  try {
+    const filePath = path.join(__dirname, 'google_connections.json');
+    if (fs.existsSync(filePath)) {
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      if (data[account]) {
+        // Return a mock object with a .save() method
+        return {
+          ...data[account],
+          save: async function() {
+            return dbSaveGoogleConnection(account, this);
+          }
+        };
+      }
+    }
+  } catch (e) {
+    console.error('Failed to read local connections file:', e.message);
+  }
+  return null;
+}
+
+async function dbSaveGoogleConnection(account, connData) {
+  const fs = require('fs');
+  const path = require('path');
+  
+  // Try to save to MongoDB first if connected
+  if (mongoose.connection && mongoose.connection.readyState === 1) {
+    try {
+      let conn = await GoogleConnection.findOne({ account });
+      if (!conn) conn = new GoogleConnection({ account });
+      conn.refreshToken = connData.refreshToken;
+      conn.accessToken = connData.accessToken;
+      conn.tokenExpiry = connData.tokenExpiry;
+      conn.connectedEmail = connData.connectedEmail;
+      conn.scopes = connData.scopes;
+      conn.name = connData.name;
+      conn.active = connData.active;
+      await conn.save();
+    } catch (e) {
+      console.warn('Failed to save connection to MongoDB:', e.message);
+    }
+  }
+  
+  // Always save to local JSON file as a robust fallback/backup!
+  try {
+    const filePath = path.join(__dirname, 'google_connections.json');
+    let data = {};
+    if (fs.existsSync(filePath)) {
+      try { data = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
+    }
+    data[account] = {
+      account,
+      refreshToken: connData.refreshToken,
+      accessToken: connData.accessToken,
+      tokenExpiry: connData.tokenExpiry,
+      connectedEmail: connData.connectedEmail,
+      scopes: connData.scopes,
+      name: connData.name,
+      active: connData.active
+    };
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+    console.log(`Saved Google Connection for ${account.toUpperCase()} to local file fallback.`);
+  } catch (e) {
+    console.error('Failed to write local connections file:', e.message);
+  }
+}
+
 // Build a configured OAuth2 client (Pakistan / default)
 function makeOAuthClient() {
   return new google.auth.OAuth2(
@@ -675,7 +755,7 @@ google.reseller = function(options) {
                     if (isAuthError) {
                       console.warn(`[Proxy Fallback] Reseller call failed on Service Account for ${account.toUpperCase()}, attempting lazy fallback to OAuth:`, msg);
                       try {
-                        const conn = await GoogleConnection.findOne({ account });
+                        const conn = await dbGetGoogleConnection(account);
                         if (conn && conn.refreshToken) {
                           const oauth2 = account === 'usa' ? makeUsaOAuthClient() : makeOAuthClient();
                           oauth2.setCredentials({ refresh_token: conn.refreshToken });
@@ -2129,6 +2209,35 @@ app.get('/api/admin/customers', authenticateCustomer, requireAdmin, async (req, 
   }
 });
 
+// Temporary test lookup route for troubleshooting reseller API errors
+app.get('/api/test-lookup', async (req, res) => {
+  try {
+    const dom = (req.query.domain || 'swiftvoice24.site').toLowerCase().trim();
+    const results = {};
+    for (const account of ['pk', 'usa']) {
+      results[account] = { success: false };
+      try {
+        const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+        const reseller = google.reseller({ version: 'v1', auth });
+        results[account].authType = auth ? (auth.isServiceAccount ? 'ServiceAccount' : 'OAuth') : 'None';
+        
+        const resp = await reseller.subscriptions.list({ customerId: dom });
+        results[account].success = true;
+        results[account].subscriptions = resp.data.subscriptions || [];
+      } catch (err) {
+        results[account].error = {
+          code: err.code,
+          message: err.message,
+          errors: err.errors
+        };
+      }
+    }
+    res.json({ domain: dom, results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Admin: look up a domain's Google Workspace subscriptions across BOTH accounts.
 // Used by the "attach subscription" UI so the account auto-selects and details for both accounts are returned.
 app.get('/api/admin/lookup-domain', authenticateCustomer, requireAdmin, async (req, res) => {
@@ -2177,10 +2286,9 @@ app.get('/api/admin/lookup-domain', authenticateCustomer, requireAdmin, async (r
         }
       } catch (e) {
         const msg = e?.errors?.[0]?.message || e?.message || '';
-        // If the code is 403 (Forbidden/Not Authorized) or the message indicates permission issues,
-        // it means the domain is not managed under this reseller account. This is normal and should not
-        // be treated as a hard configuration error or added to diagnostics.
-        const isNotOwned = e?.code === 403 || /not found|does not exist|404|forbidden|permission|authorized|unauthorized/i.test(msg);
+        // Distinguish between genuine "domain not owned" vs actual API configuration/credential errors.
+        const isAuthOrConfigError = /unauthorized|forbidden|permission denied|invalid_grant|not configured|not a reseller administrator|access not configured/i.test(msg);
+        const isNotOwned = !isAuthOrConfigError && (e?.code === 404 || /does not have access to this customer|not exist|customer not found|domain not found|customer was not found/i.test(msg));
         if (!isNotOwned) {
           errors.push(`${account.toUpperCase()}: ${msg}`);
           accountsInfo[account] = { found: false, error: msg };
@@ -2270,10 +2378,12 @@ app.post('/api/admin/bulk-lookup-domains', authenticateCustomer, requireAdmin, a
           }
         } catch (e) {
           const msg = e?.errors?.[0]?.message || e?.message || '';
-          const isNotOwned = e?.code === 403 || /not found|does not exist|404|forbidden|permission|authorized|unauthorized/i.test(msg);
+          const isAuthOrConfigError = /unauthorized|forbidden|permission denied|invalid_grant|not configured|not a reseller administrator|access not configured/i.test(msg);
+          const isNotOwned = !isAuthOrConfigError && (e?.code === 404 || /does not have access to this customer|not exist|customer not found|domain not found|customer was not found/i.test(msg));
           if (isNotOwned) {
             results[dom][account] = { found: false, notInReseller: true };
           } else {
+            results[dom][account] = { found: false, error: msg };
             results[dom].errors.push(`${account.toUpperCase()}: ${msg}`);
           }
         }
@@ -7908,16 +8018,16 @@ app.get('/api/google/callback', async (req, res) => {
     } catch (_) { }
 
     // Upsert the Pakistan connection record
-    let conn = await GoogleConnection.findOne({ account: 'pk' });
-    if (!conn) conn = new GoogleConnection({ account: 'pk' });
-    if (tokens.refresh_token) conn.refreshToken = tokens.refresh_token;
-    conn.accessToken = tokens.access_token;
-    conn.tokenExpiry = tokens.expiry_date ? new Date(tokens.expiry_date) : null;
-    conn.connectedEmail = email;
-    conn.scopes = RESELLER_SCOPES;
-    conn.name = 'Pakistan Reseller';
-    conn.active = true;
-    await conn.save();
+    const connData = {
+      refreshToken: tokens.refresh_token,
+      accessToken: tokens.access_token,
+      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+      connectedEmail: email,
+      scopes: RESELLER_SCOPES,
+      name: 'Pakistan Reseller',
+      active: true
+    };
+    await dbSaveGoogleConnection('pk', connData);
 
     res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px">
       <h2>✅ Pakistan reseller connected</h2>
@@ -7962,16 +8072,16 @@ app.get('/api/google/usa/callback', async (req, res) => {
       email = info.data.email || '';
     } catch (_) { }
 
-    let conn = await GoogleConnection.findOne({ account: 'usa' });
-    if (!conn) conn = new GoogleConnection({ account: 'usa' });
-    if (tokens.refresh_token) conn.refreshToken = tokens.refresh_token;
-    conn.accessToken = tokens.access_token;
-    conn.tokenExpiry = tokens.expiry_date ? new Date(tokens.expiry_date) : null;
-    conn.connectedEmail = email;
-    conn.scopes = ['https://www.googleapis.com/auth/apps.order'];
-    conn.name = 'USA Reseller (Voice)';
-    conn.active = true;
-    await conn.save();
+    const connData = {
+      refreshToken: tokens.refresh_token,
+      accessToken: tokens.access_token,
+      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+      connectedEmail: email,
+      scopes: ['https://www.googleapis.com/auth/apps.order'],
+      name: 'USA Reseller (Voice)',
+      active: true
+    };
+    await dbSaveGoogleConnection('usa', connData);
 
     res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px">
       <h2>✅ USA reseller connected (Voice)</h2>
@@ -7986,8 +8096,8 @@ app.get('/api/google/usa/callback', async (req, res) => {
 // Status: is the reseller Google account connected?
 app.get('/api/google/status', authenticateCustomer, async (req, res) => {
   try {
-    const pk = await GoogleConnection.findOne({ account: 'pk' });
-    const usa = await GoogleConnection.findOne({ account: 'usa' });
+    const pk = await dbGetGoogleConnection('pk');
+    const usa = await dbGetGoogleConnection('usa');
     res.json({
       connected: !!(pk && pk.refreshToken && pk.active) || !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
       email: pk?.connectedEmail || null,
@@ -8016,7 +8126,7 @@ async function getUsaServiceAccountAuth() {
   let subject = process.env.RESELLER_ADMIN_EMAIL_USA;
   if (!subject) {
     try {
-      const conn = await GoogleConnection.findOne({ account: 'usa' });
+      const conn = await dbGetGoogleConnection('usa');
       if (conn && conn.connectedEmail) {
         subject = conn.connectedEmail;
       }
@@ -8041,7 +8151,7 @@ async function getUsaAuth() {
     sa.isServiceAccount = true;
     return sa;
   }
-  const conn = await GoogleConnection.findOne({ account: 'usa' });
+  const conn = await dbGetGoogleConnection('usa');
   if (!conn || !conn.refreshToken) throw new Error('USA reseller not connected. Add GOOGLE_SERVICE_ACCOUNT_JSON_USA (recommended) or connect via OAuth.');
   const oauth2 = makeUsaOAuthClient();
   oauth2.setCredentials({ refresh_token: conn.refreshToken });
@@ -8072,7 +8182,7 @@ async function getServiceAccountAuth() {
   let subject = process.env.RESELLER_ADMIN_EMAIL;
   if (!subject) {
     try {
-      const conn = await GoogleConnection.findOne({ account: 'pk' });
+      const conn = await dbGetGoogleConnection('pk');
       if (conn && conn.connectedEmail) {
         subject = conn.connectedEmail;
       }
@@ -8096,7 +8206,7 @@ async function getResellerAuth() {
     sa.isServiceAccount = true;
     return sa;
   }
-  const conn = await GoogleConnection.findOne({ account: 'pk' });
+  const conn = await dbGetGoogleConnection('pk');
   if (!conn || !conn.refreshToken) throw new Error('Google account not connected');
   const oauth2 = makeOAuthClient();
   oauth2.setCredentials({ refresh_token: conn.refreshToken });
