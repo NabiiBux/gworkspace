@@ -2207,21 +2207,25 @@ async function checkResellerAuthHealth(account, reseller) {
 // credential/config problem. Returns { notInReseller: true } or { error: <actionable message> }.
 async function classifyResellerLookupError(account, reseller, e) {
   const msg = e?.errors?.[0]?.message || e?.message || '';
+  const gReason = e?.errors?.[0]?.reason || '';
   const httpCode = e?.code || e?.response?.status || '?';
+  const adminEmail = account === 'usa'
+    ? (process.env.RESELLER_ADMIN_EMAIL_USA || 'admin@artisandrywallaz.com')
+    : (process.env.RESELLER_ADMIN_EMAIL || 'admin@gnbmentor.com');
   const isNotOwned = e?.code === 404 || /does not have access to this customer|not exist|customer not found|domain not found|customer was not found|not found/i.test(msg);
   if (isNotOwned) {
-    return { notInReseller: true, reason: `Google (HTTP ${httpCode}): ${msg || 'customer not found'} — this domain is not a customer in the ${account.toUpperCase()} reseller console.` };
+    return { notInReseller: true, reason: `Google (HTTP ${httpCode}): ${msg || 'customer not found'} — this domain is not a customer under the ${account.toUpperCase()} console queried as "${adminEmail}". If your subscriptions live under a DIFFERENT admin/console, set RESELLER_ADMIN_EMAIL${account === 'usa' ? '_USA' : ''} to that console's super-admin.` };
   }
   const isForbidden = e?.code === 403 || e?.code === 401 || /forbidden|permission denied|unauthorized/i.test(msg);
   if (isForbidden) {
     const health = await checkResellerAuthHealth(account, reseller);
     if (health.ok) {
       // Creds verified working → Google is refusing access to THIS customer specifically.
-      return { notInReseller: true, reason: `Google (HTTP ${httpCode}): ${msg || 'Forbidden'} — ${account.toUpperCase()} credentials are working, but Google refused access to this specific customer. Usually the domain is not (or no longer) under this reseller console, or it is not the customer's PRIMARY domain (secondary domains cannot be looked up).` };
+      return { notInReseller: true, reason: `Google (HTTP ${httpCode}${gReason ? ', ' + gReason : ''}): ${msg || 'Forbidden'} — the ${account.toUpperCase()} credentials work (queried as "${adminEmail}"), but Google refused access to this customer. The domain is not under this console, or you entered a secondary domain instead of the customer's PRIMARY domain.` };
     }
-    return { error: `Google rejected the ${account.toUpperCase()} credentials (${health.error || msg}). Check the service account's domain-wide delegation scopes and the reseller admin email (RESELLER_ADMIN_EMAIL${account === 'usa' ? '_USA' : ''}), or reconnect OAuth for this account.` };
+    return { error: `Forbidden (403${gReason ? ', ' + gReason : ''}). The ${account.toUpperCase()} credentials authenticated but Google refused the reseller call (${health.error || msg}). Fix in Google Admin (admin.google.com) for this account: (1) Security → API controls → Domain-wide delegation: the service account's Client ID must include the scope https://www.googleapis.com/auth/apps.order. (2) The impersonated admin "${adminEmail}" must be a SUPER-ADMIN on this account. (3) Confirm this account is an active Google Workspace reseller. (Set RESELLER_ADMIN_EMAIL${account === 'usa' ? '_USA' : ''} if the admin address is different.)` };
   }
-  return { error: msg };
+  return { error: `${msg || 'Unknown error'}${httpCode !== '?' ? ' (HTTP ' + httpCode + ')' : ''}` };
 }
 
 // Admin: look up a domain's Google Workspace subscriptions across BOTH accounts.
