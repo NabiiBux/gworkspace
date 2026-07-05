@@ -2922,9 +2922,23 @@ const AdminCustomersSection = () => {
                   </div>
                 )}
 
+                {lookup && !lookup.found && (
+                  <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 10, padding: 14, marginBottom: 14 }}>
+                    <div style={{ fontWeight: 700, color: '#475569', marginBottom: 4, fontSize: 13 }}>
+                      🔍 Domain Not Found in Your Reseller Consoles
+                    </div>
+                    <div style={{ fontSize: 12, color: '#64748b', lineHeight: '1.4' }}>
+                      The domain <strong>{lookup.domain}</strong> was not found on either your Pakistan (PK) or USA reseller consoles.
+                      <p style={{ margin: '6px 0 0', fontSize: 11, color: '#64748b' }}>
+                        Note: Google returned <em>Forbidden</em> or <em>Not Found</em> access codes. This is normal and expected when a domain is registered directly with Google or managed by another reseller. It confirms your API credentials are functional and secure!
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {lookup && !lookup.found && lookup.diagnostics && lookup.diagnostics.length > 0 && (
                   <div style={{ background: '#fff7ed', borderRadius: 10, padding: 12, marginBottom: 12, fontSize: 12, color: '#9a3412' }}>
-                    <div style={{ fontWeight: 600, marginBottom: 4 }}>Why it wasn't found:</div>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>System Warnings / Errors:</div>
                     <ul style={{ margin: 0, paddingLeft: 16 }}>{lookup.diagnostics.map((d, i) => <li key={i}>{d}</li>)}</ul>
                   </div>
                 )}

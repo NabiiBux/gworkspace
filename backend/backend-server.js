@@ -648,6 +648,68 @@ const RESELLER_SCOPES = [
   'https://www.googleapis.com/auth/apps.order',
 ];
 
+// Override google.reseller to automatically and transparently fall back to OAuth
+// if the Service Account fails with a 403 Forbidden or 401 Unauthorized permission error.
+const originalReseller = google.reseller;
+google.reseller = function(options) {
+  const resellerClient = originalReseller.call(google, options);
+  
+  const auth = options?.auth;
+  if (auth && auth.isServiceAccount && auth.resellerAccount) {
+    const account = auth.resellerAccount;
+    
+    return new Proxy(resellerClient, {
+      get(target, prop) {
+        const saResource = target[prop];
+        if (typeof saResource === 'object' && saResource !== null) {
+          return new Proxy(saResource, {
+            get(resTarget, resProp) {
+              const saMethod = resTarget[resProp];
+              if (typeof saMethod === 'function') {
+                return async function(...args) {
+                  try {
+                    return await saMethod.apply(resTarget, args);
+                  } catch (e) {
+                    const msg = e?.errors?.[0]?.message || e?.message || '';
+                    const isAuthError = e?.code === 403 || e?.code === 401 || /forbidden|permission|authorized|unauthorized|delegation/i.test(msg);
+                    if (isAuthError) {
+                      console.warn(`[Proxy Fallback] Reseller call failed on Service Account for ${account.toUpperCase()}, attempting lazy fallback to OAuth:`, msg);
+                      try {
+                        const conn = await GoogleConnection.findOne({ account });
+                        if (conn && conn.refreshToken) {
+                          const oauth2 = account === 'usa' ? makeUsaOAuthClient() : makeOAuthClient();
+                          oauth2.setCredentials({ refresh_token: conn.refreshToken });
+                          
+                          // Create a reseller client with the OAuth auth
+                          const oauthReseller = originalReseller.call(google, { ...options, auth: oauth2 });
+                          const oauthResource = oauthReseller[prop];
+                          if (oauthResource && typeof oauthResource[resProp] === 'function') {
+                            console.log(`[Proxy Fallback] Executing reseller.${prop}.${resProp} with OAuth credentials instead!`);
+                            return await oauthResource[resProp].apply(oauthResource, args);
+                          }
+                        } else {
+                          console.warn(`[Proxy Fallback] OAuth is not connected for ${account.toUpperCase()}. Cannot fall back.`);
+                        }
+                      } catch (fallbackErr) {
+                        console.error(`[Proxy Fallback] Fallback execution failed:`, fallbackErr.message);
+                      }
+                    }
+                    throw e; // Re-throw original error
+                  }
+                };
+              }
+              return saMethod;
+            }
+          });
+        }
+        return saResource;
+      }
+    });
+  }
+  
+  return resellerClient;
+};
+
 // Seed placeholder plans once (won't overwrite later edits)
 async function seedPlans() {
   try {
@@ -2115,11 +2177,15 @@ app.get('/api/admin/lookup-domain', authenticateCustomer, requireAdmin, async (r
         }
       } catch (e) {
         const msg = e?.errors?.[0]?.message || e?.message || '';
-        if (!/not found|does not exist|404/i.test(msg)) {
+        // If the code is 403 (Forbidden/Not Authorized) or the message indicates permission issues,
+        // it means the domain is not managed under this reseller account. This is normal and should not
+        // be treated as a hard configuration error or added to diagnostics.
+        const isNotOwned = e?.code === 403 || /not found|does not exist|404|forbidden|permission|authorized|unauthorized/i.test(msg);
+        if (!isNotOwned) {
           errors.push(`${account.toUpperCase()}: ${msg}`);
           accountsInfo[account] = { found: false, error: msg };
         } else {
-          accountsInfo[account] = { found: false };
+          accountsInfo[account] = { found: false, notInReseller: true };
         }
       }
     }
@@ -2204,8 +2270,9 @@ app.post('/api/admin/bulk-lookup-domains', authenticateCustomer, requireAdmin, a
           }
         } catch (e) {
           const msg = e?.errors?.[0]?.message || e?.message || '';
-          if (/not found|does not exist|404/i.test(msg)) {
-            results[dom][account] = { found: false };
+          const isNotOwned = e?.code === 403 || /not found|does not exist|404|forbidden|permission|authorized|unauthorized/i.test(msg);
+          if (isNotOwned) {
+            results[dom][account] = { found: false, notInReseller: true };
           } else {
             results[dom].errors.push(`${account.toUpperCase()}: ${msg}`);
           }
@@ -7937,7 +8004,7 @@ app.get('/api/google/status', authenticateCustomer, async (req, res) => {
 // Service-account auth for the USA reseller (domain-wide delegation) — mirrors PK.
 // Uses GOOGLE_SERVICE_ACCOUNT_JSON_USA + RESELLER_ADMIN_EMAIL_USA. This is the method
 // that can create users in customer domains (which OAuth cannot).
-function getUsaServiceAccountAuth() {
+async function getUsaServiceAccountAuth() {
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON_USA) return null;
   let creds;
   try {
@@ -7946,7 +8013,16 @@ function getUsaServiceAccountAuth() {
     console.error('GOOGLE_SERVICE_ACCOUNT_JSON_USA is not valid JSON:', e.message);
     return null;
   }
-  const subject = process.env.RESELLER_ADMIN_EMAIL_USA || 'admin@artisandrywallaz.com';
+  let subject = process.env.RESELLER_ADMIN_EMAIL_USA;
+  if (!subject) {
+    try {
+      const conn = await GoogleConnection.findOne({ account: 'usa' });
+      if (conn && conn.connectedEmail) {
+        subject = conn.connectedEmail;
+      }
+    } catch (_) {}
+  }
+  if (!subject) subject = 'admin@artisandrywallaz.com';
   return new google.auth.JWT({
     email: creds.client_email,
     key: creds.private_key,
@@ -7959,12 +8035,18 @@ function getUsaServiceAccountAuth() {
 // Prefers the USA service account (needed for user creation + full provisioning);
 // falls back to the OAuth refresh token (Voice-only, can't create users).
 async function getUsaAuth() {
-  const sa = getUsaServiceAccountAuth();
-  if (sa) return sa;
+  const sa = await getUsaServiceAccountAuth();
+  if (sa) {
+    sa.resellerAccount = 'usa';
+    sa.isServiceAccount = true;
+    return sa;
+  }
   const conn = await GoogleConnection.findOne({ account: 'usa' });
   if (!conn || !conn.refreshToken) throw new Error('USA reseller not connected. Add GOOGLE_SERVICE_ACCOUNT_JSON_USA (recommended) or connect via OAuth.');
   const oauth2 = makeUsaOAuthClient();
   oauth2.setCredentials({ refresh_token: conn.refreshToken });
+  oauth2.resellerAccount = 'usa';
+  oauth2.isServiceAccount = false;
   return oauth2;
 }
 
@@ -7978,7 +8060,7 @@ const PROVISION_SCOPES = [
 
 // Service-account auth that impersonates the reseller admin (domain-wide delegation).
 // This is the method that can create users in customer domains.
-function getServiceAccountAuth() {
+async function getServiceAccountAuth() {
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return null;
   let creds;
   try {
@@ -7987,7 +8069,16 @@ function getServiceAccountAuth() {
     console.error('GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON:', e.message);
     return null;
   }
-  const subject = process.env.RESELLER_ADMIN_EMAIL || 'admin@gnbmentor.com';
+  let subject = process.env.RESELLER_ADMIN_EMAIL;
+  if (!subject) {
+    try {
+      const conn = await GoogleConnection.findOne({ account: 'pk' });
+      if (conn && conn.connectedEmail) {
+        subject = conn.connectedEmail;
+      }
+    } catch (_) {}
+  }
+  if (!subject) subject = 'admin@gnbmentor.com';
   return new google.auth.JWT({
     email: creds.client_email,
     key: creds.private_key,
@@ -7999,12 +8090,18 @@ function getServiceAccountAuth() {
 // Helper: get an authorized client for reseller calls.
 // Prefers the service account (needed for user creation); falls back to OAuth refresh token.
 async function getResellerAuth() {
-  const sa = getServiceAccountAuth();
-  if (sa) return sa;
+  const sa = await getServiceAccountAuth();
+  if (sa) {
+    sa.resellerAccount = 'pk';
+    sa.isServiceAccount = true;
+    return sa;
+  }
   const conn = await GoogleConnection.findOne({ account: 'pk' });
   if (!conn || !conn.refreshToken) throw new Error('Google account not connected');
   const oauth2 = makeOAuthClient();
   oauth2.setCredentials({ refresh_token: conn.refreshToken });
+  oauth2.resellerAccount = 'pk';
+  oauth2.isServiceAccount = false;
   return oauth2;
 }
 
