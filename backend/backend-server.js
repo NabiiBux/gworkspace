@@ -728,67 +728,10 @@ const RESELLER_SCOPES = [
   'https://www.googleapis.com/auth/apps.order',
 ];
 
-// Override google.reseller to automatically and transparently fall back to OAuth
-// if the Service Account fails with a 403 Forbidden or 401 Unauthorized permission error.
-const originalReseller = google.reseller;
-google.reseller = function(options) {
-  const resellerClient = originalReseller.call(google, options);
-  
-  const auth = options?.auth;
-  if (auth && auth.isServiceAccount && auth.resellerAccount) {
-    const account = auth.resellerAccount;
-    
-    return new Proxy(resellerClient, {
-      get(target, prop) {
-        const saResource = target[prop];
-        if (typeof saResource === 'object' && saResource !== null) {
-          return new Proxy(saResource, {
-            get(resTarget, resProp) {
-              const saMethod = resTarget[resProp];
-              if (typeof saMethod === 'function') {
-                return async function(...args) {
-                  try {
-                    return await saMethod.apply(resTarget, args);
-                  } catch (e) {
-                    const msg = e?.errors?.[0]?.message || e?.message || '';
-                    const isAuthError = e?.code === 403 || e?.code === 401 || /forbidden|permission|authorized|unauthorized|delegation/i.test(msg);
-                    if (isAuthError) {
-                      console.warn(`[Proxy Fallback] Reseller call failed on Service Account for ${account.toUpperCase()}, attempting lazy fallback to OAuth:`, msg);
-                      try {
-                        const conn = await dbGetGoogleConnection(account);
-                        if (conn && conn.refreshToken) {
-                          const oauth2 = account === 'usa' ? makeUsaOAuthClient() : makeOAuthClient();
-                          oauth2.setCredentials({ refresh_token: conn.refreshToken });
-                          
-                          // Create a reseller client with the OAuth auth
-                          const oauthReseller = originalReseller.call(google, { ...options, auth: oauth2 });
-                          const oauthResource = oauthReseller[prop];
-                          if (oauthResource && typeof oauthResource[resProp] === 'function') {
-                            console.log(`[Proxy Fallback] Executing reseller.${prop}.${resProp} with OAuth credentials instead!`);
-                            return await oauthResource[resProp].apply(oauthResource, args);
-                          }
-                        } else {
-                          console.warn(`[Proxy Fallback] OAuth is not connected for ${account.toUpperCase()}. Cannot fall back.`);
-                        }
-                      } catch (fallbackErr) {
-                        console.error(`[Proxy Fallback] Fallback execution failed:`, fallbackErr.message);
-                      }
-                    }
-                    throw e; // Re-throw original error
-                  }
-                };
-              }
-              return saMethod;
-            }
-          });
-        }
-        return saResource;
-      }
-    });
-  }
-  
-  return resellerClient;
-};
+// NOTE: an earlier revision wrapped google.reseller in a Proxy that silently retried failed
+// Service Account calls with OAuth credentials. That masked the real credential in use and
+// changed which reseller console answered lookups, so it was removed — calls now go straight
+// through the auth client selected by getResellerAuth()/getUsaAuth(), matching the proven setup.
 
 // Seed placeholder plans once (won't overwrite later edits)
 async function seedPlans() {
@@ -2641,68 +2584,6 @@ app.post('/api/admin/customers/:id/attach-domain', authenticateCustomer, require
     }
 
     res.json({ success: true, domain: dom, account, subscriptions: subCount, message: `Attached ${dom} on the ${account.toUpperCase()} account${subCount ? ` (${subCount} subscription${subCount === 1 ? '' : 's'})` : ''}.` });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Admin: force-link a domain to a customer WITHOUT Google verification (for manually-managed domains).
-app.post('/api/admin/customers/:id/force-link-domain', authenticateCustomer, requireAdmin, async (req, res) => {
-  try {
-    const { domain, account, planId, seats } = req.body;
-    const dom = (domain || '').toLowerCase().trim();
-    if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) return res.status(400).json({ error: 'Enter a valid domain like example.com' });
-    const acct = account === 'usa' ? 'usa' : 'pk';
-    const cust = await Customer.findById(req.params.id);
-    if (!cust) return res.status(404).json({ error: 'Customer not found.' });
-    cust.domain = dom;
-    cust.account = acct;
-    await cust.save();
-
-    let extraMsg = '';
-    if (planId) {
-      const planDoc = await Plan.findOne({ planId });
-      if (planDoc) {
-        const numSeats = Number(seats) || 1;
-        const orderNumber = `WS-FORCE-${Date.now()}`;
-        const order = await WorkspaceOrder.create({
-          customerId: cust._id,
-          orderNumber,
-          type: 'workspace',
-          planType: 'flexible',
-          account: acct,
-          plan: { id: planDoc.planId, name: planDoc.name, monthlyPrice: planDoc.monthlyPrice },
-          seats: numSeats,
-          monthlyTotal: planDoc.monthlyPrice * numSeats,
-          organization: { domain: dom, name: dom.split('.')[0] },
-          contact: { firstName: cust.firstName || 'Admin', lastName: cust.lastName || 'User', email: cust.businessEmail || cust.email },
-          status: 'provisioned',
-          googleProvisioned: false,
-        });
-
-        await Subscription.findOneAndUpdate(
-          { customerId: cust._id, googleWorkspaceSkuId: planDoc.skuId || 'unknown' },
-          {
-            customerId: cust._id,
-            orderId: order._id,
-            subscriptionId: `FORCE-${Date.now()}`,
-            type: 'workspace',
-            plan: planDoc.name,
-            seats: numSeats,
-            monthlyPrice: planDoc.monthlyPrice,
-            status: 'active',
-            googleWorkspaceSkuId: planDoc.skuId || 'unknown',
-            autoRenew: true,
-            nextBillingDate: addDays(new Date(), BILLING_CYCLE_DAYS),
-            updatedAt: new Date()
-          },
-          { upsert: true, new: true }
-        );
-        extraMsg = ` and created manual subscription for ${planDoc.name} (${numSeats} seats)`;
-      }
-    }
-
-    res.json({ success: true, domain: dom, account: acct, message: `Force-linked ${dom} to ${cust.businessEmail} on the ${acct.toUpperCase()} account${extraMsg}. (Not verified against Google.)` });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -7333,191 +7214,6 @@ app.post('/api/admin/subscriptions/bulk-attach', authenticateCustomer, requireAd
   }
 });
 
-app.post('/api/admin/customers/bulk-attach-with-login', authenticateCustomer, requireAdmin, async (req, res) => {
-  try {
-    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
-    if (rows.length === 0) {
-      return res.status(400).json({ error: 'Please provide at least one row of domain, email, and password.' });
-    }
-
-    const results = [];
-
-    for (const r of rows) {
-      const dom = (r.domain || '').toLowerCase().trim();
-      const emailClean = (r.email || '').toLowerCase().trim();
-      const passwordClean = (r.password || '').trim();
-
-      if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) {
-        results.push({ ok: false, domain: dom || '—', email: emailClean || '—', error: 'Invalid domain name format.' });
-        continue;
-      }
-      if (!emailClean || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailClean)) {
-        results.push({ ok: false, domain: dom, email: emailClean || '—', error: 'Invalid email address format.' });
-        continue;
-      }
-
-      try {
-        // Auto-detect reseller account by listing subscriptions across 'pk' and 'usa'
-        let resolvedAccount = null;
-        let googleSubs = [];
-        const lookupErrors = [];
-
-        for (const acct of ['pk', 'usa']) {
-          let auth;
-          try {
-            auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth();
-          } catch (err) {
-            lookupErrors.push(`${acct.toUpperCase()}: auth failed (${err.message})`);
-            continue;
-          }
-
-          const reseller = google.reseller({ version: 'v1', auth });
-          try {
-            const listResp = await reseller.subscriptions.list({ customerId: dom });
-            const subs = listResp.data.subscriptions || [];
-            if (subs.length > 0) {
-              resolvedAccount = acct;
-              googleSubs = subs;
-              break;
-            }
-            // Check if customer exists without active subscription
-            try {
-              await reseller.customers.get({ customerId: dom });
-              resolvedAccount = acct;
-              googleSubs = [];
-              break;
-            } catch (_) {}
-          } catch (err) {
-            const msg = err?.errors?.[0]?.message || err?.message || '';
-            if (!/not found|does not exist|404/i.test(msg)) {
-              lookupErrors.push(`${acct.toUpperCase()}: ${msg}`);
-            }
-          }
-        }
-
-        if (!resolvedAccount) {
-          throw new Error(`Domain not found on either PK or USA reseller account. Diagnostics: ${lookupErrors.join(' | ') || 'None'}`);
-        }
-
-        // Find or create customer by businessEmail
-        let cust = await Customer.findOne({ businessEmail: emailClean });
-        const hashedPassword = passwordClean ? await bcrypt.hash(passwordClean, 10) : undefined;
-
-        if (cust) {
-          cust.domain = dom;
-          cust.account = resolvedAccount;
-          if (hashedPassword) {
-            cust.password = hashedPassword;
-          }
-          await cust.save();
-        } else {
-          cust = await Customer.create({
-            username: dom.split('.')[0],
-            businessEmail: emailClean,
-            domain: dom,
-            account: resolvedAccount,
-            password: hashedPassword || (await bcrypt.hash('DefaultPass123!', 10)),
-            role: 'customer',
-            status: 'active',
-            firstName: 'Admin',
-            lastName: 'User',
-          });
-        }
-
-        // Sync active subscriptions to MongoDB
-        let syncedCount = 0;
-        for (const s of googleSubs) {
-          let planDoc = await Plan.findOne({ skuId: String(s.skuId) });
-          const planName = planDoc ? planDoc.name : (skuName(s.skuId) || s.skuId);
-          const monthlyPrice = planDoc ? planDoc.monthlyPrice : 6.00;
-          const numSeats = s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? 1;
-
-          const orderNumber = `WS-BULK-ATTACH-${Date.now()}`;
-          const order = await WorkspaceOrder.create({
-            customerId: cust._id,
-            orderNumber,
-            type: 'workspace',
-            planType: 'flexible',
-            account: resolvedAccount,
-            plan: { id: planDoc ? planDoc.planId : 'business_starter', name: planName, monthlyPrice: monthlyPrice },
-            seats: numSeats,
-            monthlyTotal: monthlyPrice * numSeats,
-            organization: { domain: dom, name: dom.split('.')[0] },
-            contact: { firstName: cust.firstName || 'Admin', lastName: cust.lastName || 'User', email: cust.businessEmail },
-            status: 'provisioned',
-            googleProvisioned: true,
-          });
-
-          await Subscription.findOneAndUpdate(
-            { customerId: cust._id, googleWorkspaceSkuId: String(s.skuId) },
-            {
-              customerId: cust._id,
-              orderId: order._id,
-              subscriptionId: s.subscriptionId,
-              type: 'workspace',
-              plan: planName,
-              seats: numSeats,
-              monthlyPrice: monthlyPrice,
-              status: s.status === 'ACTIVE' ? 'active' : 'suspended',
-              googleWorkspaceSkuId: String(s.skuId),
-              autoRenew: true,
-              nextBillingDate: addDays(new Date(), BILLING_CYCLE_DAYS),
-              updatedAt: new Date()
-            },
-            { upsert: true, new: true }
-          );
-
-          // Also seed/update SubBilling so it's tracked in billing
-          try {
-            let rec = await SubBilling.findOne({ domain: dom, skuId: String(s.skuId) });
-            if (!rec) {
-              rec = new SubBilling({ account: resolvedAccount, domain: dom, skuId: String(s.skuId), subscriptionId: s.subscriptionId });
-              startNewBillingCycle(rec, new Date());
-            } else if (s.subscriptionId) {
-              rec.subscriptionId = s.subscriptionId;
-            }
-            applyPaymentToCurrentCycle(rec, new Date());
-            await rec.save();
-          } catch (billingErr) {
-            console.error(`SubBilling seeding failed for ${dom}:`, billingErr.message);
-          }
-
-          syncedCount++;
-        }
-
-        results.push({
-          ok: true,
-          domain: dom,
-          email: emailClean,
-          account: resolvedAccount.toUpperCase(),
-          syncedCount,
-          note: `Successfully attached and synced ${syncedCount} subscription(s) on ${resolvedAccount.toUpperCase()}`
-        });
-
-      } catch (err) {
-        results.push({
-          ok: false,
-          domain: dom,
-          email: emailClean,
-          error: err.message
-        });
-      }
-    }
-
-    const successCount = results.filter(r => r.ok).length;
-    res.json({
-      success: true,
-      total: rows.length,
-      attached: successCount,
-      failed: rows.length - successCount,
-      results
-    });
-
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 app.post('/api/admin/customers/bulk-apply', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const { customerIds, planId, seats, actionType } = req.body;
@@ -8173,16 +7869,10 @@ async function getUsaServiceAccountAuth() {
     console.error('GOOGLE_SERVICE_ACCOUNT_JSON_USA is not valid JSON:', e.message);
     return null;
   }
-  let subject = process.env.RESELLER_ADMIN_EMAIL_USA;
-  if (!subject) {
-    try {
-      const conn = await dbGetGoogleConnection('usa');
-      if (conn && conn.connectedEmail) {
-        subject = conn.connectedEmail;
-      }
-    } catch (_) {}
-  }
-  if (!subject) subject = 'admin@artisandrywallaz.com';
+  // Impersonate the USA reseller admin directly (env override or known admin). Do NOT fall
+  // back to the OAuth-connected email — if that email is not a reseller admin, every
+  // reseller call fails with 403 and lookups appear as "not found".
+  const subject = process.env.RESELLER_ADMIN_EMAIL_USA || 'admin@artisandrywallaz.com';
   return new google.auth.JWT({
     email: creds.client_email,
     key: creds.private_key,
@@ -8229,16 +7919,10 @@ async function getServiceAccountAuth() {
     console.error('GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON:', e.message);
     return null;
   }
-  let subject = process.env.RESELLER_ADMIN_EMAIL;
-  if (!subject) {
-    try {
-      const conn = await dbGetGoogleConnection('pk');
-      if (conn && conn.connectedEmail) {
-        subject = conn.connectedEmail;
-      }
-    } catch (_) {}
-  }
-  if (!subject) subject = 'admin@gnbmentor.com';
+  // Impersonate the PK reseller admin directly (env override or known admin). Do NOT fall
+  // back to the OAuth-connected email — if that email is not a reseller admin, every
+  // reseller call fails with 403 and lookups appear as "not found".
+  const subject = process.env.RESELLER_ADMIN_EMAIL || 'admin@gnbmentor.com';
   return new google.auth.JWT({
     email: creds.client_email,
     key: creds.private_key,
