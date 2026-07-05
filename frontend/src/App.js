@@ -2537,6 +2537,13 @@ const AdminCustomersSection = () => {
   const [modalPlan, setModalPlan] = useState('');
   const [modalSeats, setModalSeats] = useState(1);
 
+  // New bulk lookup and attach states inside the modal
+  const [modalTab, setModalTab] = useState('single'); // 'single' | 'bulk'
+  const [bulkAttachDoms, setBulkAttachDoms] = useState('');
+  const [bulkLookupResult, setBulkLookupResult] = useState(null);
+  const [bulkLookupBusy, setBulkLookupBusy] = useState(false);
+  const [bulkSelectedSubs, setBulkSelectedSubs] = useState([]);
+
   const forceLink = async () => {
     setAttachBusy(true); setAttachMsg('');
     try {
@@ -2561,6 +2568,13 @@ const AdminCustomersSection = () => {
     setForceAcct('pk');
     setModalPlan(plans[0]?.id || '');
     setModalSeats(1);
+    
+    // Reset bulk states
+    setModalTab('single');
+    setBulkAttachDoms('');
+    setBulkLookupResult(null);
+    setBulkSelectedSubs([]);
+
     if (guess) setTimeout(() => doLookupFor(guess), 100);
   };
 
@@ -2586,6 +2600,84 @@ const AdminCustomersSection = () => {
       setAttaching(null); load();
     } catch (e) { setAttachMsg(e?.response?.data?.error || 'Could not attach.'); }
     finally { setAttachBusy(false); }
+  };
+
+  const confirmAttachForAccount = async (acct) => {
+    setAttachBusy(true); setAttachMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/admin/customers/${attaching.id}/attach-domain`, { 
+        domain: attachDom.toLowerCase().trim(),
+        account: acct
+      });
+      setAttachMsg('✓ ' + r.data.message);
+      setAttaching(null); load();
+    } catch (e) { setAttachMsg(e?.response?.data?.error || 'Could not attach.'); }
+    finally { setAttachBusy(false); }
+  };
+
+  const doBulkLookup = async () => {
+    const list = bulkAttachDoms.split(/[\s,\n]+/).map(d => d.toLowerCase().trim()).filter(Boolean);
+    if (list.length === 0) { setAttachMsg('Enter at least one domain.'); return; }
+    setBulkLookupBusy(true); setAttachMsg(''); setBulkLookupResult(null); setBulkSelectedSubs([]);
+    try {
+      const r = await axios.post(`${API_URL}/admin/bulk-lookup-domains`, { domains: list });
+      setBulkLookupResult(r.data.results);
+      
+      // Auto-select active subscriptions by default
+      const autoSelected = [];
+      Object.entries(r.data.results).forEach(([domain, res]) => {
+        if (res.found) {
+          ['pk', 'usa'].forEach(account => {
+            if (res[account]?.found && res[account]?.subscriptions) {
+              res[account].subscriptions.forEach(sub => {
+                if (sub.status === 'ACTIVE') {
+                  autoSelected.push({
+                    domain,
+                    account,
+                    subscriptionId: sub.subscriptionId,
+                    skuId: sub.skuId,
+                    skuName: sub.skuName,
+                    planName: sub.planName,
+                    seats: sub.seats,
+                    status: sub.status
+                  });
+                }
+              });
+            }
+          });
+        }
+      });
+      setBulkSelectedSubs(autoSelected);
+    } catch (e) {
+      setAttachMsg(e?.response?.data?.error || 'Bulk lookup failed.');
+    } finally {
+      setBulkLookupBusy(false);
+    }
+  };
+
+  const toggleBulkSelectedSub = (sub) => {
+    setBulkSelectedSubs(prev => {
+      const exists = prev.find(p => p.domain === sub.domain && p.account === sub.account && p.subscriptionId === sub.subscriptionId && p.skuId === sub.skuId);
+      if (exists) {
+        return prev.filter(p => !(p.domain === sub.domain && p.account === sub.account && p.subscriptionId === sub.subscriptionId && p.skuId === sub.skuId));
+      } else {
+        return [...prev, sub];
+      }
+    });
+  };
+
+  const confirmBulkAttach = async () => {
+    if (bulkSelectedSubs.length === 0) { setAttachMsg('Select at least one subscription to attach.'); return; }
+    setAttachBusy(true); setAttachMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/admin/customers/${attaching.id}/bulk-attach-subscriptions`, { attachments: bulkSelectedSubs });
+      setAttachMsg(`✓ Successfully attached ${r.data.attached} subscription(s).`);
+      setTimeout(() => { setAttaching(null); load(); }, 1500);
+    } catch (e) {
+      setAttachMsg(e?.response?.data?.error || 'Bulk attach failed.');
+    } finally {
+      setAttachBusy(false);
+    }
   };
 
   if (loading) return <div className="loading">Loading customers…</div>;
@@ -2733,68 +2825,215 @@ const AdminCustomersSection = () => {
       {/* Attach subscription modal */}
       {attaching && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 1000 }} onClick={() => !attachBusy && setAttaching(null)}>
-          <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 520, width: '100%' }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0 }}>Attach Workspace subscription</h3>
-            <p style={{ color: '#374151', marginTop: 0, fontSize: 14 }}>Linking to customer: <strong>{attaching.email}</strong></p>
-            <p style={{ color: '#6b7280', marginTop: 0, fontSize: 13 }}>Enter or confirm the domain of the Google Workspace you manage for this customer. We'll find it on your reseller accounts and detect PK/USA automatically.</p>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 580, width: '100%' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0, marginBottom: 4 }}>Attach Workspace Subscription</h3>
+            <p style={{ color: '#374151', marginTop: 0, fontSize: 14, marginBottom: 16 }}>Linking to customer: <strong>{attaching.email}</strong></p>
 
-            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Workspace domain</label>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-              <input value={attachDom} onChange={e => { setAttachDom(e.target.value); setLookup(null); }} placeholder="customerdomain.com"
-                style={{ flex: 1, height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }} />
-              <button onClick={doLookup} disabled={lookupBusy} className="btn btn-secondary">{lookupBusy ? 'Looking…' : 'Look up'}</button>
+            {/* Modal Tabs */}
+            <div style={{ display: 'flex', gap: 12, borderBottom: '1px solid #e2e8f0', marginBottom: 16 }}>
+              <button 
+                onClick={() => { setModalTab('single'); setAttachMsg(''); }} 
+                style={{ padding: '8px 16px', border: 0, background: 'none', borderBottom: modalTab === 'single' ? '2px solid #2563eb' : 'none', color: modalTab === 'single' ? '#2563eb' : '#64748b', fontWeight: 600, cursor: 'pointer', fontSize: 14 }}
+              >
+                Single Domain
+              </button>
+              <button 
+                onClick={() => { setModalTab('bulk'); setAttachMsg(''); }} 
+                style={{ padding: '8px 16px', border: 0, background: 'none', borderBottom: modalTab === 'bulk' ? '2px solid #2563eb' : 'none', color: modalTab === 'bulk' ? '#2563eb' : '#64748b', fontWeight: 600, cursor: 'pointer', fontSize: 14 }}
+              >
+                Bulk Domains (Multi-Select)
+              </button>
             </div>
 
-            {lookup?.found && (
-              <div style={{ background: '#f0f7f5', borderRadius: 10, padding: 14, marginBottom: 14 }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                  Found on the {lookup.account === 'usa' ? 'USA' : 'Pakistan'} account ({lookup.account.toUpperCase()}) ✓
+            {modalTab === 'single' && (
+              <div>
+                <p style={{ color: '#6b7280', marginTop: 0, fontSize: 13, marginBottom: 12 }}>Enter or confirm the domain of the Google Workspace you manage for this customer. We'll automatically lookup Pakistan (PK) and USA reseller accounts.</p>
+
+                <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Workspace domain</label>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                  <input value={attachDom} onChange={e => { setAttachDom(e.target.value); setLookup(null); }} placeholder="customerdomain.com"
+                    style={{ flex: 1, height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }} />
+                  <button onClick={doLookup} disabled={lookupBusy} className="btn btn-secondary">{lookupBusy ? 'Looking…' : 'Look up'}</button>
                 </div>
-                {lookup.subscriptions && lookup.subscriptions.length > 0 ? (
-                  <>
-                    <div style={{ fontSize: 13, color: '#374151' }}>Subscriptions that will be attached:</div>
-                    <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 13 }}>
-                      {lookup.subscriptions.map((s, i) => (
-                        <li key={i}>{s.skuName} — {s.planName || '—'} · {s.seats ?? '?'} seats · <span style={{ color: s.status === 'ACTIVE' ? '#166534' : '#b45309' }}>{s.status}</span></li>
-                      ))}
-                    </ul>
-                  </>
-                ) : (
-                  <div style={{ fontSize: 13, color: '#6b7280' }}>{lookup.note || 'Customer found. No subscriptions listed.'}</div>
+
+                {lookup?.found && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>Lookup Results across Pakistan & USA accounts:</div>
+                    
+                    {/* Pakistan Account Card */}
+                    {lookup.accounts?.pk?.found ? (
+                      <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <span style={{ fontWeight: 700, color: '#166534', fontSize: 13 }}>🇵🇰 Pakistan Account (PK) — FOUND</span>
+                          <button 
+                            onClick={() => confirmAttachForAccount('pk')} 
+                            disabled={attachBusy} 
+                            className="btn btn-primary" 
+                            style={{ padding: '4px 8px', fontSize: 12, height: 'auto', minHeight: 'auto', borderRadius: 6 }}
+                          >
+                            Attach PK
+                          </button>
+                        </div>
+                        {lookup.accounts.pk.subscriptions && lookup.accounts.pk.subscriptions.length > 0 ? (
+                          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#1e293b' }}>
+                            {lookup.accounts.pk.subscriptions.map((s, i) => (
+                              <li key={i}>{s.skuName} — {s.planName || '—'} · {s.seats ?? '?'} seats · <span style={{ color: s.status === 'ACTIVE' ? '#15803d' : '#b45309', fontWeight: 600 }}>{s.status}</span></li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div style={{ fontSize: 12, color: '#64748b' }}>{lookup.accounts.pk.note || 'No active subscriptions found on this account.'}</div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, opacity: 0.7 }}>
+                        <div style={{ fontWeight: 600, color: '#64748b', fontSize: 12 }}>🇵🇰 Pakistan Account (PK) — Not Found</div>
+                      </div>
+                    )}
+
+                    {/* USA Account Card */}
+                    {lookup.accounts?.usa?.found ? (
+                      <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <span style={{ fontWeight: 700, color: '#166534', fontSize: 13 }}>🇺🇸 USA Account (USA) — FOUND</span>
+                          <button 
+                            onClick={() => confirmAttachForAccount('usa')} 
+                            disabled={attachBusy} 
+                            className="btn btn-primary" 
+                            style={{ padding: '4px 8px', fontSize: 12, height: 'auto', minHeight: 'auto', borderRadius: 6 }}
+                          >
+                            Attach USA
+                          </button>
+                        </div>
+                        {lookup.accounts.usa.subscriptions && lookup.accounts.usa.subscriptions.length > 0 ? (
+                          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#1e293b' }}>
+                            {lookup.accounts.usa.subscriptions.map((s, i) => (
+                              <li key={i}>{s.skuName} — {s.planName || '—'} · {s.seats ?? '?'} seats · <span style={{ color: s.status === 'ACTIVE' ? '#15803d' : '#b45309', fontWeight: 600 }}>{s.status}</span></li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div style={{ fontSize: 12, color: '#64748b' }}>{lookup.accounts.usa.note || 'No active subscriptions found on this account.'}</div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, opacity: 0.7 }}>
+                        <div style={{ fontWeight: 600, color: '#64748b', fontSize: 12 }}>🇺🇸 USA Account (USA) — Not Found</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {lookup && !lookup.found && lookup.diagnostics && lookup.diagnostics.length > 0 && (
+                  <div style={{ background: '#fff7ed', borderRadius: 10, padding: 12, marginBottom: 12, fontSize: 12, color: '#9a3412' }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>Why it wasn't found:</div>
+                    <ul style={{ margin: 0, paddingLeft: 16 }}>{lookup.diagnostics.map((d, i) => <li key={i}>{d}</li>)}</ul>
+                  </div>
+                )}
+
+                {lookup && !lookup.found && (
+                  <div style={{ marginTop: 12, borderTop: '1px solid #eee', paddingTop: 12 }}>
+                    <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 8px' }}>Manage this domain manually (not in your reseller console)? Link it anyway:</p>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <select value={forceAcct} onChange={e => setForceAcct(e.target.value)} style={{ height: 36, borderRadius: 6, border: '1px solid #d8dbe6', fontSize: 13, padding: '0 8px' }}>
+                        <option value="pk">Pakistan</option>
+                        <option value="usa">USA</option>
+                      </select>
+                      <button onClick={forceLink} disabled={attachBusy} className="btn btn-secondary" style={{ fontSize: 13, padding: '8px 14px' }}>Force link to {forceAcct.toUpperCase()}</button>
+                    </div>
+                  </div>
                 )}
               </div>
             )}
 
-            {lookup && !lookup.found && lookup.diagnostics && lookup.diagnostics.length > 0 && (
-              <div style={{ background: '#fff7ed', borderRadius: 10, padding: 12, marginBottom: 12, fontSize: 12, color: '#9a3412' }}>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>Why it wasn't found:</div>
-                <ul style={{ margin: 0, paddingLeft: 16 }}>{lookup.diagnostics.map((d, i) => <li key={i}>{d}</li>)}</ul>
+            {modalTab === 'bulk' && (
+              <div>
+                <p style={{ color: '#4b5563', fontSize: 13, margin: '0 0 10px' }}>Enter Google Workspace domains (one per line) to query Pakistan and USA accounts in bulk, then select which subscriptions to attach.</p>
+                <textarea 
+                  value={bulkAttachDoms} 
+                  onChange={e => setBulkAttachDoms(e.target.value)} 
+                  placeholder="domain1.com&#10;domain2.com&#10;domain3.com"
+                  style={{ width: '100%', height: 90, borderRadius: 8, border: '1px solid #d8dbe6', padding: '10px 12px', fontSize: 13, fontFamily: 'monospace', marginBottom: 10 }}
+                />
+                <button 
+                  onClick={doBulkLookup} 
+                  disabled={bulkLookupBusy || !bulkAttachDoms.trim()} 
+                  className="btn btn-secondary" 
+                  style={{ width: '100%', height: 38, marginBottom: 14 }}
+                >
+                  {bulkLookupBusy ? 'Looking up domains in bulk…' : '🔍 Bulk Lookup Domains'}
+                </button>
+
+                {bulkLookupResult && (
+                  <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8, padding: 10, background: '#f8fafc', marginBottom: 14 }}>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: '#334155', marginBottom: 8, borderBottom: '1px solid #e2e8f0', paddingBottom: 4 }}>Lookup Results:</div>
+                    {Object.entries(bulkLookupResult).map(([domain, res]) => (
+                      <div key={domain} style={{ marginBottom: 12, borderBottom: '1px dashed #e2e8f0', paddingBottom: 8 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: '#1e293b' }}>🌐 {domain}</div>
+                        {!res.found ? (
+                          <div style={{ fontSize: 11, color: '#94a3b8', marginLeft: 12 }}>No subscription found on either PK or USA accounts.</div>
+                        ) : (
+                          <div style={{ marginLeft: 12, marginTop: 4 }}>
+                            {['pk', 'usa'].map(acct => {
+                              const acctRes = res[acct];
+                              if (!acctRes?.found) return null;
+                              return (
+                                <div key={acct} style={{ marginTop: 4 }}>
+                                  <div style={{ fontSize: 11, fontWeight: 600, color: '#0f766e' }}>{acct.toUpperCase() === 'USA' ? '🇺🇸 USA Reseller' : '🇵🇰 PK Reseller'}:</div>
+                                  {acctRes.subscriptions && acctRes.subscriptions.length > 0 ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginLeft: 8, marginTop: 2 }}>
+                                      {acctRes.subscriptions.map((sub, i) => {
+                                        const item = { domain, account: acct, subscriptionId: sub.subscriptionId, skuId: sub.skuId, skuName: sub.skuName, planName: sub.planName, seats: sub.seats, status: sub.status };
+                                        const isSelected = !!bulkSelectedSubs.find(p => p.domain === domain && p.account === acct && p.subscriptionId === sub.subscriptionId && p.skuId === sub.skuId);
+                                        return (
+                                          <label key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, cursor: 'pointer' }}>
+                                            <input 
+                                              type="checkbox" 
+                                              checked={isSelected} 
+                                              onChange={() => toggleBulkSelectedSub(item)} 
+                                            />
+                                            <span>
+                                              <strong>{sub.skuName}</strong> ({sub.planName || 'FLEXIBLE'}) · {sub.seats ?? '?'} seats · <span style={{ color: sub.status === 'ACTIVE' ? '#166534' : '#b45309' }}>{sub.status}</span>
+                                            </span>
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <div style={{ fontSize: 11, color: '#64748b', marginLeft: 8 }}>Customer exists but has no subscriptions.</div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {bulkSelectedSubs.length > 0 && (
+                  <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: 10, fontSize: 12, color: '#1e40af', marginBottom: 14 }}>
+                    Selected <strong>{bulkSelectedSubs.length}</strong> subscription(s) across {new Set(bulkSelectedSubs.map(s => s.domain)).size} domain(s) to attach.
+                  </div>
+                )}
+
+                <button 
+                  onClick={confirmBulkAttach} 
+                  disabled={attachBusy || bulkSelectedSubs.length === 0} 
+                  className="btn btn-primary" 
+                  style={{ width: '100%', height: 42, marginBottom: 8 }}
+                >
+                  {attachBusy ? 'Attaching Selected Subscriptions…' : `Attach ${bulkSelectedSubs.length} Selected Subscriptions`}
+                </button>
               </div>
             )}
 
             {attachMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: attachMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: attachMsg.startsWith('✓') ? '#166534' : '#b42318', fontSize: 14 }}>{attachMsg}</div>}
 
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-              <button onClick={confirmAttach} disabled={attachBusy || !lookup?.found} className="btn btn-primary" style={{ flex: 1 }}>
-                {attachBusy ? 'Attaching…' : 'Attach Verified Google Subscription'}
-              </button>
-              <button onClick={() => setAttaching(null)} disabled={attachBusy} className="btn btn-secondary">Cancel</button>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+              <button onClick={() => setAttaching(null)} disabled={attachBusy} className="btn btn-secondary" style={{ width: '100%' }}>Cancel / Close</button>
             </div>
 
-            {lookup && !lookup.found && (
-              <div style={{ marginTop: 12, borderTop: '1px solid #eee', paddingTop: 12 }}>
-                <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 8px' }}>Manage this domain manually (not in your reseller console)? Link it anyway:</p>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <select value={forceAcct} onChange={e => setForceAcct(e.target.value)} style={{ height: 36, borderRadius: 6, border: '1px solid #d8dbe6', fontSize: 13, padding: '0 8px' }}>
-                    <option value="pk">Pakistan</option>
-                    <option value="usa">USA</option>
-                  </select>
-                  <button onClick={forceLink} disabled={attachBusy} className="btn btn-secondary" style={{ fontSize: 13, padding: '8px 14px' }}>Force link to {forceAcct.toUpperCase()}</button>
-                </div>
-              </div>
-            )}
-
-            <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 14, marginBottom: 0 }}>The account (Pakistan/USA) is detected automatically from where the subscription lives on Google reseller lookup.</p>
+            <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 14, marginBottom: 0 }}>The Pakistan and USA accounts are queried dynamically from the Google Reseller APIs using secure server authentication.</p>
           </div>
         </div>
       )}

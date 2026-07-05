@@ -2068,45 +2068,260 @@ app.get('/api/admin/customers', authenticateCustomer, requireAdmin, async (req, 
 });
 
 // Admin: look up a domain's Google Workspace subscriptions across BOTH accounts.
-// Used by the "attach subscription" UI so the account auto-selects.
+// Used by the "attach subscription" UI so the account auto-selects and details for both accounts are returned.
 app.get('/api/admin/lookup-domain', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const dom = (req.query.domain || '').toLowerCase().trim();
     if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) return res.status(400).json({ error: 'Enter a valid domain like example.com' });
 
     const errors = [];
+    const accountsInfo = {};
+    let foundAny = false;
+
     for (const account of ['pk', 'usa']) {
       let auth;
       try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
       catch (e) { errors.push(`${account.toUpperCase()}: not connected (${e.message})`); continue; }
       const reseller = google.reseller({ version: 'v1', auth });
 
-      // Try listing subscriptions directly — this is the most reliable check and returns the data we need.
       try {
         const resp = await reseller.subscriptions.list({ customerId: dom });
         const subs = resp.data.subscriptions || [];
         if (subs.length > 0) {
-          return res.json({
-            found: true, account, domain: dom,
+          foundAny = true;
+          accountsInfo[account] = {
+            found: true,
             subscriptions: subs.map((s) => ({
+              subscriptionId: s.subscriptionId,
               skuId: String(s.skuId),
               skuName: skuName(s.skuId),
               planName: s.plan?.planName,
               seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
               status: s.status,
             })),
-          });
+          };
+        } else {
+          try {
+            await reseller.customers.get({ customerId: dom });
+            foundAny = true;
+            accountsInfo[account] = {
+              found: true,
+              subscriptions: [],
+              note: 'Customer exists but has no subscriptions.'
+            };
+          } catch (_) {
+            accountsInfo[account] = { found: false };
+          }
         }
-        // No subscriptions on this account — but maybe the customer exists with none. Check.
-        try { await reseller.customers.get({ customerId: dom }); return res.json({ found: true, account, domain: dom, subscriptions: [], note: 'Customer exists on ' + account.toUpperCase() + ' but has no subscriptions.' }); }
-        catch (_) { /* not on this account */ }
       } catch (e) {
         const msg = e?.errors?.[0]?.message || e?.message || '';
-        if (!/not found|does not exist|404/i.test(msg)) errors.push(`${account.toUpperCase()}: ${msg}`);
-        // try next account
+        if (!/not found|does not exist|404/i.test(msg)) {
+          errors.push(`${account.toUpperCase()}: ${msg}`);
+          accountsInfo[account] = { found: false, error: msg };
+        } else {
+          accountsInfo[account] = { found: false };
+        }
       }
     }
-    res.json({ found: false, domain: dom, note: 'No Google Workspace customer found for this domain on either account.', diagnostics: errors });
+
+    // For backwards compatibility, if only one account has it, set the primary found properties on the root level.
+    let primaryAccount = null;
+    let primarySubs = [];
+    if (accountsInfo.pk?.found) {
+      primaryAccount = 'pk';
+      primarySubs = accountsInfo.pk.subscriptions || [];
+    } else if (accountsInfo.usa?.found) {
+      primaryAccount = 'usa';
+      primarySubs = accountsInfo.usa.subscriptions || [];
+    }
+
+    res.json({
+      found: foundAny,
+      domain: dom,
+      account: primaryAccount, // default/fallback
+      subscriptions: primarySubs, // default/fallback
+      accounts: accountsInfo, // full breakdown for the beautiful new UI!
+      diagnostics: errors
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: bulk lookup Google Workspace domains across Pakistan and USA accounts.
+app.post('/api/admin/bulk-lookup-domains', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { domains } = req.body;
+    if (!domains || !Array.isArray(domains)) {
+      return res.status(400).json({ error: 'Please provide an array of domains.' });
+    }
+    
+    const results = {};
+    for (let dom of domains) {
+      dom = (dom || '').toLowerCase().trim();
+      if (!dom) continue;
+      
+      results[dom] = { found: false, pk: null, usa: null, errors: [] };
+      
+      for (const account of ['pk', 'usa']) {
+        let auth;
+        try {
+          auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+        } catch (e) {
+          results[dom].errors.push(`${account.toUpperCase()}: auth failed (${e.message})`);
+          continue;
+        }
+        const reseller = google.reseller({ version: 'v1', auth });
+        
+        try {
+          const resp = await reseller.subscriptions.list({ customerId: dom });
+          const subs = resp.data.subscriptions || [];
+          if (subs.length > 0) {
+            results[dom].found = true;
+            results[dom][account] = {
+              found: true,
+              subscriptions: subs.map((s) => ({
+                subscriptionId: s.subscriptionId,
+                skuId: String(s.skuId),
+                skuName: skuName(s.skuId),
+                planName: s.plan?.planName,
+                seats: s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null,
+                status: s.status,
+              }))
+            };
+          } else {
+            try {
+              await reseller.customers.get({ customerId: dom });
+              results[dom].found = true;
+              results[dom][account] = {
+                found: true,
+                subscriptions: [],
+                note: 'Customer exists but has no subscriptions.'
+              };
+            } catch (_) {
+              results[dom][account] = { found: false };
+            }
+          }
+        } catch (e) {
+          const msg = e?.errors?.[0]?.message || e?.message || '';
+          if (/not found|does not exist|404/i.test(msg)) {
+            results[dom][account] = { found: false };
+          } else {
+            results[dom].errors.push(`${account.toUpperCase()}: ${msg}`);
+          }
+        }
+      }
+    }
+    
+    res.json({ success: true, results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: attach multiple existing subscriptions from different domains to a customer in bulk.
+app.post('/api/admin/customers/:id/bulk-attach-subscriptions', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { attachments } = req.body; // Array of { domain, account, subscriptionId, skuId, skuName, planName, seats, status }
+    if (!attachments || !Array.isArray(attachments) || attachments.length === 0) {
+      return res.status(400).json({ error: 'Please provide an array of attachments.' });
+    }
+    const cust = await Customer.findById(req.params.id);
+    if (!cust) return res.status(404).json({ error: 'Customer not found.' });
+
+    let successCount = 0;
+    const errors = [];
+
+    // Set first attached domain as customer's domain if not set
+    if (!cust.domain && attachments[0]?.domain) {
+      cust.domain = attachments[0].domain.toLowerCase().trim();
+      cust.account = attachments[0].account;
+      await cust.save();
+    }
+
+    for (const att of attachments) {
+      const dom = (att.domain || '').toLowerCase().trim();
+      const account = att.account;
+      const skuId = String(att.skuId);
+      const subscriptionId = att.subscriptionId;
+
+      try {
+        let planDoc = await Plan.findOne({ skuId });
+        const planName = planDoc ? planDoc.name : (skuName(skuId) || skuId);
+        const monthlyPrice = planDoc ? planDoc.monthlyPrice : 6.00;
+        const numSeats = Number(att.seats) || 1;
+
+        const orderNumber = `WS-BULK-ATTACH-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const order = await WorkspaceOrder.create({
+          customerId: cust._id,
+          orderNumber,
+          type: 'workspace',
+          planType: 'flexible',
+          account: account,
+          plan: { id: planDoc ? planDoc.planId : 'business_starter', name: planName, monthlyPrice: monthlyPrice },
+          seats: numSeats,
+          monthlyTotal: monthlyPrice * numSeats,
+          organization: { domain: dom, name: dom.split('.')[0] },
+          contact: { firstName: cust.firstName || 'Admin', lastName: cust.lastName || 'User', email: cust.businessEmail || cust.email },
+          status: 'provisioned',
+          googleProvisioned: true,
+        });
+
+        await Subscription.findOneAndUpdate(
+          { customerId: cust._id, googleWorkspaceSkuId: skuId, subscriptionId: subscriptionId },
+          {
+            customerId: cust._id,
+            orderId: order._id,
+            subscriptionId: subscriptionId,
+            type: 'workspace',
+            plan: planName,
+            seats: numSeats,
+            monthlyPrice: monthlyPrice,
+            status: att.status === 'ACTIVE' ? 'active' : 'suspended',
+            googleWorkspaceSkuId: skuId,
+            autoRenew: true,
+            nextBillingDate: addDays(new Date(), BILLING_CYCLE_DAYS),
+            updatedAt: new Date()
+          },
+          { upsert: true, new: true }
+        );
+
+        // Seed SubBilling for billing tracking
+        try {
+          let rec = await SubBilling.findOne({ domain: dom, skuId: skuId });
+          if (!rec) {
+            rec = new SubBilling({ account, domain: dom, skuId, subscriptionId });
+            startNewBillingCycle(rec, new Date());
+          } else if (subscriptionId) {
+            rec.subscriptionId = subscriptionId;
+          }
+          applyPaymentToCurrentCycle(rec, new Date());
+          await rec.save();
+        } catch (billingErr) {
+          console.error(`SubBilling sync failed for ${dom} during bulk-attach:`, billingErr.message);
+        }
+
+        successCount++;
+      } catch (err) {
+        errors.push(`Failed for ${dom} (${skuId}): ${err.message}`);
+      }
+    }
+
+    // Call sync for safety
+    try {
+      const distinctAccounts = [...new Set(attachments.map(a => a.account))];
+      for (const acct of distinctAccounts) {
+        await syncSubscriptionsForBilling(acct);
+      }
+    } catch (_) {}
+
+    res.json({
+      success: true,
+      total: attachments.length,
+      attached: successCount,
+      failed: attachments.length - successCount,
+      errors
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
