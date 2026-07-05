@@ -2238,6 +2238,43 @@ app.get('/api/test-lookup', async (req, res) => {
   }
 });
 
+// The Reseller API answers with a bare 403 "Forbidden" when the queried customer domain is
+// NOT under the reseller account — the same status a broken credential produces. To tell the
+// two apart we run one cheap credential self-test per account (list the reseller's own
+// subscriptions, no customerId) and cache the verdict briefly so bulk lookups stay fast.
+const resellerAuthHealthCache = {}; // { [account]: { ok, error, at } }
+const RESELLER_AUTH_HEALTH_TTL_MS = 5 * 60 * 1000;
+
+async function checkResellerAuthHealth(account, reseller) {
+  const cached = resellerAuthHealthCache[account];
+  if (cached && Date.now() - cached.at < RESELLER_AUTH_HEALTH_TTL_MS) return cached;
+  let result;
+  try {
+    await reseller.subscriptions.list({ maxResults: 1 });
+    result = { ok: true, at: Date.now() };
+  } catch (e) {
+    const msg = e?.errors?.[0]?.message || e?.message || 'unknown error';
+    result = { ok: false, error: msg, at: Date.now() };
+  }
+  resellerAuthHealthCache[account] = result;
+  return result;
+}
+
+// Classify a failed customer-scoped reseller call: "not under this reseller" vs a real
+// credential/config problem. Returns { notInReseller: true } or { error: <actionable message> }.
+async function classifyResellerLookupError(account, reseller, e) {
+  const msg = e?.errors?.[0]?.message || e?.message || '';
+  const isNotOwned = e?.code === 404 || /does not have access to this customer|not exist|customer not found|domain not found|customer was not found|not found/i.test(msg);
+  if (isNotOwned) return { notInReseller: true };
+  const isForbidden = e?.code === 403 || e?.code === 401 || /forbidden|permission denied|unauthorized/i.test(msg);
+  if (isForbidden) {
+    const health = await checkResellerAuthHealth(account, reseller);
+    if (health.ok) return { notInReseller: true }; // creds are fine → domain just isn't ours on this account
+    return { error: `Google rejected the ${account.toUpperCase()} credentials (${health.error || msg}). Check the service account's domain-wide delegation scopes and the reseller admin email (RESELLER_ADMIN_EMAIL${account === 'usa' ? '_USA' : ''}), or reconnect OAuth for this account.` };
+  }
+  return { error: msg };
+}
+
 // Admin: look up a domain's Google Workspace subscriptions across BOTH accounts.
 // Used by the "attach subscription" UI so the account auto-selects and details for both accounts are returned.
 app.get('/api/admin/lookup-domain', authenticateCustomer, requireAdmin, async (req, res) => {
@@ -2285,15 +2322,14 @@ app.get('/api/admin/lookup-domain', authenticateCustomer, requireAdmin, async (r
           }
         }
       } catch (e) {
-        const msg = e?.errors?.[0]?.message || e?.message || '';
-        // Distinguish between genuine "domain not owned" vs actual API configuration/credential errors.
-        const isAuthOrConfigError = /unauthorized|forbidden|permission denied|invalid_grant|not configured|not a reseller administrator|access not configured/i.test(msg);
-        const isNotOwned = !isAuthOrConfigError && (e?.code === 404 || /does not have access to this customer|not exist|customer not found|domain not found|customer was not found/i.test(msg));
-        if (!isNotOwned) {
-          errors.push(`${account.toUpperCase()}: ${msg}`);
-          accountsInfo[account] = { found: false, error: msg };
-        } else {
+        // A bare 403 "Forbidden" here usually just means the domain is not under this reseller
+        // account — verify the credentials before reporting it as a system error.
+        const verdict = await classifyResellerLookupError(account, reseller, e);
+        if (verdict.notInReseller) {
           accountsInfo[account] = { found: false, notInReseller: true };
+        } else {
+          errors.push(`${account.toUpperCase()}: ${verdict.error}`);
+          accountsInfo[account] = { found: false, error: verdict.error };
         }
       }
     }
@@ -2377,14 +2413,14 @@ app.post('/api/admin/bulk-lookup-domains', authenticateCustomer, requireAdmin, a
             }
           }
         } catch (e) {
-          const msg = e?.errors?.[0]?.message || e?.message || '';
-          const isAuthOrConfigError = /unauthorized|forbidden|permission denied|invalid_grant|not configured|not a reseller administrator|access not configured/i.test(msg);
-          const isNotOwned = !isAuthOrConfigError && (e?.code === 404 || /does not have access to this customer|not exist|customer not found|domain not found|customer was not found/i.test(msg));
-          if (isNotOwned) {
+          // Bare 403 "Forbidden" = domain not under this reseller account (Google quirk).
+          // Only report an error when the credentials themselves fail the health check.
+          const verdict = await classifyResellerLookupError(account, reseller, e);
+          if (verdict.notInReseller) {
             results[dom][account] = { found: false, notInReseller: true };
           } else {
-            results[dom][account] = { found: false, error: msg };
-            results[dom].errors.push(`${account.toUpperCase()}: ${msg}`);
+            results[dom][account] = { found: false, error: verdict.error };
+            results[dom].errors.push(`${account.toUpperCase()}: ${verdict.error}`);
           }
         }
       }
@@ -2412,15 +2448,20 @@ app.post('/api/admin/customers/:id/bulk-attach-subscriptions', authenticateCusto
     // Set first attached domain as customer's domain if not set
     if (!cust.domain && attachments[0]?.domain) {
       cust.domain = attachments[0].domain.toLowerCase().trim();
-      cust.account = attachments[0].account;
+      cust.account = attachments[0].account === 'usa' ? 'usa' : 'pk';
       await cust.save();
     }
 
     for (const att of attachments) {
       const dom = (att.domain || '').toLowerCase().trim();
-      const account = att.account;
-      const skuId = String(att.skuId);
+      const account = att.account === 'usa' ? 'usa' : 'pk';
+      const skuId = String(att.skuId || '');
       const subscriptionId = att.subscriptionId;
+
+      if (!dom || !skuId) {
+        errors.push(`Skipped attachment with missing domain or skuId (${dom || '?'} / ${skuId || '?'}).`);
+        continue;
+      }
 
       try {
         let planDoc = await Plan.findOne({ skuId });
@@ -2531,8 +2572,8 @@ app.post('/api/admin/customers/:id/attach-domain', authenticateCustomer, require
         // No subs but customer may exist:
         try { await reseller.customers.get({ customerId: dom }); account = acct; subCount = 0; break; } catch (_) { }
       } catch (e) {
-        const msg = e?.errors?.[0]?.message || e?.message || '';
-        if (!/not found|does not exist|404/i.test(msg)) errors.push(`${acct.toUpperCase()}: ${msg}`);
+        const verdict = await classifyResellerLookupError(acct, reseller, e);
+        if (verdict.error) errors.push(`${acct.toUpperCase()}: ${verdict.error}`);
       }
     }
     if (!account) {
