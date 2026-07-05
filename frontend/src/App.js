@@ -2469,6 +2469,54 @@ const AdminCustomersSection = () => {
     }
   };
 
+  // Bulk attach with login state
+  const [bulkText, setBulkText] = useState('');
+  const [bulkAttachBusy, setBulkAttachBusy] = useState(false);
+  const [bulkAttachMsg, setBulkAttachMsg] = useState('');
+  const [bulkAttachResults, setBulkAttachResults] = useState(null);
+
+  const runBulkAttachWithLogin = async () => {
+    if (!bulkText.trim()) {
+      setBulkAttachMsg('Please enter at least one line of domain, email, password.');
+      return;
+    }
+
+    setBulkAttachBusy(true);
+    setBulkAttachMsg('');
+    setBulkAttachResults(null);
+
+    const lines = bulkText.split('\n');
+    const rows = [];
+    for (let line of lines) {
+      line = line.trim();
+      if (!line) continue;
+
+      const parts = line.split(',').map(p => p.trim());
+      const domain = parts[0] || '';
+      const email = parts[1] || '';
+      const password = parts[2] || '';
+
+      rows.push({ domain, email, password });
+    }
+
+    if (rows.length === 0) {
+      setBulkAttachMsg('Could not parse any valid lines. Format: domain, email, password');
+      setBulkAttachBusy(false);
+      return;
+    }
+
+    try {
+      const res = await axios.post(`${API_URL}/admin/customers/bulk-attach-with-login`, { rows });
+      setBulkAttachResults(res.data);
+      setBulkAttachMsg(`✓ Processed bulk attachment. Succeeded: ${res.data.attached}, Failed: ${res.data.failed}`);
+      load();
+    } catch (e) {
+      setBulkAttachMsg(e?.response?.data?.error || 'Bulk attachment process failed.');
+    } finally {
+      setBulkAttachBusy(false);
+    }
+  };
+
   const resetPassword = async (id) => {
     try {
       const res = await axios.post(`${API_URL}/admin/customers/${id}/reset-password`, {});
@@ -2548,88 +2596,81 @@ const AdminCustomersSection = () => {
       {error && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
       <p style={{ color: '#5b6075' }}>{customers.length} registered customer{customers.length === 1 ? '' : 's'}</p>
 
-      {/* Bulk Action Interface */}
+      {/* Bulk Attach Interface */}
       <div style={{ background: '#f8fafc', borderRadius: 14, padding: 20, border: '1px solid #e2e8f0', marginBottom: 24 }}>
         <h3 style={{ margin: '0 0 4px', fontSize: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
-          ⚡ Batch-Apply License Upgrades / Subscriptions
+          🔗 Bulk Attach Subscriptions (Auto-Lookup & Customer Accounts Creation)
         </h3>
         <p style={{ color: '#64748b', fontSize: 13, marginTop: 0, marginBottom: 16 }}>
-          Select multiple customer accounts in the table below to apply new licenses or upgrade their subscriptions simultaneously.
+          Enter Google Workspace domains alongside the customer portal email and password.
+          The system will automatically look up each domain across Pakistan and USA reseller accounts, verify the active Google subscription, find or create the customer portal account with the specified email/password, and link the subscription to their dashboard.
         </p>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.5fr', gap: 12, marginBottom: 16 }} className="grid-2">
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Select Plan</label>
-            <select value={bulkActionPlan} onChange={e => setBulkActionPlan(e.target.value)} style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 12px' }}>
-              <option value="">-- Choose a Workspace Plan --</option>
-              {plans.map(p => <option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}/seat/mo</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Seats</label>
-            <input type="number" min="1" value={bulkActionSeats} onChange={e => setBulkActionSeats(e.target.value)} style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 12px' }} />
-          </div>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Action Type</label>
-            <select value={bulkActionType} onChange={e => setBulkActionType(e.target.value)} style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 12px' }}>
-              <option value="upgrade">Upgrade Existing License (Change SKU/Seats)</option>
-              <option value="new_subscription">Force Provision New Subscription</option>
-            </select>
-          </div>
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 6 }}>
+            Enter Rows (Format: <code>domain, email, password</code> — one per line)
+          </label>
+          <textarea
+            value={bulkText}
+            onChange={e => setBulkText(e.target.value)}
+            placeholder="example.com, customer@gmail.com, Password123!&#10;anotherdomain.site, user@email.com, SecretPass456"
+            style={{ width: '100%', height: 120, borderRadius: 8, border: '1px solid #cbd5e1', padding: '10px 12px', fontSize: 13, fontFamily: 'monospace', lineHeight: '1.5' }}
+          />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <button 
-            onClick={runBulkApply} 
-            disabled={bulkActionBusy || selectedCustomerIds.length === 0} 
+            onClick={runBulkAttachWithLogin} 
+            disabled={bulkAttachBusy || !bulkText.trim()} 
             className="btn btn-primary"
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            {bulkActionBusy ? 'Applying Batch...' : `Apply to ${selectedCustomerIds.length} Selected Account(s)`}
+            {bulkAttachBusy ? 'Processing Bulk Attachments…' : '⚡ Click to Bulk Attach Subscriptions'}
           </button>
-          {selectedCustomerIds.length > 0 && (
+          {bulkText.trim() && (
             <button 
-              onClick={() => setSelectedCustomerIds([])} 
+              onClick={() => setBulkText('')} 
               className="btn btn-secondary" 
               style={{ padding: '8px 14px' }}
             >
-              Clear Selection
+              Clear Input
             </button>
           )}
-          <span style={{ fontSize: 13, color: '#475569', fontWeight: 500 }}>
-            {selectedCustomerIds.length} of {customers.length} customers selected
-          </span>
         </div>
 
-        {bulkActionMsg && (
-          <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, fontSize: 14, fontWeight: 500, backgroundColor: bulkActionMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', border: bulkActionMsg.startsWith('✓') ? '1px solid #bbf7d0' : '1px solid #fee2e2', color: bulkActionMsg.startsWith('✓') ? '#15803d' : '#b91c1c' }}>
-            {bulkActionMsg}
+        {bulkAttachMsg && (
+          <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, fontSize: 14, fontWeight: 500, backgroundColor: bulkAttachMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', border: bulkAttachMsg.startsWith('✓') ? '1px solid #bbf7d0' : '1px solid #fee2e2', color: bulkAttachMsg.startsWith('✓') ? '#15803d' : '#b91c1c' }}>
+            {bulkAttachMsg}
           </div>
         )}
 
-        {bulkActionResults && bulkActionResults.results && (
+        {bulkAttachResults && (
           <div style={{ marginTop: 16, borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
             <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 14, color: '#1e293b' }}>
-              Batch Results: {bulkActionResults.applied} Succeeded, {bulkActionResults.failed} Failed
+              Bulk Run Results: {bulkAttachResults.attached} Succeeded, {bulkAttachResults.failed} Failed
             </div>
-            <div style={{ overflowX: 'auto', maxHeight: 200, border: '1px solid #e2e8f0', borderRadius: 8 }}>
+            <div style={{ overflowX: 'auto', maxHeight: 250, border: '1px solid #e2e8f0', borderRadius: 8 }}>
               <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', background: '#fff' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left', color: '#64748b' }}>
+                    <th style={{ padding: '8px 12px' }}>Domain</th>
                     <th style={{ padding: '8px 12px' }}>Email</th>
+                    <th style={{ padding: '8px 12px' }}>Account</th>
                     <th style={{ padding: '8px 12px' }}>Status</th>
                     <th style={{ padding: '8px 12px' }}>Details / Errors</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {bulkActionResults.results.map((r, i) => (
+                  {bulkAttachResults.results.map((r, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '8px 12px', fontWeight: 600 }}>{r.email || '—'}</td>
+                      <td style={{ padding: '8px 12px', fontWeight: 600 }}>{r.domain}</td>
+                      <td style={{ padding: '8px 12px' }}>{r.email}</td>
+                      <td style={{ padding: '8px 12px', fontWeight: 600, color: '#0369a1' }}>{r.account || '—'}</td>
                       <td style={{ padding: '8px 12px', color: r.ok ? '#166534' : '#b42318', fontWeight: 600 }}>
                         {r.ok ? '✓ Success' : '✗ Failed'}
                       </td>
                       <td style={{ padding: '8px 12px', color: '#475569' }}>
-                        {r.ok ? (r.note || 'Processed successfully') : (r.error || 'Failed')}
+                        {r.ok ? (r.note || 'Linked successfully') : (r.error || 'Failed')}
                       </td>
                     </tr>
                   ))}
@@ -2740,37 +2781,18 @@ const AdminCustomersSection = () => {
               <button onClick={() => setAttaching(null)} disabled={attachBusy} className="btn btn-secondary">Cancel</button>
             </div>
 
-            <div style={{ marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: '#374151' }}>
-                Or Manual Attachment (Force Link without Google Lookup)
-              </div>
-              <p style={{ color: '#6b7280', fontSize: 12, margin: '0 0 10px' }}>
-                Use this to attach a manual subscription when the domain is not managed in your reseller console.
-              </p>
-              
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 2 }}>Plan *</label>
-                  <select value={modalPlan} onChange={e => setModalPlan(e.target.value)} style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #d8dbe6', padding: '0 8px', fontSize: 12 }}>
-                    {plans.map(p => <option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}</option>)}
+            {lookup && !lookup.found && (
+              <div style={{ marginTop: 12, borderTop: '1px solid #eee', paddingTop: 12 }}>
+                <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 8px' }}>Manage this domain manually (not in your reseller console)? Link it anyway:</p>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select value={forceAcct} onChange={e => setForceAcct(e.target.value)} style={{ height: 36, borderRadius: 6, border: '1px solid #d8dbe6', fontSize: 13, padding: '0 8px' }}>
+                    <option value="pk">Pakistan</option>
+                    <option value="usa">USA</option>
                   </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 2 }}>Seats</label>
-                  <input type="number" min="1" value={modalSeats} onChange={e => setModalSeats(e.target.value)} style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #d8dbe6', padding: '0 8px', fontSize: 12 }} />
+                  <button onClick={forceLink} disabled={attachBusy} className="btn btn-secondary" style={{ fontSize: 13, padding: '8px 14px' }}>Force link to {forceAcct.toUpperCase()}</button>
                 </div>
               </div>
-
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <select value={forceAcct} onChange={e => setForceAcct(e.target.value)} style={{ height: 36, borderRadius: 6, border: '1px solid #d8dbe6', fontSize: 12, padding: '0 8px' }}>
-                  <option value="pk">Pakistan Account</option>
-                  <option value="usa">USA Account</option>
-                </select>
-                <button onClick={forceLink} disabled={attachBusy} className="btn btn-secondary" style={{ fontSize: 12, padding: '8px 14px' }}>
-                  Force Link & Create Manual Subscription
-                </button>
-              </div>
-            </div>
+            )}
 
             <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 14, marginBottom: 0 }}>The account (Pakistan/USA) is detected automatically from where the subscription lives on Google reseller lookup.</p>
           </div>
