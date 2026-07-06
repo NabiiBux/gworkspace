@@ -2974,8 +2974,12 @@ async function createNickyPayment({ amount, currency, description, orderNumber, 
   const token = process.env.NICKY_API_TOKEN;
   if (!token) throw new Error('NICKY_API_TOKEN not set');
   const base = process.env.NICKY_API_BASE || 'https://api-public.pay.nicky.me';
-  // The pricing/settlement asset id from your Nicky account (e.g. a USD or stablecoin asset id).
+  // The pricing/settlement asset id from your Nicky account. WITHOUT this, Nicky creates a bill
+  // its hosted checkout page cannot render — the customer then sees "Payment Order Not Found".
   const assetId = process.env.NICKY_ASSET_ID || '';
+  if (!assetId) {
+    throw new Error('NICKY_ASSET_ID is not set. Add the settlement asset id from your Nicky account to the environment, or use card payment. (Without it Nicky shows "Payment Order Not Found".)');
+  }
 
   // Real Nicky CreateForUser schema
   const body = {
@@ -3006,16 +3010,45 @@ async function createNickyPayment({ amount, currency, description, orderNumber, 
   }
   const data = await resp.json();
   console.log('NICKY RESPONSE:', JSON.stringify(data));
-  // Nicky checkout URL format (confirmed): https://pay.nicky.me/home?paymentId=<shortId>
-  const shortId = data.bill?.shortId || data.shortId || data.requestShortId;
-  const url =
-    data.checkoutUrl || data.url || data.paymentUrl || data.hostedUrl ||
-    (shortId ? `https://pay.nicky.me/home?paymentId=${shortId}` : null);
-  if (!url) {
-    throw new Error('Nicky created the request but no checkout URL was found. Response keys: ' + Object.keys(data).join(', ') + (shortId ? ` (shortId=${shortId})` : ''));
+
+  // Prefer any hosted checkout URL Nicky returns; only construct one as a last resort.
+  const shortId = data.bill?.shortId || data.shortId || data.requestShortId || data.bill?.requestShortId;
+  const returnedUrl =
+    data.checkoutUrl || data.url || data.paymentUrl || data.hostedUrl || data.paymentPageUrl || data.link ||
+    data.bill?.checkoutUrl || data.bill?.paymentUrl || data.bill?.hostedUrl || data.bill?.paymentPageUrl;
+  const url = returnedUrl || (shortId ? `https://pay.nicky.me/home?paymentId=${shortId}` : null);
+
+  if (!url || (!returnedUrl && !shortId)) {
+    // No usable checkout target — do NOT send the customer to a broken page.
+    throw new Error('Nicky did not return a usable checkout link (no URL or shortId). Response keys: ' + Object.keys(data).join(', '));
   }
   return { url, nickyId: data.id || data.bill?.id || null, shortId: shortId || null };
 }
+
+// Admin: test the Nicky configuration end-to-end (creates a tiny live request and returns the
+// resulting checkout link + raw response so you can confirm the asset id / token are correct).
+app.post('/api/admin/nicky-test', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const hasToken = !!process.env.NICKY_API_TOKEN;
+    const hasAsset = !!process.env.NICKY_ASSET_ID;
+    if (!hasToken || !hasAsset) {
+      return res.status(400).json({
+        ok: false,
+        hasToken, hasAsset,
+        error: `Nicky is not fully configured: ${!hasToken ? 'NICKY_API_TOKEN missing. ' : ''}${!hasAsset ? 'NICKY_ASSET_ID missing.' : ''}`.trim(),
+      });
+    }
+    const nicky = await createNickyPayment({
+      amount: 1, currency: 'USD', description: 'Nicky config test', orderNumber: `TEST-${Date.now()}`,
+      reference: 'config-test', billDescription: 'Nicky config test',
+      customerEmail: req.customerEmail || 'test@example.com', customerName: 'Config Test',
+      redirectUrl: `${FRONTEND_URL}/?nicky=test`, cancelUrl: `${FRONTEND_URL}/?nicky=test`,
+    });
+    res.json({ ok: true, hasToken, hasAsset, checkoutUrl: nicky.url, shortId: nicky.shortId, nickyId: nicky.nickyId });
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message });
+  }
+});
 
 // Stripe webhook — confirms payment truly completed
 app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
