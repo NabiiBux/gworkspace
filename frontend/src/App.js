@@ -3862,6 +3862,21 @@ const AdminPaymentsSection = () => {
   const [bulkUnsuspendResult, setBulkUnsuspendResult] = useState(null);
   const [bulkUnsuspendBusy, setBulkUnsuspendBusy] = useState(false);
 
+  // Nicky config test
+  const [nickyTestBusy, setNickyTestBusy] = useState(false);
+  const [nickyTestMsg, setNickyTestMsg] = useState('');
+  const [nickyTestUrl, setNickyTestUrl] = useState('');
+  const testNicky = async () => {
+    setNickyTestBusy(true); setNickyTestMsg(''); setNickyTestUrl('');
+    try {
+      const r = await axios.post(`${API_URL}/admin/nicky-test`, {});
+      if (r.data.ok) { setNickyTestMsg('✓ Nicky is working — checkout link created.'); setNickyTestUrl(r.data.checkoutUrl || ''); }
+      else setNickyTestMsg('✗ ' + (r.data.error || 'Nicky test failed.'));
+    } catch (e) {
+      setNickyTestMsg('✗ ' + (e?.response?.data?.error || 'Nicky test failed.'));
+    } finally { setNickyTestBusy(false); }
+  };
+
   // Payments stuck 'pending' (likely missed provider webhooks)
   const [stuck, setStuck] = useState([]);
   const [stuckBusy, setStuckBusy] = useState('');
@@ -4276,6 +4291,22 @@ const AdminPaymentsSection = () => {
             </div>
             <p style={{ color: '#6b7280', fontSize: 14 }}>Customers pay in crypto via Nicky's hosted checkout, settled to your account.</p>
             <div style={chip(s.nickyConfigured)}>API key: {s.nickyConfigured ? 'configured in Railway ✓' : 'set NICKY_API_TOKEN in Railway'}</div>
+            <p style={{ color: '#6b7280', fontSize: 13, marginTop: 10 }}>
+              If customers see <strong>“Payment Order Not Found”</strong> on Nicky's page, the settlement asset (<code>NICKY_ASSET_ID</code>) is usually missing in Railway. Test it below — a working test returns a real checkout link.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 6 }}>
+              <button className="btn btn-secondary" onClick={testNicky} disabled={nickyTestBusy} style={{ fontSize: 13 }}>
+                {nickyTestBusy ? 'Testing…' : 'Test Nicky config'}
+              </button>
+              {nickyTestMsg && (
+                <span style={{ fontSize: 13, color: nickyTestMsg.startsWith('✓') ? '#166534' : '#b42318', fontWeight: 600 }}>{nickyTestMsg}</span>
+              )}
+            </div>
+            {nickyTestUrl && (
+              <div style={{ fontSize: 12, marginTop: 6 }}>
+                Checkout link: <a href={nickyTestUrl} target="_blank" rel="noreferrer" style={{ color: '#0F766E' }}>{nickyTestUrl}</a> — open it to confirm Nicky can load the order.
+              </div>
+            )}
           </div>
 
           <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save payment settings'}</button>
