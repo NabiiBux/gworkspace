@@ -236,6 +236,7 @@ const PaymentSchema = new mongoose.Schema({
   customerId: mongoose.Schema.Types.ObjectId,
   customerEmail: String,
   domain: String,
+  orderNumber: String,       // human-facing reference (e.g. RN-... for renewals) for admin retry/lookup
   orderId: mongoose.Schema.Types.ObjectId,
   orderType: { type: String, enum: ['workspace', 'domain', 'domain_transfer', 'workspace_transfer', 'ssl', 'hosting', 'addon', 'seat_change'], default: 'workspace' },
   amount: Number,            // total charged (subtotal + tax)
@@ -1887,6 +1888,7 @@ app.post('/api/customer/subscriptions/renew', authenticateCustomer, async (req, 
     const orderNumber = `RN-${Date.now()}`;
     const payment = await Payment.create({
       customerId: me._id, customerEmail: me.businessEmail, domain: dom,
+      orderNumber,
       orderType: 'workspace', amount, subtotal: taxed.subtotal, tax: taxed.tax, fee: taxed.fee, currency: 'USD',
       method: method === 'nicky' ? 'nicky' : 'stripe', status: 'pending',
       isRenewal: true, renewalSkuId: String(skuId),
@@ -8519,6 +8521,73 @@ app.post('/api/admin/workspace-order-reprovision', authenticateCustomer, require
     await order.save();
     const result = await provisionWorkspaceOrder(order);
     res.json({ success: true, result });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// Admin: retry a subscription RENEWAL (RN-...) that was paid but didn't reactivate/apply.
+// Re-runs the billing-cycle update + Reseller reactivation for the paid renewal payment.
+app.post('/api/admin/renewal-retry', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const raw = (req.body?.orderNumber || '').trim();
+    if (!raw) return res.status(400).json({ error: 'Enter the renewal order number (e.g. RN-1783347896025).' });
+
+    // Look up by orderNumber; also accept a raw payment id as a fallback.
+    let payment = await Payment.findOne({ orderNumber: raw });
+    if (!payment && /^[a-f0-9]{24}$/i.test(raw)) payment = await Payment.findById(raw);
+    // Legacy fallback: older renewals didn't store orderNumber, but RN-<ts> is the Date.now()
+    // from creation — match the renewal payment created at (about) that instant.
+    if (!payment) {
+      const m = raw.match(/^RN-(\d{10,})$/i);
+      if (m) {
+        const ts = Number(m[1]);
+        payment = await Payment.findOne({
+          isRenewal: true,
+          createdAt: { $gte: new Date(ts - 5000), $lte: new Date(ts + 5000) },
+        }).sort({ createdAt: 1 });
+      }
+    }
+    if (!payment) return res.status(404).json({ error: `No payment found for "${raw}". Make sure it starts with RN- and was created by a subscription renewal.` });
+    if (!payment.isRenewal || !payment.renewalSkuId) return res.status(400).json({ error: 'This order is not a subscription renewal.' });
+    if (payment.status !== 'paid') return res.status(400).json({ error: `This renewal is not paid yet (status: ${payment.status}). Only paid renewals can be retried.` });
+    if (payment.isTest) return res.status(400).json({ error: 'This was a TEST-mode payment — it does not affect real Google subscriptions.' });
+
+    const dom = (payment.domain || '').toLowerCase();
+    const me = await Customer.findById(payment.customerId);
+    const account = me?.account || 'pk';
+    const now = new Date();
+
+    // Mark the CURRENT cycle paid (never shifts the fixed schedule).
+    let rec = await SubBilling.findOne({ domain: dom, skuId: payment.renewalSkuId });
+    if (!rec) { rec = new SubBilling({ domain: dom, skuId: payment.renewalSkuId, account }); startNewBillingCycle(rec, now); }
+    applyPaymentToCurrentCycle(rec, now);
+
+    // Re-attempt reactivation (only lifts OUR suspensions; reports a Google-side one).
+    const react = await reactivateAfterPayment(account, dom, payment.renewalSkuId, rec.subscriptionId);
+    if (react.googleSuspended) {
+      rec.suspendedByGoogle = true; rec.billingStatus = 'suspended'; rec.activationNote = react.message;
+    } else if (react.ok) {
+      rec.suspendedByGoogle = false; rec.billingStatus = 'active'; rec.suspendedAt = null; rec.activationNote = null;
+    } else {
+      rec.activationNote = react.message;
+    }
+    await rec.save();
+
+    const prodName = skuName(payment.renewalSkuId) || payment.renewalSkuId;
+    res.json({
+      success: true,
+      orderNumber: raw,
+      domain: dom,
+      product: prodName,
+      reactivated: !!(react.activated || react.alreadyActive),
+      googleSuspended: !!react.googleSuspended,
+      message: react.googleSuspended
+        ? `Payment applied, but ${prodName} for ${dom} cannot be activated because it was suspended by Google itself. ${react.message}`
+        : react.activated ? `${prodName} for ${dom} reactivated and marked paid for this cycle.`
+        : react.alreadyActive ? `${prodName} for ${dom} was already active; cycle marked paid.`
+        : (react.message || 'Renewal re-applied.'),
+    });
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
