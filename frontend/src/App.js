@@ -5853,7 +5853,14 @@ const CustomerSubscriptions = () => {
                       <span style={{ fontWeight: 600 }}>{s.seats ?? '—'}</span>
                     )}
                   </td>
-                  <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
+                  <td>
+                    <span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span>
+                    {s.suspendedByGoogle && (
+                      <div style={{ fontSize: 11, color: '#b42318', marginTop: 4, maxWidth: 220, lineHeight: 1.35 }}>
+                        ⚠️ Suspended by Google — a payment can’t reactivate this. {s.activationNote || 'Please contact support to resolve it with Google.'}
+                      </div>
+                    )}
+                  </td>
                   <td>
                     <span style={{ fontWeight: 600, color: overdue ? '#b42318' : soon ? '#b45309' : '#111827' }}>{fmtDate(s.renewalDate)}</span>
                     {d !== null && d !== undefined && (

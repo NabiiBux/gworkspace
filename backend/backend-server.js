@@ -407,6 +407,11 @@ const SubBillingSchema = new mongoose.Schema({
   lastAutoChargeAt: Date,
   lastAutoChargeError: String,
 
+  // Reactivation-after-payment outcome. When Google itself suspended the sub, a paid renewal
+  // cannot lift it — we record that here so the portal can explain it to the customer.
+  suspendedByGoogle: { type: Boolean, default: false },
+  activationNote: String,
+
   // Legacy field kept for backward compatibility with older records (mirrors billingCycleStart).
   purchaseDate: Date,
 
@@ -1493,6 +1498,9 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
           billingCycleStart: rec?.billingCycleStart ? new Date(rec.billingCycleStart).getTime() : null,
           subscriptionId: s.subscriptionId || null,
           autoRenew,
+          // If Google itself suspended it, a payment can't reactivate it — tell the customer.
+          suspendedByGoogle: !!rec?.suspendedByGoogle,
+          activationNote: rec?.activationNote || null,
         });
       }
     }
@@ -3384,28 +3392,47 @@ async function markPaidAndProvision(payment) {
         startNewBillingCycle(rec, now);
       }
       applyPaymentToCurrentCycle(rec, now);
+
+      // Payment received → try to reactivate it in Google (only lifts OUR suspensions;
+      // a Google-side suspension is reported back so we can tell the customer).
+      let react = { ok: true };
+      try {
+        react = await reactivateAfterPayment(account, dom, payment.renewalSkuId, rec.subscriptionId);
+      } catch (e) {
+        react = { ok: false, message: `Reactivation error: ${e.message}` };
+      }
+      if (react.googleSuspended) {
+        // Google suspended it — our billing shows paid, but the sub stays suspended until
+        // it's resolved on Google's side. Record the reason for the portal.
+        rec.suspendedByGoogle = true;
+        rec.billingStatus = 'suspended';
+        rec.activationNote = react.message;
+      } else if (react.ok) {
+        rec.suspendedByGoogle = false;
+        rec.billingStatus = 'active';
+        rec.suspendedAt = null;
+        rec.activationNote = null;
+      } else {
+        // Transient failure — keep the note but don't claim it's Google-suspended.
+        rec.activationNote = react.message;
+      }
       await rec.save();
 
-      // If Google had it suspended, reactivate it.
-      try {
-        const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
-        const reseller = google.reseller({ version: 'v1', auth });
-        const resp = await reseller.subscriptions.list({ customerId: dom });
-        const sub = (resp.data.subscriptions || []).find((s) => String(s.skuId) === String(payment.renewalSkuId));
-        if (sub && sub.status === 'SUSPENDED' && rec.subscriptionId) {
-          await setSubscriptionState(account, dom, payment.renewalSkuId, 'activate', rec.subscriptionId);
-          console.log('RENEWAL reactivated suspended sub:', dom, payment.renewalSkuId);
-        }
-      } catch (_) { }
+      console.log('SUBSCRIPTION RENEWAL applied:', dom, payment.renewalSkuId, '→ next', rec.nextBillingDate, react.googleSuspended ? '| GOOGLE-SUSPENDED (not reactivated)' : react.activated ? '| reactivated' : '');
 
-      console.log('SUBSCRIPTION RENEWAL applied:', dom, payment.renewalSkuId, '→ next', rec.nextBillingDate);
       try {
         const prodName = skuName(payment.renewalSkuId);
-        const html = emailShell('Subscription renewed', `
-          <p>Hi ${me?.firstName || me?.username || 'there'},</p>
-          <p>Thanks — your <strong>${prodName}</strong> subscription for <strong>${dom}</strong> has been renewed and is active. Your next renewal date is <strong>${rec.nextBillingDate ? new Date(rec.nextBillingDate).toLocaleDateString() : 'updated'}</strong>.</p>
-          <p>Note: each subscription is billed separately. If you have other subscriptions (like Google Voice or add-ons), please make sure each one is paid to keep it active.</p>`);
-        await sendEmail(me?.businessEmail, `Subscription renewed: ${prodName} · ${dom}`, html);
+        const html = react.googleSuspended
+          ? emailShell('Payment received — action needed on Google', `
+              <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+              <p>We received your payment for <strong>${prodName}</strong> (${dom}) and your billing is up to date.</p>
+              <p><strong>However, this subscription was suspended by Google itself, so it cannot be reactivated from our side.</strong> ${react.message}</p>
+              <p>Please contact support and we’ll help resolve it with Google.</p>`)
+          : emailShell('Subscription renewed', `
+              <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+              <p>Thanks — your <strong>${prodName}</strong> subscription for <strong>${dom}</strong> has been renewed and is active. Your next renewal date is <strong>${rec.nextBillingDate ? new Date(rec.nextBillingDate).toLocaleDateString() : 'updated'}</strong>.</p>
+              <p>Note: each subscription is billed separately. If you have other subscriptions (like Google Voice or add-ons), please make sure each one is paid to keep it active.</p>`);
+        await sendEmail(me?.businessEmail, react.googleSuspended ? `Payment received — ${prodName} needs Google action` : `Subscription renewed: ${prodName} · ${dom}`, html);
       } catch (_) { }
     } catch (e) {
       console.error('WORKSPACE RENEWAL FAILED for payment', String(payment._id), e.message);
@@ -3438,17 +3465,35 @@ async function markPaidAndProvision(payment) {
           console.log('AUTO-PROVISIONED order', order.orderNumber);
         }
 
-        // If it was suspended for non-payment, reactivate it in Google
+        // If it was suspended for non-payment, reactivate it in Google — but only lift OUR
+        // suspensions. A Google-side suspension can't be reactivated by a payment.
+        let orderGoogleSuspended = false;
         if (order.billingStatus === 'suspended') {
           try {
-            await reactivateSubscription(order);
-            console.log('REACTIVATED order', order.orderNumber);
+            const opd = await Plan.findOne({ planId: order.plan?.id });
+            const oSku = opd?.skuId;
+            const oDom = (order.organization?.domain || '').toLowerCase();
+            if (oSku && oDom) {
+              const react = await reactivateAfterPayment(order.account || 'pk', oDom, oSku, null);
+              if (react.googleSuspended) {
+                orderGoogleSuspended = true;
+                console.warn('ORDER NOT REACTIVATED (Google-suspended):', order.orderNumber, react.message);
+                try {
+                  await SubBilling.updateOne({ domain: oDom, skuId: String(oSku) }, { $set: { suspendedByGoogle: true, billingStatus: 'suspended', activationNote: react.message, updatedAt: new Date() } });
+                } catch (_) { }
+              } else if (react.ok) {
+                console.log('REACTIVATED order', order.orderNumber);
+              } else {
+                console.error('REACTIVATE FAILED', order.orderNumber, react.message);
+              }
+            }
           } catch (e) {
             console.error('REACTIVATE FAILED', order.orderNumber, e.message);
           }
         }
-        order.billingStatus = 'active';
-        order.suspendedAt = null;
+        // Keep it suspended if Google is the one holding it down; otherwise mark active.
+        order.billingStatus = orderGoogleSuspended ? 'suspended' : 'active';
+        if (!orderGoogleSuspended) order.suspendedAt = null;
         await order.save();
 
         // AUTO-ATTACH: link this purchase to the customer's portal account so it appears in
@@ -3699,6 +3744,57 @@ async function setSubscriptionState(account, domain, skuId, action, subscription
     await reseller.subscriptions.suspend({ customerId: domain, subscriptionId: subId });
   } else {
     await reseller.subscriptions.activate({ customerId: domain, subscriptionId: subId });
+  }
+}
+
+// Reactivate a suspended subscription after a payment. Google's Reseller API can only lift a
+// suspension that the RESELLER caused; if Google itself suspended it (trial ended, ToS pending,
+// billing/state error, etc.) the activate call cannot restore it. Returns a structured result
+// so the caller can tell the customer exactly what happened.
+//   { ok, alreadyActive, activated, googleSuspended, reasons, message }
+async function reactivateAfterPayment(account, domain, skuId, storedSubscriptionId) {
+  const dom = (domain || '').toLowerCase();
+  const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+  const reseller = google.reseller({ version: 'v1', auth });
+
+  // Find the live subscription so we use Google's real subscriptionId + suspension reasons.
+  let sub = null;
+  try {
+    const resp = await reseller.subscriptions.list({ customerId: dom });
+    sub = (resp.data.subscriptions || []).find((s) => String(s.skuId) === String(skuId)) || null;
+  } catch (e) {
+    return { ok: false, message: `Could not read the subscription from Google: ${e?.errors?.[0]?.message || e.message}` };
+  }
+  if (!sub) return { ok: false, message: 'Subscription not found on Google for this domain.' };
+  if (sub.status !== 'SUSPENDED') return { ok: true, alreadyActive: true };
+
+  // suspensionReasons tells us WHO suspended it. Only RESELLER_INITIATED is ours to lift.
+  const reasons = sub.suspensionReasons || [];
+  const resellerOnly = reasons.length > 0 && reasons.every((r) => r === 'RESELLER_INITIATED');
+  const googleSuspended = reasons.some((r) => r && r !== 'RESELLER_INITIATED');
+
+  if (googleSuspended && !resellerOnly) {
+    return {
+      ok: false,
+      googleSuspended: true,
+      reasons,
+      message: `This subscription cannot be activated because it was suspended by Google itself (${reasons.join(', ')}). Payment was received, but reactivation must be resolved on Google’s side (e.g. accept Terms of Service, end of trial, or a Google billing/state issue).`,
+    };
+  }
+
+  // Reseller-initiated (or no reason reported) → we can activate it.
+  const subId = sub.subscriptionId || storedSubscriptionId || skuId;
+  try {
+    await reseller.subscriptions.activate({ customerId: dom, subscriptionId: subId });
+    console.log(`REACTIVATED (payment): ${dom} sku=${skuId} subId=${subId} acct=${account}`);
+    return { ok: true, activated: true };
+  } catch (e) {
+    const msg = e?.errors?.[0]?.message || e?.message || 'activate failed';
+    // Google sometimes reports a non-reseller suspension only at activate time.
+    if (/suspended by google|not.*reseller|cannot be activated|invalid/i.test(msg)) {
+      return { ok: false, googleSuspended: true, reasons, message: `This subscription cannot be activated because it was suspended by Google itself (${msg}). Payment was received, but reactivation must be resolved on Google’s side.` };
+    }
+    return { ok: false, message: `Reactivation failed: ${msg}` };
   }
 }
 
