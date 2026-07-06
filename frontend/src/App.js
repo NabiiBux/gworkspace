@@ -3862,6 +3862,42 @@ const AdminPaymentsSection = () => {
   const [bulkUnsuspendResult, setBulkUnsuspendResult] = useState(null);
   const [bulkUnsuspendBusy, setBulkUnsuspendBusy] = useState(false);
 
+  // Refund-to-balance + crypto withdrawals
+  const [refundNum, setRefundNum] = useState('');
+  const [refundAmt, setRefundAmt] = useState('');
+  const [refundBusy, setRefundBusy] = useState(false);
+  const [refundMsg, setRefundMsg] = useState('');
+  const [withdrawals, setWithdrawals] = useState([]);
+  const [withdrawMsg, setWithdrawMsg] = useState('');
+  const loadWithdrawals = async () => {
+    try { const r = await axios.get(`${API_URL}/admin/withdrawals`); setWithdrawals(r.data.withdrawals || []); } catch (_) { }
+  };
+  const doRefund = async () => {
+    if (!refundNum.trim()) { setRefundMsg('Enter an order number.'); return; }
+    setRefundBusy(true); setRefundMsg('');
+    try {
+      const body = { orderNumber: refundNum.trim() };
+      if (refundAmt && Number(refundAmt) > 0) body.amount = Number(refundAmt);
+      const r = await axios.post(`${API_URL}/admin/refund-to-balance`, body);
+      setRefundMsg(`✓ Refunded $${Number(r.data.amount).toFixed(2)} to ${r.data.customerEmail || 'customer'}. New balance: $${Number(r.data.balance).toFixed(2)}.`);
+      setRefundNum(''); setRefundAmt('');
+    } catch (e) {
+      setRefundMsg('✗ ' + (e?.response?.data?.error || 'Refund failed.'));
+    } finally { setRefundBusy(false); }
+  };
+  const resolveWithdrawal = async (txnId, action) => {
+    const label = action === 'paid' ? 'mark this withdrawal as SENT (crypto already transferred)' : 'REFUND this withdrawal back to the customer\'s balance';
+    if (!window.confirm(`Are you sure you want to ${label}?`)) return;
+    setWithdrawMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/admin/withdrawal-resolve`, { txnId, action });
+      setWithdrawMsg('✓ ' + (r.data.message || 'Done.'));
+      loadWithdrawals();
+    } catch (e) {
+      setWithdrawMsg('✗ ' + (e?.response?.data?.error || 'Failed.'));
+    }
+  };
+
   // Nicky config test
   const [nickyTestBusy, setNickyTestBusy] = useState(false);
   const [nickyTestMsg, setNickyTestMsg] = useState('');
@@ -4056,6 +4092,7 @@ const AdminPaymentsSection = () => {
     } catch (_) { } finally { setLoading(false); }
     loadBalance();
     loadStuck();
+    loadWithdrawals();
   };
   useEffect(() => { load(); }, []);
 
@@ -4346,6 +4383,53 @@ const AdminPaymentsSection = () => {
 
       {tab === 'transactions' && (
         <>
+          {/* Refund an order to the customer's balance */}
+          <div style={{ ...card, marginBottom: 18 }}>
+            <h3 style={{ marginTop: 0 }}>💸 Refund an order to customer balance</h3>
+            <p style={{ color: '#6b7280', fontSize: 13, marginTop: 0 }}>Enter the order number (WS-…, DR-…, RN-…). The amount is credited to the customer's Balance, which they can spend on any order or withdraw as crypto. Leave amount blank to refund the full order amount.</p>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Order number</label>
+                <input value={refundNum} onChange={e => setRefundNum(e.target.value)} placeholder="WS-… / DR-… / RN-…" style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', width: 240 }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Amount (optional)</label>
+                <input type="number" min="0" step="0.01" value={refundAmt} onChange={e => setRefundAmt(e.target.value)} placeholder="full amount" style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', width: 140 }} />
+              </div>
+              <button onClick={doRefund} disabled={refundBusy} className="btn btn-primary" style={{ height: 40 }}>{refundBusy ? 'Refunding…' : 'Refund to balance'}</button>
+            </div>
+            {refundMsg && <div style={{ marginTop: 10, fontSize: 13, color: refundMsg.startsWith('✓') ? '#166534' : '#b42318', fontWeight: 600 }}>{refundMsg}</div>}
+          </div>
+
+          {/* Pending crypto withdrawals to fulfil */}
+          {withdrawals.length > 0 && (
+            <div style={{ ...card, marginBottom: 18, border: '1px solid #fed7aa', background: '#fff7ed' }}>
+              <h3 style={{ marginTop: 0, color: '#9a3412' }}>↗ Crypto withdrawal requests ({withdrawals.length})</h3>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', background: '#fff', borderRadius: 8 }}>
+                  <thead><tr style={{ textAlign: 'left', color: '#9a3412' }}>
+                    <th style={{ padding: '6px 10px' }}>Date</th><th>Customer</th><th>Amount</th><th>Wallet address</th><th></th>
+                  </tr></thead>
+                  <tbody>
+                    {withdrawals.map(w => (
+                      <tr key={w.id} style={{ borderTop: '1px solid #fee7d1' }}>
+                        <td style={{ padding: '6px 10px' }}>{new Date(w.createdAt).toLocaleDateString()}</td>
+                        <td>{w.email}</td>
+                        <td>${Number(w.amount).toFixed(2)}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{w.walletAddress}</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <button onClick={() => resolveWithdrawal(w.id, 'paid')} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px', marginRight: 6 }}>Mark sent</button>
+                          <button onClick={() => resolveWithdrawal(w.id, 'failed')} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>Refund</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {withdrawMsg && <div style={{ marginTop: 10, fontSize: 13, color: withdrawMsg.startsWith('✓') ? '#166534' : '#b42318', fontWeight: 600 }}>{withdrawMsg}</div>}
+            </div>
+          )}
+
           <div className="stats-grid" style={{ marginBottom: 18 }}>
             <div className="stat-card"><h3>Total received</h3><p className="stat-value">${Number(totalPaid).toFixed(2)}</p></div>
             <div className="stat-card"><h3>Payments</h3><p className="stat-value">{payments.length}</p></div>
@@ -4790,6 +4874,7 @@ const CustomerPortal = () => {
     { key: 'voice', label: 'Google Voice', icon: '📞' },
     { key: 'addons', label: 'Add-ons', icon: '🧩' },
     { key: 'payments', label: 'Payments', icon: '💳' },
+    { key: 'balance', label: 'Balance', icon: '💰' },
     { key: 'support', label: 'Support', icon: '🎫' },
     { key: 'settings', label: 'Account settings', icon: '⚙' },
   ];
@@ -4853,6 +4938,7 @@ const CustomerPortal = () => {
           {section === 'voice' && <CustomerVoice />}
           {section === 'addons' && <CustomerAddons />}
           {section === 'payments' && <CustomerPayments />}
+          {section === 'balance' && <CustomerBalance />}
           {section === 'support' && <CustomerSupport />}
           {section === 'settings' && <CustomerSettings />}
         </main>
@@ -4974,6 +5060,110 @@ const CustomerOverview = ({ onNavigate }) => {
 };
 
 // Customer Payments page (placeholder until Stripe is wired in Step 2)
+// Customer Balance — account credits from refunds; spend on orders or withdraw as crypto.
+const CustomerBalance = () => {
+  const [balance, setBalance] = useState(0);
+  const [txns, setTxns] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [wAmount, setWAmount] = useState('');
+  const [wAddr, setWAddr] = useState('');
+  const [wBusy, setWBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await axios.get(`${API_URL}/customer/balance`);
+      setBalance(r.data.balance || 0);
+      setTxns(r.data.transactions || []);
+    } catch (_) { } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const withdraw = async () => {
+    const amt = Number(wAmount);
+    if (!(amt > 0)) { setMsg('Enter an amount greater than zero.'); return; }
+    if (amt > balance) { setMsg('Amount exceeds your balance.'); return; }
+    if (!wAddr.trim()) { setMsg('Enter your crypto wallet address.'); return; }
+    if (!window.confirm(`Withdraw $${amt.toFixed(2)} to ${wAddr.trim()}?`)) return;
+    setWBusy(true); setMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/customer/balance/withdraw`, { amount: amt, walletAddress: wAddr.trim() });
+      setMsg('✓ ' + (r.data.message || 'Withdrawal requested.'));
+      setWAmount(''); setWAddr('');
+      load();
+    } catch (e) {
+      setMsg('✗ ' + (e?.response?.data?.error || 'Withdrawal failed.'));
+    } finally { setWBusy(false); }
+  };
+
+  const fmt = (n) => `$${Number(n || 0).toFixed(2)}`;
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString() : '—';
+  const typeLabel = (t) => t.type === 'credit' ? '＋ Credit' : t.type === 'withdrawal' ? '↗ Withdrawal' : '－ Spent';
+  const typeColor = (t) => t.type === 'credit' ? '#166534' : '#b42318';
+
+  return (
+    <div>
+      <h1 style={{ fontSize: 28, margin: '0 0 6px' }}>💰 Balance</h1>
+      <p style={{ color: MUTE, margin: '0 0 20px' }}>Credits from refunds. Use them toward any order at checkout, or withdraw as crypto.</p>
+
+      {msg && <div style={{ background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318', padding: '12px 16px', borderRadius: 10, marginBottom: 20 }}>{msg}</div>}
+
+      <div style={{ ...card, marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <div style={{ color: MUTE, fontSize: 14 }}>Available balance</div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: TEAL }}>{loading ? '…' : fmt(balance)}</div>
+        </div>
+        <div style={{ color: MUTE, fontSize: 13, maxWidth: 320 }}>
+          At checkout for any order, choose <strong>“Pay with balance”</strong> to spend your credits. Or withdraw below.
+        </div>
+      </div>
+
+      <div style={{ ...card, marginBottom: 20 }}>
+        <h3 style={{ marginTop: 0 }}>Withdraw as crypto</h3>
+        <p style={{ color: MUTE, fontSize: 13, marginTop: 0 }}>Enter an amount and your wallet address. Funds are reserved immediately and sent to your wallet shortly.</p>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Amount (USD)</label>
+            <input type="number" min="0" step="0.01" value={wAmount} onChange={e => setWAmount(e.target.value)} placeholder="0.00" style={{ height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', width: 140 }} />
+          </div>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Crypto wallet address</label>
+            <input value={wAddr} onChange={e => setWAddr(e.target.value)} placeholder="Your USDT/BTC/... wallet address" style={{ height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', width: '100%', boxSizing: 'border-box' }} />
+          </div>
+          <button onClick={withdraw} disabled={wBusy || balance <= 0} className="btn btn-primary" style={{ height: 42 }}>{wBusy ? 'Requesting…' : 'Withdraw'}</button>
+        </div>
+      </div>
+
+      <div style={{ ...card }}>
+        <h3 style={{ marginTop: 0 }}>History</h3>
+        {loading ? <p style={{ color: MUTE }}>Loading…</p> : txns.length === 0 ? <p style={{ color: MUTE }}>No balance activity yet.</p> : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+              <thead><tr style={{ textAlign: 'left', color: MUTE }}>
+                <th style={{ padding: '8px 0' }}>Date</th><th>Type</th><th>Details</th><th>Amount</th><th>Balance</th><th>Status</th>
+              </tr></thead>
+              <tbody>
+                {txns.map(t => (
+                  <tr key={t.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '8px 0' }}>{fmtDate(t.createdAt)}</td>
+                    <td style={{ color: typeColor(t), fontWeight: 600 }}>{typeLabel(t)}</td>
+                    <td>{t.reason || t.orderNumber || (t.walletAddress ? `To ${t.walletAddress.slice(0, 10)}…` : '—')}</td>
+                    <td style={{ fontWeight: 600, color: typeColor(t) }}>{t.type === 'credit' ? '+' : '−'}{fmt(t.amount)}</td>
+                    <td>{fmt(t.balanceAfter)}</td>
+                    <td style={{ fontSize: 12, color: t.status === 'paid' ? '#166534' : t.status === 'failed' ? '#b42318' : t.status === 'requested' ? '#b45309' : MUTE }}>{t.status === 'done' ? '—' : t.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const CustomerPayments = () => {
   const [orders, setOrders] = useState([]);
   const [payments, setPayments] = useState([]);
@@ -5032,6 +5222,10 @@ const CustomerPayments = () => {
       const res = await axios.post(`${API_URL}/customer/checkout`, { orderId, method });
       if (res.data.checkoutUrl) {
         window.location.href = res.data.checkoutUrl; // redirect to Stripe or Nicky hosted checkout
+      } else if (res.data.paid) {
+        setMsg('✓ ' + (res.data.message || 'Paid from your balance.'));
+        loadBalance();
+        load();
       } else {
         setMsg('Could not start checkout.');
       }
@@ -5039,6 +5233,12 @@ const CustomerPayments = () => {
       setMsg(e?.response?.data?.error || 'Could not start checkout.');
     } finally { setBusy(''); }
   };
+
+  const [balance, setBalance] = useState(0);
+  const loadBalance = async () => {
+    try { const r = await axios.get(`${API_URL}/customer/balance`); setBalance(r.data.balance || 0); } catch (_) { }
+  };
+  useEffect(() => { loadBalance(); }, []);
 
   const paidOrderIds = new Set(payments.filter(p => p.status === 'paid').map(p => String(p.orderId)));
 
@@ -5080,6 +5280,13 @@ const CustomerPayments = () => {
                 style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: 'pointer' }}>
                 {busy === o._id + 'nicky' ? '…' : '🪙 Pay with crypto'}
               </button>
+              {balance > 0 && (
+                <button onClick={() => pay(o._id, 'balance')} disabled={!!busy || balance + 1e-9 < Number(o.monthlyTotal || 0)}
+                  title={balance + 1e-9 < Number(o.monthlyTotal || 0) ? `Balance ($${balance.toFixed(2)}) doesn't cover this order` : `Pay $${Number(o.monthlyTotal || 0).toFixed(2)} from your $${balance.toFixed(2)} balance`}
+                  style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: (busy || balance + 1e-9 < Number(o.monthlyTotal || 0)) ? 'not-allowed' : 'pointer', opacity: balance + 1e-9 < Number(o.monthlyTotal || 0) ? 0.5 : 1 }}>
+                  {busy === o._id + 'balance' ? '…' : `💰 Pay from balance ($${balance.toFixed(2)})`}
+                </button>
+              )}
             </div>
           </div>
         </div>
