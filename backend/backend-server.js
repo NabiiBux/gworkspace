@@ -1403,119 +1403,144 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
     }
     if (!domain) return res.json({ subscriptions: [], domain: null, note: 'No domain linked to your account yet.' });
 
-    // Try BOTH reseller accounts (the domain could be on PK or USA).
-    const accountsToTry = me.account ? [me.account] : ['pk', 'usa'];
-    let subs = [];
-    let foundAccount = null;
-    let lastErr = null;
-
-    for (const account of accountsToTry) {
-      let auth;
-      try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
-      catch (e) { lastErr = e; continue; } // account not configured — try the next
-      const reseller = google.reseller({ version: 'v1', auth });
-      try {
-        const resp = await reseller.subscriptions.list({ customerId: domain });
-        subs = resp.data.subscriptions || [];
-        foundAccount = account;
-        break; // success
-      } catch (e) {
-        // 404 / "not found" / transfer-token style errors just mean this domain isn't on this account.
-        const msg = (e?.errors?.[0]?.message || e?.message || '').toLowerCase();
-        if (e?.code === 404 || /not found|does not exist|transfer token|no customer/i.test(msg)) {
-          lastErr = e; continue; // try the other account
-        }
-        lastErr = e; // unexpected error — keep trying the other account too
-        continue;
-      }
-    }
-
-    // If the domain isn't on any reseller account, return an empty (not an error) so the
-    // dashboard shows "no subscriptions" cleanly instead of a scary message.
-    if (foundAccount === null && subs.length === 0) {
-      const dbSubs = await Subscription.find({ customerId: me._id });
-      if (dbSubs.length > 0) {
-        const manualRows = dbSubs.map(ds => {
-          return {
-            domain: domain,
-            skuId: ds.googleWorkspaceSkuId || 'manual',
-            skuName: ds.plan || 'Workspace Subscription',
-            planName: ds.plan || 'Workspace Subscription',
-            seats: ds.seats || 1,
-            seatPrice: ds.monthlyPrice || 6.00,
-            status: ds.status === 'active' ? 'ACTIVE' : 'SUSPENDED',
-            creationTime: ds.createdAt ? ds.createdAt.getTime() : Date.now(),
-            renewalDate: ds.nextBillingDate ? ds.nextBillingDate.getTime() : addDays(new Date(), BILLING_CYCLE_DAYS).getTime(),
-            daysUntilRenewal: ds.nextBillingDate ? Math.ceil((new Date(ds.nextBillingDate).getTime() - Date.now()) / 86400000) : 30,
-            cycleStatus: 'paid', // manual subs
-            category: 'workspace',
-            isPrimary: true,
-            subscriptionId: ds.subscriptionId || null,
-            autoRenew: ds.autoRenew !== false,
-          };
-        });
-        return res.json({ subscriptions: manualRows, domain, account: me.account || 'pk' });
-      }
-      return res.json({ subscriptions: [], domain, note: 'No active Workspace subscription found for your domain yet.' });
-    }
-
-    // Remember the account we found it on (so future loads are faster + billing is correct).
-    if (foundAccount && me.account !== foundAccount) { try { me.account = foundAccount; if (!me.domain) me.domain = domain; await me.save(); } catch (_) { } }
+    // Collect ALL domains linked to this customer — a customer can have several attached
+    // (e.g. bulk attach). Primary domain + every domain on their workspace orders.
+    const domainSet = new Set();
+    if (domain) domainSet.add(domain.toLowerCase());
+    try {
+      const wos = await WorkspaceOrder.find({ customerId: me._id, 'organization.domain': { $exists: true, $ne: '' } });
+      wos.forEach((o) => { const d = (o.organization?.domain || '').toLowerCase(); if (d) domainSet.add(d); });
+    } catch (_) { }
+    const domains = [...domainSet];
 
     const nowD = new Date();
-    // Pull our billing records for this domain to show the FIXED next_billing_date + cycle status.
-    const billingRecs = await SubBilling.find({ domain: domain });
-    const billingBySku = {};
-    billingRecs.forEach((b) => { billingBySku[String(b.skuId)] = b; });
 
-    // Pre-load plan prices by SKU for seat-increase pricing.
-    const planDocs = await Plan.find({ skuId: { $in: subs.map((s) => String(s.skuId)) } });
-    const priceBySku = {};
-    planDocs.forEach((p) => { if (p.skuId) priceBySku[String(p.skuId)] = Number(p.monthlyPrice) || 0; });
-
-    // Fetch DB subscriptions for the customer to get auto-renew status
+    // DB subscription records for this customer → auto-renew status + manual fallback.
     const dbSubs = await Subscription.find({ customerId: me._id });
     const dbSubBySkuOrId = {};
-    dbSubs.forEach(ds => {
+    dbSubs.forEach((ds) => {
       if (ds.subscriptionId) dbSubBySkuOrId[String(ds.subscriptionId)] = ds;
       if (ds.googleWorkspaceSkuId) dbSubBySkuOrId[String(ds.googleWorkspaceSkuId)] = ds;
     });
 
-    const rows = subs.map((s) => {
-      const created = s.creationTime ? Number(s.creationTime) : null;
-      const rec = billingBySku[String(s.skuId)];
+    const rows = [];
+    const seenKeys = new Set();        // `${domain}::${skuId}` dedupe
+    const matchedDbKeys = new Set();   // which DB subs got a live Google row
+    let primaryAccount = null;
 
-      // Renewal date comes from our FIXED billing schedule (next_billing_date), not the payment date.
-      let renewalMs = rec?.nextBillingDate ? new Date(rec.nextBillingDate).getTime() : null;
-      // Fallback for subs without a billing record yet: creation + 29 days.
-      if (!renewalMs && created) renewalMs = addDays(new Date(created), BILLING_CYCLE_DAYS).getTime();
+    // Query each attached domain across the reseller accounts and merge the results.
+    for (const dom of domains) {
+      const accountsToTry = me.account ? [me.account, me.account === 'pk' ? 'usa' : 'pk'] : ['pk', 'usa'];
+      let subs = [];
+      let foundAccount = null;
 
-      const daysUntil = renewalMs ? Math.ceil((renewalMs - nowD.getTime()) / 86400000) : null;
-      const curSeats = s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null;
+      for (const account of accountsToTry) {
+        let auth;
+        try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
+        catch (e) { continue; }
+        const reseller = google.reseller({ version: 'v1', auth });
+        try {
+          const resp = await reseller.subscriptions.list({ customerId: dom });
+          subs = resp.data.subscriptions || [];
+          foundAccount = account;
+          break;
+        } catch (e) {
+          continue; // not on this account (or refused) — try the next
+        }
+      }
+      if (foundAccount && !primaryAccount) primaryAccount = foundAccount;
+      if (!foundAccount || subs.length === 0) continue;
 
-      const dbSub = (s.subscriptionId ? dbSubBySkuOrId[String(s.subscriptionId)] : null) || dbSubBySkuOrId[String(s.skuId)];
-      const autoRenew = dbSub ? dbSub.autoRenew !== false : true;
+      // Billing records + plan prices for this domain.
+      const billingRecs = await SubBilling.find({ domain: dom });
+      const billingBySku = {};
+      billingRecs.forEach((b) => { billingBySku[String(b.skuId)] = b; });
+      const planDocs = await Plan.find({ skuId: { $in: subs.map((s) => String(s.skuId)) } });
+      const priceBySku = {};
+      planDocs.forEach((p) => { if (p.skuId) priceBySku[String(p.skuId)] = Number(p.monthlyPrice) || 0; });
 
-      return {
-        domain: s.customerDomain || domain,
-        skuId: s.skuId,
-        skuName: s.skuName || skuName(s.skuId) || s.skuId,
-        planName: s.plan?.planName,
-        seats: curSeats,
-        seatPrice: priceBySku[String(s.skuId)] ?? null,   // monthly price per seat (if we have a Plan)
-        status: s.status,
-        creationTime: created,
-        renewalDate: renewalMs,
-        daysUntilRenewal: daysUntil,
-        cycleStatus: rec?.currentCycleStatus || 'unpaid',
-        category: skuCategory(s.skuId),
-        isPrimary: isPrimarySku(s.skuId),
-        billingCycleStart: rec?.billingCycleStart ? new Date(rec.billingCycleStart).getTime() : null,
-        subscriptionId: s.subscriptionId || null,
-        autoRenew,
-      };
-    });
-    res.json({ subscriptions: rows, domain, account: foundAccount });
+      for (const s of subs) {
+        const key = `${dom}::${s.skuId}`;
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+
+        const created = s.creationTime ? Number(s.creationTime) : null;
+        const rec = billingBySku[String(s.skuId)];
+        // Renewal date comes from our FIXED billing schedule, not the payment date.
+        let renewalMs = rec?.nextBillingDate ? new Date(rec.nextBillingDate).getTime() : null;
+        if (!renewalMs && created) renewalMs = addDays(new Date(created), BILLING_CYCLE_DAYS).getTime();
+        const daysUntil = renewalMs ? Math.ceil((renewalMs - nowD.getTime()) / 86400000) : null;
+        const curSeats = s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? null;
+
+        const dbSub = (s.subscriptionId ? dbSubBySkuOrId[String(s.subscriptionId)] : null) || dbSubBySkuOrId[String(s.skuId)];
+        if (dbSub) { if (dbSub.subscriptionId) matchedDbKeys.add(String(dbSub.subscriptionId)); if (dbSub.googleWorkspaceSkuId) matchedDbKeys.add(String(dbSub.googleWorkspaceSkuId)); }
+        const autoRenew = dbSub ? dbSub.autoRenew !== false : true;
+
+        rows.push({
+          domain: s.customerDomain || dom,
+          skuId: s.skuId,
+          skuName: s.skuName || skuName(s.skuId) || s.skuId,
+          planName: s.plan?.planName,
+          seats: curSeats,
+          seatPrice: priceBySku[String(s.skuId)] ?? null,
+          status: s.status,
+          creationTime: created,
+          renewalDate: renewalMs,
+          daysUntilRenewal: daysUntil,
+          cycleStatus: rec?.currentCycleStatus || 'unpaid',
+          category: skuCategory(s.skuId),
+          isPrimary: isPrimarySku(s.skuId),
+          billingCycleStart: rec?.billingCycleStart ? new Date(rec.billingCycleStart).getTime() : null,
+          subscriptionId: s.subscriptionId || null,
+          autoRenew,
+        });
+      }
+    }
+
+    // Remember the account we found subs on (faster future loads + correct billing).
+    if (primaryAccount && me.account !== primaryAccount) {
+      try { me.account = primaryAccount; if (!me.domain && domain) me.domain = domain; await me.save(); } catch (_) { }
+    }
+
+    // Manual fallback: include any DB subscription not represented by a live Google row
+    // (force-linked / manually attached subs whose domain isn't live on Google).
+    const orderById = {};
+    try {
+      const orderIds = dbSubs.map((d) => d.orderId).filter(Boolean);
+      if (orderIds.length) {
+        const orders = await WorkspaceOrder.find({ _id: { $in: orderIds } });
+        orders.forEach((o) => { orderById[String(o._id)] = o; });
+      }
+    } catch (_) { }
+    for (const ds of dbSubs) {
+      const bySub = ds.subscriptionId && matchedDbKeys.has(String(ds.subscriptionId));
+      const bySku = ds.googleWorkspaceSkuId && matchedDbKeys.has(String(ds.googleWorkspaceSkuId));
+      if (bySub || bySku) continue; // already shown from Google
+      const ord = ds.orderId ? orderById[String(ds.orderId)] : null;
+      const dsDomain = (ord?.organization?.domain || domain || '').toLowerCase();
+      rows.push({
+        domain: dsDomain,
+        skuId: ds.googleWorkspaceSkuId || 'manual',
+        skuName: ds.plan || 'Workspace Subscription',
+        planName: ds.plan || 'Workspace Subscription',
+        seats: ds.seats || 1,
+        seatPrice: ds.monthlyPrice || 6.00,
+        status: ds.status === 'active' ? 'ACTIVE' : 'SUSPENDED',
+        creationTime: ds.createdAt ? ds.createdAt.getTime() : Date.now(),
+        renewalDate: ds.nextBillingDate ? ds.nextBillingDate.getTime() : addDays(new Date(), BILLING_CYCLE_DAYS).getTime(),
+        daysUntilRenewal: ds.nextBillingDate ? Math.ceil((new Date(ds.nextBillingDate).getTime() - Date.now()) / 86400000) : 30,
+        cycleStatus: 'paid',
+        category: 'workspace',
+        isPrimary: true,
+        subscriptionId: ds.subscriptionId || null,
+        autoRenew: ds.autoRenew !== false,
+      });
+    }
+
+    if (rows.length === 0) {
+      return res.json({ subscriptions: [], domain, note: 'No active Workspace subscription found for your domain yet.' });
+    }
+    res.json({ subscriptions: rows, domain, account: primaryAccount || me.account || 'pk' });
   } catch (e) {
     const msg = e?.errors?.[0]?.message || e?.message || 'Could not load your subscriptions.';
     res.status(500).json({ error: msg });
