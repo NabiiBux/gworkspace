@@ -99,6 +99,9 @@ const CustomerSchema = new mongoose.Schema({
   aupAccepted: { type: Boolean, default: false },
   aupAcceptedAt: Date,
   aupVersion: String,
+  // Account credit balance (USD). Funded by admin refunds of cancelled/refunded orders.
+  // Spendable on any order, or withdrawable as crypto. Never goes negative.
+  balance: { type: Number, default: 0 },
   // Saved card for automatic renewal charging (Stripe). Auto-renew can only be ON with a card.
   stripeCustomerId: String,
   cardPmId: String,        // default Stripe PaymentMethod id used for off-session charges
@@ -263,6 +266,49 @@ const PaymentSchema = new mongoose.Schema({
   paidAt: Date,
 });
 const Payment = mongoose.model('Payment', PaymentSchema);
+
+// Ledger for every change to a customer's credit balance (audit trail).
+const BalanceTransactionSchema = new mongoose.Schema({
+  customerId: { type: mongoose.Schema.Types.ObjectId, index: true },
+  // credit  = money added (admin refund); debit = spent on an order;
+  // withdrawal = crypto cash-out request (funds already deducted, status tracks payout).
+  type: { type: String, enum: ['credit', 'debit', 'withdrawal'], required: true },
+  amount: Number,                 // positive USD amount of this entry
+  balanceAfter: Number,           // customer balance right after this entry
+  reason: String,                 // human note (e.g. "Refund for order WS-...")
+  orderNumber: String,            // related order/payment reference, if any
+  walletAddress: String,          // for withdrawals: destination crypto address
+  // withdrawal lifecycle: requested → paid (crypto sent) / failed (refunded to balance)
+  status: { type: String, enum: ['requested', 'paid', 'failed', 'done'], default: 'done' },
+  providerRef: String,            // Nicky payout id, if any
+  createdAt: { type: Date, default: Date.now },
+});
+const BalanceTransaction = mongoose.model('BalanceTransaction', BalanceTransactionSchema);
+
+// Credit or debit a customer's balance atomically and write a ledger entry. `amount` is the
+// positive magnitude; `delta` is +amount (credit) or -amount (debit/withdrawal). Never allows
+// the balance to go below zero. Returns { balance, txn }.
+async function applyBalanceChange(customerId, { type, amount, reason, orderNumber, walletAddress, status, providerRef }) {
+  const amt = Math.round(Number(amount) * 100) / 100;
+  if (!(amt > 0)) throw new Error('Amount must be greater than zero.');
+  const delta = type === 'credit' ? amt : -amt;
+  // Guard against overdraw for debits/withdrawals.
+  const filter = { _id: customerId };
+  if (delta < 0) filter.balance = { $gte: amt };
+  const updated = await Customer.findOneAndUpdate(filter, { $inc: { balance: delta } }, { new: true });
+  if (!updated) {
+    const exists = await Customer.findById(customerId);
+    if (!exists) throw new Error('Customer not found.');
+    throw new Error('Insufficient balance.');
+  }
+  const balanceAfter = Math.round((updated.balance) * 100) / 100;
+  const txn = await BalanceTransaction.create({
+    customerId, type, amount: amt, balanceAfter, reason: reason || '',
+    orderNumber: orderNumber || null, walletAddress: walletAddress || null,
+    status: status || 'done', providerRef: providerRef || null,
+  });
+  return { balance: balanceAfter, txn };
+}
 
 // Domain order (paid domain registration)
 const DomainOrderSchema = new mongoose.Schema({
@@ -2876,10 +2922,32 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
     const taxed = await applyTaxAndFee(subtotal);
     const amount = taxed.total;
 
+    // PAY WITH ACCOUNT BALANCE (credits) — no external checkout.
+    if (method === 'balance') {
+      if (Number(me.balance || 0) + 1e-9 < amount) {
+        return res.status(400).json({ error: `Your balance ($${Number(me.balance || 0).toFixed(2)}) doesn't cover this order ($${amount.toFixed(2)}).` });
+      }
+      const payment = await Payment.create({
+        customerId: me._id, customerEmail: me.businessEmail, domain: order.organization?.domain,
+        orderNumber: order.orderNumber, orderId: order._id, amount, subtotal: taxed.subtotal, tax: taxed.tax,
+        currency: 'USD', method: 'balance', status: 'pending',
+      });
+      try {
+        await applyBalanceChange(me._id, { type: 'debit', amount, reason: `Paid order ${order.orderNumber} from balance`, orderNumber: order.orderNumber });
+      } catch (e) {
+        payment.status = 'cancelled'; await payment.save();
+        return res.status(400).json({ error: e.message });
+      }
+      payment.status = 'paid'; payment.paidAt = new Date(); await payment.save();
+      await markPaidAndProvision(payment);
+      return res.json({ paid: true, viaBalance: true, message: 'Paid from your account balance.' });
+    }
+
     const payment = await Payment.create({
       customerId: me._id,
       customerEmail: me.businessEmail,
       domain: order.organization?.domain,
+      orderNumber: order.orderNumber,
       orderId: order._id,
       amount,
       subtotal: taxed.subtotal,
@@ -5511,6 +5579,152 @@ app.post('/api/admin/payments/mark-paid', authenticateCustomer, requireAdmin, as
     res.json({ success: true, message: `Payment ${payment._id} marked paid and provisioning started.` });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== ACCOUNT BALANCE / CREDITS ====================
+
+// Admin: refund an order's amount to the customer's balance as credit.
+app.post('/api/admin/refund-to-balance', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const rawNum = (req.body?.orderNumber || '').trim();
+    const overrideAmount = req.body?.amount != null ? Number(req.body.amount) : null;
+    if (!rawNum) return res.status(400).json({ error: 'Enter the order number to refund (e.g. WS-..., DR-..., RN-...).' });
+
+    // Locate the order/payment + its customer + a default amount.
+    let customerId = null, defaultAmount = null, ref = rawNum, markCancel = null;
+    const wo = await WorkspaceOrder.findOne({ orderNumber: rawNum });
+    const dOrd = !wo ? await DomainOrder.findOne({ orderNumber: rawNum }) : null;
+    let pay = null;
+    if (wo) {
+      customerId = wo.customerId;
+      pay = await Payment.findOne({ orderId: wo._id, status: 'paid' }).sort({ createdAt: -1 });
+      defaultAmount = pay ? pay.amount : (wo.monthlyTotal || null);
+      markCancel = { doc: wo };
+    } else if (dOrd) {
+      customerId = dOrd.customerId;
+      pay = await Payment.findOne({ orderId: dOrd._id, status: 'paid' }).sort({ createdAt: -1 });
+      defaultAmount = pay ? pay.amount : (dOrd.price || null);
+      markCancel = { doc: dOrd };
+    } else {
+      // Fall back to a Payment by orderNumber (e.g. renewals RN-...).
+      pay = await Payment.findOne({ orderNumber: rawNum });
+      if (!pay) { const m = rawNum.match(/^RN-(\d{10,})$/i); if (m) { const ts = Number(m[1]); pay = await Payment.findOne({ isRenewal: true, createdAt: { $gte: new Date(ts - 5000), $lte: new Date(ts + 5000) } }); } }
+      if (pay) { customerId = pay.customerId; defaultAmount = pay.amount; ref = pay.orderNumber || rawNum; }
+    }
+    if (!customerId) return res.status(404).json({ error: `No order/payment found for "${rawNum}".` });
+
+    const amount = overrideAmount != null && overrideAmount > 0 ? overrideAmount : defaultAmount;
+    if (!(amount > 0)) return res.status(400).json({ error: 'Could not determine a refund amount. Enter an explicit amount.' });
+
+    const me = await Customer.findById(customerId);
+    const { balance, txn } = await applyBalanceChange(customerId, {
+      type: 'credit', amount, reason: `Refund for order ${ref}`, orderNumber: ref,
+    });
+
+    // Mark the source order/payment refunded/cancelled for a clear trail.
+    try {
+      if (markCancel?.doc) { markCancel.doc.status = 'cancelled'; await markCancel.doc.save(); }
+      if (pay && pay.status === 'paid') { /* keep payment record; refund is tracked in the ledger */ }
+    } catch (_) { }
+
+    // Notify the customer.
+    try {
+      const html = emailShell('Refund added to your balance', `
+        <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+        <p>A refund of <strong>$${amount.toFixed(2)}</strong> for order <strong>${ref}</strong> has been added to your account balance.</p>
+        <p>Your balance is now <strong>$${balance.toFixed(2)}</strong>. You can use it toward any order or withdraw it as crypto from the <strong>Balance</strong> page in your portal.</p>`);
+      await sendEmail(me?.businessEmail, `Refund of $${amount.toFixed(2)} added to your balance`, html);
+    } catch (_) { }
+
+    res.json({ success: true, orderNumber: ref, amount, balance, customerEmail: me?.businessEmail, txnId: String(txn._id) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: list pending crypto withdrawal requests to fulfil.
+app.get('/api/admin/withdrawals', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const txns = await BalanceTransaction.find({ type: 'withdrawal', status: 'requested' }).sort({ createdAt: -1 }).limit(200);
+    const rows = [];
+    for (const t of txns) {
+      const c = await Customer.findById(t.customerId).select('businessEmail firstName lastName balance');
+      rows.push({ id: String(t._id), amount: t.amount, walletAddress: t.walletAddress, createdAt: t.createdAt, email: c?.businessEmail || null, currentBalance: c?.balance ?? null });
+    }
+    res.json({ withdrawals: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin: mark a withdrawal paid (crypto sent) or failed (funds returned to balance).
+app.post('/api/admin/withdrawal-resolve', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { txnId, action, providerRef } = req.body; // action: 'paid' | 'failed'
+    const txn = await BalanceTransaction.findById(txnId);
+    if (!txn || txn.type !== 'withdrawal') return res.status(404).json({ error: 'Withdrawal request not found.' });
+    if (txn.status !== 'requested') return res.status(400).json({ error: `This withdrawal is already ${txn.status}.` });
+
+    if (action === 'failed') {
+      // Return the funds to the customer's balance.
+      await applyBalanceChange(txn.customerId, { type: 'credit', amount: txn.amount, reason: `Withdrawal failed — refunded to balance` });
+      txn.status = 'failed'; await txn.save();
+      return res.json({ success: true, message: 'Withdrawal marked failed and funds returned to balance.' });
+    }
+    // Mark paid (crypto sent). Funds were already deducted at request time.
+    txn.status = 'paid'; if (providerRef) txn.providerRef = providerRef; await txn.save();
+    try {
+      const c = await Customer.findById(txn.customerId);
+      const html = emailShell('Withdrawal sent', `<p>Hi ${c?.firstName || c?.username || 'there'},</p><p>Your withdrawal of <strong>$${txn.amount.toFixed(2)}</strong> has been sent to <strong>${txn.walletAddress || 'your wallet'}</strong>.${providerRef ? ` Reference: ${providerRef}.` : ''}</p>`);
+      await sendEmail(c?.businessEmail, `Withdrawal of $${txn.amount.toFixed(2)} sent`, html);
+    } catch (_) { }
+    res.json({ success: true, message: 'Withdrawal marked paid.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Customer: view balance + ledger history.
+app.get('/api/customer/balance', authenticateCustomer, async (req, res) => {
+  try {
+    const me = await Customer.findById(req.customerId).select('balance');
+    const txns = await BalanceTransaction.find({ customerId: req.customerId }).sort({ createdAt: -1 }).limit(100);
+    res.json({
+      balance: Math.round((me?.balance || 0) * 100) / 100,
+      transactions: txns.map((t) => ({
+        id: String(t._id), type: t.type, amount: t.amount, balanceAfter: t.balanceAfter,
+        reason: t.reason, orderNumber: t.orderNumber, walletAddress: t.walletAddress,
+        status: t.status, createdAt: t.createdAt,
+      })),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Customer: request a crypto withdrawal of balance to a wallet address. Funds are deducted
+// immediately and the payout is fulfilled by the admin (or an automated Nicky payout if set up).
+app.post('/api/customer/balance/withdraw', authenticateCustomer, async (req, res) => {
+  try {
+    const amount = Number(req.body?.amount);
+    const walletAddress = (req.body?.walletAddress || '').trim();
+    if (!(amount > 0)) return res.status(400).json({ error: 'Enter a withdrawal amount greater than zero.' });
+    if (!walletAddress || walletAddress.length < 12) return res.status(400).json({ error: 'Enter a valid crypto wallet address to receive the funds.' });
+
+    const me = await Customer.findById(req.customerId);
+    if (Number(me.balance || 0) + 1e-9 < amount) {
+      return res.status(400).json({ error: `Your balance ($${Number(me.balance || 0).toFixed(2)}) is less than the requested amount.` });
+    }
+
+    // Deduct now and record a pending withdrawal (status 'requested').
+    const { balance, txn } = await applyBalanceChange(req.customerId, {
+      type: 'withdrawal', amount, reason: 'Crypto withdrawal request', walletAddress, status: 'requested',
+    });
+
+    // Notify admin to fulfil the payout.
+    try {
+      const adminEmail = process.env.ADMIN_NOTIFY_EMAIL || process.env.EMAIL_FROM_ADDRESS;
+      if (adminEmail) await sendEmail(adminEmail, `Withdrawal request: $${amount.toFixed(2)}`, emailShell('Withdrawal request', `<p>${me.businessEmail} requested a crypto withdrawal of <strong>$${amount.toFixed(2)}</strong> to <strong>${walletAddress}</strong>. Fulfil it from the admin Payments → Withdrawals panel.</p>`));
+    } catch (_) { }
+
+    res.json({ success: true, balance, message: 'Withdrawal requested. Funds have been reserved and will be sent to your wallet shortly.', txnId: String(txn._id) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
   }
 });
 
