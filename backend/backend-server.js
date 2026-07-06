@@ -8550,8 +8550,37 @@ app.post('/api/admin/renewal-retry', authenticateCustomer, requireAdmin, async (
     }
     if (!payment) return res.status(404).json({ error: `No payment found for "${raw}". Make sure it starts with RN- and was created by a subscription renewal.` });
     if (!payment.isRenewal || !payment.renewalSkuId) return res.status(400).json({ error: 'This order is not a subscription renewal.' });
-    if (payment.status !== 'paid') return res.status(400).json({ error: `This renewal is not paid yet (status: ${payment.status}). Only paid renewals can be retried.` });
     if (payment.isTest) return res.status(400).json({ error: 'This was a TEST-mode payment — it does not affect real Google subscriptions.' });
+
+    // If our DB still shows it pending, the provider webhook was likely missed. Verify the
+    // payment DIRECTLY with Stripe/Nicky and, if it truly went through, mark it paid here.
+    if (payment.status !== 'paid') {
+      let confirmed = false, provStatus = payment.status;
+      try {
+        if (payment.method === 'stripe' && payment.providerRef) {
+          const stripe = await getStripeForMode();
+          const session = await stripe.checkout.sessions.retrieve(payment.providerRef);
+          provStatus = session.payment_status || 'pending';
+          confirmed = session.payment_status === 'paid';
+        } else if (payment.method === 'nicky') {
+          const result = await checkNickyPaymentStatus(payment); // marks paid if Finished
+          provStatus = result.status || 'pending';
+          confirmed = !!result.paid;
+          payment = (await Payment.findById(payment._id)) || payment; // reload — may now be paid
+        }
+      } catch (verErr) {
+        return res.status(502).json({ error: `Could not verify the payment with ${payment.method}: ${verErr.message}` });
+      }
+      if (!confirmed && payment.status !== 'paid') {
+        return res.status(400).json({ error: `This renewal has not been paid at ${(payment.method || 'the provider')} yet (status: ${provStatus}). If the customer just paid, wait a minute and retry; otherwise the payment did not complete.` });
+      }
+      if (payment.status !== 'paid') {
+        payment.status = 'paid';
+        payment.paidAt = payment.paidAt || new Date();
+        await payment.save();
+        console.log('[renewal-retry] Confirmed paid via provider + marked paid:', raw, payment.method);
+      }
+    }
 
     const dom = (payment.domain || '').toLowerCase();
     const me = await Customer.findById(payment.customerId);
