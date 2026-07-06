@@ -99,6 +99,12 @@ const CustomerSchema = new mongoose.Schema({
   aupAccepted: { type: Boolean, default: false },
   aupAcceptedAt: Date,
   aupVersion: String,
+  // Saved card for automatic renewal charging (Stripe). Auto-renew can only be ON with a card.
+  stripeCustomerId: String,
+  cardPmId: String,        // default Stripe PaymentMethod id used for off-session charges
+  cardBrand: String,
+  cardLast4: String,
+  cardAddedAt: Date,
   createdAt: { type: Date, default: Date.now },
   lastLogin: Date,
 });
@@ -395,6 +401,12 @@ const SubBillingSchema = new mongoose.Schema({
   notified7DaysBefore: { type: Boolean, default: false },
   notifiedOnExpiration: { type: Boolean, default: false },
 
+  // Auto-renew card charging (one attempt per daily billing run; after 3 failures ALL of the
+  // customer's subscriptions are suspended until they pay).
+  autoChargeAttempts: { type: Number, default: 0 },
+  lastAutoChargeAt: Date,
+  lastAutoChargeError: String,
+
   // Legacy field kept for backward compatibility with older records (mirrors billingCycleStart).
   purchaseDate: Date,
 
@@ -451,6 +463,8 @@ function applyPaymentToCurrentCycle(rec, when = new Date()) {
   rec.billingStatus = 'active';   // unsuspend if it was suspended (late payment)
   rec.warnedAt = null;
   rec.suspendedAt = null;
+  rec.autoChargeAttempts = 0;     // a payment resets the failed-card retry counter
+  rec.lastAutoChargeError = null;
   rec.updatedAt = new Date();
   // NOTE: billingCycleStart and nextBillingDate are intentionally UNCHANGED.
   return rec;
@@ -1882,12 +1896,100 @@ app.post('/api/customer/subscriptions/renew', authenticateCustomer, async (req, 
   }
 });
 
+// ==================== SAVED CARD (auto-renewal charging) ====================
+// Customer: saved-card status. If a card was added but the webhook was missed, sync it from Stripe.
+app.get('/api/customer/billing/card', authenticateCustomer, async (req, res) => {
+  try {
+    const me = await Customer.findById(req.customerId);
+    if (!me) return res.status(404).json({ error: 'Customer not found.' });
+    if (me.stripeCustomerId && !me.cardPmId) {
+      try {
+        const stripe = await getStripeForMode();
+        const pms = await stripe.paymentMethods.list({ customer: me.stripeCustomerId, type: 'card', limit: 1 });
+        const pm = pms?.data?.[0];
+        if (pm) {
+          me.cardPmId = pm.id;
+          me.cardBrand = pm.card?.brand || null;
+          me.cardLast4 = pm.card?.last4 || null;
+          me.cardAddedAt = new Date();
+          await me.save();
+        }
+      } catch (_) { }
+    }
+    res.json({
+      hasCard: !!(me.stripeCustomerId && me.cardPmId),
+      brand: me.cardBrand || null,
+      last4: me.cardLast4 || null,
+      addedAt: me.cardAddedAt || null,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Customer: start a Stripe "save card" checkout (mode=setup — verifies the card, charges nothing).
+app.post('/api/customer/billing/setup-card', authenticateCustomer, async (req, res) => {
+  try {
+    const me = await Customer.findById(req.customerId);
+    if (!me) return res.status(404).json({ error: 'Customer not found.' });
+    let stripe;
+    try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+
+    if (!me.stripeCustomerId) {
+      const sc = await stripe.customers.create({
+        email: me.businessEmail || undefined,
+        name: [me.firstName, me.lastName].filter(Boolean).join(' ') || me.username || undefined,
+        metadata: { portalCustomerId: String(me._id) },
+      });
+      me.stripeCustomerId = sc.id;
+      await me.save();
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'setup',
+      customer: me.stripeCustomerId,
+      payment_method_types: ['card'],
+      success_url: `${FRONTEND_URL}/?card=saved`,
+      cancel_url: `${FRONTEND_URL}/?card=cancelled`,
+      client_reference_id: String(me._id),
+      metadata: { portalCustomerId: String(me._id), purpose: 'save_card' },
+    });
+    res.json({ checkoutUrl: session.url });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Customer: remove the saved card. Auto-renew toggles stay as-is but nothing can be charged,
+// so renewals fall back to manual payment (and eventual suspension if unpaid).
+app.post('/api/customer/billing/remove-card', authenticateCustomer, async (req, res) => {
+  try {
+    const me = await Customer.findById(req.customerId);
+    if (!me) return res.status(404).json({ error: 'Customer not found.' });
+    if (me.cardPmId) {
+      try { const stripe = await getStripeForMode(); await stripe.paymentMethods.detach(me.cardPmId); } catch (_) { }
+    }
+    me.cardPmId = null; me.cardBrand = null; me.cardLast4 = null; me.cardAddedAt = null;
+    await me.save();
+    // Without a card auto-renewal cannot charge — turn the flags off to keep the UI truthful.
+    await Subscription.updateMany({ customerId: me._id }, { $set: { autoRenew: false, updatedAt: new Date() } });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Customer: Toggle auto-renew status of a subscription (Google Workspace or Voice)
 app.post('/api/customer/subscriptions/toggle-autorenew', authenticateCustomer, async (req, res) => {
   try {
     const { skuId, subscriptionId, autoRenew } = req.body;
     if (!skuId && !subscriptionId) {
       return res.status(400).json({ error: 'Please specify skuId or subscriptionId.' });
+    }
+
+    // Auto-renew ON means we charge the saved card automatically — card payment only.
+    if (autoRenew) {
+      const me = await Customer.findById(req.customerId);
+      if (!me || !me.stripeCustomerId || !me.cardPmId) {
+        return res.status(400).json({
+          error: 'Please enable card payment for auto renewals — add a card first. If you cannot add a card, contact Admin.',
+          needCard: true,
+        });
+      }
     }
 
     // Find the local subscription record
@@ -2893,10 +2995,35 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
     }
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      const pid = session.metadata?.paymentId || session.client_reference_id;
-      if (pid) {
-        const payment = await Payment.findById(pid);
-        await markPaidAndProvision(payment);
+      if (session.mode === 'setup') {
+        // Card-save session (auto-renewal): store the verified payment method on the customer.
+        try {
+          const custId = session.metadata?.portalCustomerId || session.client_reference_id;
+          const me = custId ? await Customer.findById(custId) : null;
+          if (me && session.setup_intent) {
+            const stripeApi = await getStripeForMode();
+            const si = await stripeApi.setupIntents.retrieve(String(session.setup_intent));
+            const pmId = si?.payment_method;
+            if (pmId) {
+              const pm = await stripeApi.paymentMethods.retrieve(String(pmId));
+              me.stripeCustomerId = me.stripeCustomerId || (typeof session.customer === 'string' ? session.customer : session.customer?.id);
+              me.cardPmId = String(pmId);
+              me.cardBrand = pm?.card?.brand || null;
+              me.cardLast4 = pm?.card?.last4 || null;
+              me.cardAddedAt = new Date();
+              await me.save();
+              console.log('[card] Saved card for customer', String(me._id), `${me.cardBrand || 'card'} •••• ${me.cardLast4 || '????'}`);
+            }
+          }
+        } catch (cardErr) {
+          console.error('[card] Failed to store saved card from webhook:', cardErr.message);
+        }
+      } else {
+        const pid = session.metadata?.paymentId || session.client_reference_id;
+        if (pid) {
+          const payment = await Payment.findById(pid);
+          await markPaidAndProvision(payment);
+        }
       }
     }
     res.json({ received: true });
@@ -3299,6 +3426,44 @@ async function markPaidAndProvision(payment) {
         order.suspendedAt = null;
         await order.save();
 
+        // AUTO-ATTACH: link this purchase to the customer's portal account so it appears in
+        // "My Subscriptions" and is picked up by billing/auto-renewal without manual attaching.
+        try {
+          const me = await Customer.findById(payment.customerId);
+          const attachDomain = (order.organization?.domain || '').toLowerCase();
+          const planDoc = await Plan.findOne({ planId: order.plan?.id });
+          if (me && attachDomain) {
+            if (!me.domain) {
+              me.domain = attachDomain;
+              me.account = order.account || me.account || 'pk';
+              await me.save();
+            }
+            if (planDoc?.skuId) {
+              await Subscription.findOneAndUpdate(
+                { customerId: me._id, googleWorkspaceSkuId: String(planDoc.skuId) },
+                {
+                  customerId: me._id,
+                  orderId: order._id,
+                  type: 'workspace',
+                  plan: planDoc.name,
+                  seats: order.seats || 1,
+                  monthlyPrice: planDoc.monthlyPrice,
+                  status: 'active',
+                  googleWorkspaceSkuId: String(planDoc.skuId),
+                  // Auto-renew only turns on when a card is saved (card is what gets charged).
+                  autoRenew: !!(me.stripeCustomerId && me.cardPmId),
+                  nextBillingDate: addDays(now, BILLING_CYCLE_DAYS),
+                  updatedAt: now,
+                },
+                { upsert: true }
+              );
+              console.log('[auto-attach] Linked', planDoc.skuId, attachDomain, '→ customer', String(me._id));
+            }
+          }
+        } catch (attachErr) {
+          console.error('[auto-attach] failed:', attachErr.message);
+        }
+
         // Payment confirmation email
         try {
           const me = await Customer.findById(payment.customerId);
@@ -3512,6 +3677,150 @@ async function setSubscriptionState(account, domain, skuId, action, subscription
   }
 }
 
+// ==================== AUTO-RENEW CARD CHARGING ====================
+// Try to auto-charge a due, unpaid subscription on the owning customer's saved card.
+// One attempt per daily billing run. Returns 'paid' | 'retry' | 'exhausted' | 'skip'.
+async function attemptAutoRenewCharge(r, now) {
+  // Find the portal customer who owns this domain.
+  const customer = await Customer.findOne({ domain: (r.domain || '').toLowerCase() });
+  if (!customer || !customer.stripeCustomerId || !customer.cardPmId) return 'skip'; // no saved card → manual billing path
+
+  // Respect the per-subscription auto-renew toggle.
+  const sub = await Subscription.findOne({
+    customerId: customer._id,
+    $or: [
+      ...(r.subscriptionId ? [{ subscriptionId: r.subscriptionId }] : []),
+      { googleWorkspaceSkuId: String(r.skuId) },
+    ],
+  });
+  if (sub && sub.autoRenew === false) return 'skip';
+
+  const attempts = r.autoChargeAttempts || 0;
+  if (attempts >= 3) return 'exhausted';
+
+  // Price: the customer's subscription record, else the plan price (covers Workspace, Voice, add-ons).
+  let monthly = sub && Number(sub.monthlyPrice) > 0 ? Number(sub.monthlyPrice) : 0;
+  const seats = sub && Number(sub.seats) > 0 ? Number(sub.seats) : 1;
+  if (!monthly) {
+    const planDoc = await Plan.findOne({ skuId: String(r.skuId) });
+    if (planDoc && Number(planDoc.monthlyPrice) > 0) monthly = Number(planDoc.monthlyPrice);
+  }
+  if (!monthly) {
+    r.autoChargeAttempts = attempts + 1;
+    r.lastAutoChargeAt = now;
+    r.lastAutoChargeError = 'No price configured for this SKU — cannot auto-charge.';
+    await r.save();
+    console.warn(`[auto-renew] NO PRICE for ${r.domain} ${r.skuId} — attempt ${r.autoChargeAttempts}/3`);
+    return r.autoChargeAttempts >= 3 ? 'exhausted' : 'retry';
+  }
+
+  // Same tax/fee treatment as manual checkouts.
+  const taxed = await applyTaxAndFee(monthly * seats);
+  const amount = Math.round(taxed.total * 100) / 100;
+
+  try {
+    const stripe = await getStripeForMode();
+    const sd = await PaymentSettings.findOne({ singleton: 'main' });
+    const isTest = (sd?.stripeMode || 'test') !== 'live';
+    const pi = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100),
+      currency: 'usd',
+      customer: customer.stripeCustomerId,
+      payment_method: customer.cardPmId,
+      off_session: true,
+      confirm: true,
+      description: `Auto-renewal: ${skuName(r.skuId) || r.skuId} for ${r.domain}`,
+      metadata: { domain: r.domain, skuId: String(r.skuId), portalCustomerId: String(customer._id), autoRenew: 'true' },
+    });
+    if (pi.status !== 'succeeded') throw new Error(`Payment not completed (status: ${pi.status})`);
+
+    // Record it like a renewal payment (already paid — no checkout/webhook involved).
+    try {
+      await Payment.create({
+        customerId: customer._id,
+        customerEmail: customer.businessEmail,
+        domain: r.domain,
+        orderType: 'workspace',
+        amount,
+        subtotal: taxed.subtotal,
+        tax: taxed.tax,
+        fee: taxed.fee,
+        isRenewal: true,
+        renewalSkuId: String(r.skuId),
+        method: 'stripe',
+        status: 'paid',
+        providerRef: pi.id,
+        isTest,
+        paidAt: now,
+      });
+    } catch (payErr) { console.error('[auto-renew] Payment record failed:', payErr.message); }
+
+    applyPaymentToCurrentCycle(r, now);
+    await r.save();
+    console.log(`[auto-renew] CHARGED $${amount.toFixed(2)} — ${r.domain} ${r.skuId} (${pi.id})`);
+    try {
+      const html = emailShell('Subscription auto-renewed', `
+        <p>Hi ${customer.firstName || customer.username || 'there'},</p>
+        <p>Your saved card was charged <strong>$${amount.toFixed(2)}</strong> to renew <strong>${skuName(r.skuId) || r.skuId}</strong> for <strong>${r.domain}</strong>.</p>
+        <p>Your service continues without interruption. Thank you!</p>`);
+      await sendEmail(customer.businessEmail, `Auto-renewed: ${skuName(r.skuId) || 'subscription'} · ${r.domain}`, html);
+    } catch (_) { }
+    return 'paid';
+  } catch (e) {
+    r.autoChargeAttempts = attempts + 1;
+    r.lastAutoChargeAt = now;
+    r.lastAutoChargeError = e.message;
+    await r.save();
+    console.warn(`[auto-renew] CHARGE FAILED (${r.autoChargeAttempts}/3) ${r.domain} ${r.skuId}: ${e.message}`);
+    try {
+      const left = 3 - r.autoChargeAttempts;
+      const html = emailShell('Auto-renewal payment failed', `
+        <p>Hi ${customer.firstName || customer.username || 'there'},</p>
+        <p>We tried to charge your saved card for <strong>${skuName(r.skuId) || r.skuId}</strong> (${r.domain}) but the payment did not go through.</p>
+        <p>${left > 0
+          ? `We will automatically retry ${left} more time${left === 1 ? '' : 's'}. Please update your card or pay manually in the portal to avoid suspension.`
+          : 'All retries failed, so your subscriptions have been suspended. Please pay in the portal (or update your card) to reactivate your service.'}</p>`);
+      await sendEmail(customer.businessEmail, `Payment failed — action needed for ${r.domain}`, html);
+    } catch (_) { }
+    return r.autoChargeAttempts >= 3 ? 'exhausted' : 'retry';
+  }
+}
+
+// After 3 failed card charges: suspend ALL of the customer's subscriptions (every domain they own),
+// in Google and in our records. They stay suspended until a payment is received.
+async function suspendAllCustomerSubscriptions(domain, now) {
+  const dom = (domain || '').toLowerCase();
+  const customer = await Customer.findOne({ domain: dom });
+  const domains = new Set([dom]);
+  if (customer) {
+    const orders = await WorkspaceOrder.find({ customerId: customer._id });
+    for (const o of orders) {
+      const d = (o.organization?.domain || '').toLowerCase();
+      if (d) domains.add(d);
+    }
+  }
+  for (const d of domains) {
+    const recs = await SubBilling.find({ domain: d, billingStatus: { $ne: 'suspended' }, whitelisted: { $ne: true } });
+    for (const rec of recs) {
+      try {
+        await setSubscriptionState(rec.account, rec.domain, rec.skuId, 'suspend', rec.subscriptionId);
+      } catch (e) {
+        console.error('[auto-renew] Google suspend failed:', rec.domain, rec.skuId, e.message);
+      }
+      rec.billingStatus = 'suspended';
+      rec.suspendedAt = now;
+      await rec.save();
+      console.log('[auto-renew] SUSPENDED (card failed 3x):', rec.domain, rec.skuId);
+    }
+  }
+  if (customer) {
+    await Subscription.updateMany(
+      { customerId: customer._id, status: 'active' },
+      { $set: { status: 'suspended', updatedAt: now } }
+    );
+  }
+}
+
 // The 29-day check for ALL tracked subscriptions (existing + new).
 async function runSubscriptionBillingCheck() {
   const now = new Date();
@@ -3616,6 +3925,28 @@ async function runSubscriptionBillingCheck() {
 
     // RULE 5: due reached AND current cycle unpaid → suspend (if not already).
     if (r.billingStatus !== 'suspended') {
+      // AUTO-RENEW: before suspending, try charging the customer's saved card (max 3 daily attempts).
+      let chargeOutcome = 'skip';
+      try { chargeOutcome = await attemptAutoRenewCharge(r, now); }
+      catch (e) { console.error('[auto-renew] unexpected error:', r.domain, r.skuId, e.message); }
+
+      if (chargeOutcome === 'paid') {
+        results.autoCharged = results.autoCharged || [];
+        results.autoCharged.push(`${r.domain} (${r.skuId})`);
+        continue; // cycle is paid now — the next run advances it via the paid branch above
+      }
+      if (chargeOutcome === 'retry') {
+        continue; // charge failed but retries remain — hold off suspension until 3 failures
+      }
+      if (chargeOutcome === 'exhausted') {
+        // Card failed 3 times → suspend ALL of this customer's subscriptions until they pay.
+        try { await suspendAllCustomerSubscriptions(r.domain, now); } catch (e) { console.error('[auto-renew] suspend-all failed:', r.domain, e.message); }
+        results.suspended.push(`${r.domain} (ALL SUBSCRIPTIONS — card failed 3x)`);
+        try { await sendSuspensionEmail(await emailForDomain(r.domain), r.domain); } catch (_) { }
+        continue;
+      }
+
+      // 'skip' → no saved card / auto-renew off: original manual-billing suspension.
       try {
         await setSubscriptionState(r.account, r.domain, r.skuId, 'suspend', r.subscriptionId);
         r.billingStatus = 'suspended';

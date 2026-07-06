@@ -5610,14 +5610,22 @@ const CustomerSubscriptions = () => {
   const [seatOpen, setSeatOpen] = useState({});   // per-sku: is the inline counter open
   const [seatBusy, setSeatBusy] = useState(false);
   const [seatMsg, setSeatMsg] = useState('');
+  const [card, setCard] = useState(null);       // { hasCard, brand, last4 } | null while loading
+  const [cardBusy, setCardBusy] = useState(false);
+  const [cardMsg, setCardMsg] = useState('');
 
   useEffect(() => {
     (async () => {
       try {
-        const [subRes, domRes] = await Promise.all([
+        const [subRes, domRes, cardRes] = await Promise.all([
           axios.get(`${API_URL}/customer/my-subscriptions`).catch((e) => ({ error: e })),
           axios.get(`${API_URL}/customer/my-domains`).catch(() => ({ data: { domains: [] } })),
+          axios.get(`${API_URL}/customer/billing/card`).catch(() => ({ data: { hasCard: false } })),
         ]);
+        setCard(cardRes.data || { hasCard: false });
+        if (new URLSearchParams(window.location.search).get('card') === 'saved') {
+          setCardMsg((cardRes.data?.hasCard) ? '✓ Your card was saved. You can now turn on auto-renew.' : 'Card saved — it may take a moment to appear. Refresh if it doesn\'t show.');
+        }
         if (subRes.error) {
           const raw = subRes.error?.response?.data?.error || '';
           // Hide confusing raw Google errors (e.g. "transfer token does not exist") — show a friendly message.
@@ -5663,9 +5671,44 @@ const CustomerSubscriptions = () => {
     finally { setRenewBusy(false); }
   };
 
-  const toggleAutoRenew = async (sub, currentVal) => {
+  const addCard = async () => {
+    setCardBusy(true); setCardMsg('');
     try {
-      const newVal = !currentVal;
+      const r = await axios.post(`${API_URL}/customer/billing/setup-card`, {});
+      if (r.data.checkoutUrl) window.location.href = r.data.checkoutUrl;
+      else setCardMsg('Could not start the card setup. Please try again or contact Admin.');
+    } catch (e) {
+      setCardMsg(e?.response?.data?.error || 'Could not start the card setup. Please contact Admin.');
+    } finally { setCardBusy(false); }
+  };
+
+  const removeCard = async () => {
+    if (!window.confirm('Remove your saved card? Auto-renew will be turned OFF for all subscriptions.')) return;
+    setCardBusy(true); setCardMsg('');
+    try {
+      await axios.post(`${API_URL}/customer/billing/remove-card`, {});
+      setCard({ hasCard: false });
+      setCardMsg('Card removed. Auto-renew has been turned off.');
+      try {
+        const subRes = await axios.get(`${API_URL}/customer/my-subscriptions`);
+        if (subRes && subRes.data) setData(subRes.data);
+      } catch (_) {}
+    } catch (e) {
+      setCardMsg(e?.response?.data?.error || 'Could not remove the card.');
+    } finally { setCardBusy(false); }
+  };
+
+  const toggleAutoRenew = async (sub, currentVal) => {
+    const newVal = !currentVal;
+
+    // Auto-renew charges the saved card — without a card it must stay OFF.
+    if (newVal && !(card && card.hasCard)) {
+      const addNow = window.confirm('Please enable card payment for auto renewals.\n\nAuto-renew charges your saved card automatically. Add a card now?\n\n(If you cannot add a card, please contact Admin.)');
+      if (addNow) addCard();
+      return;
+    }
+
+    try {
       setData(prev => {
         if (!prev || !prev.subscriptions) return prev;
         return {
@@ -5686,7 +5729,11 @@ const CustomerSubscriptions = () => {
       });
     } catch (e) {
       console.error('Failed to toggle auto-renew', e);
-      alert('Could not update auto-renew preference: ' + (e?.response?.data?.error || e.message));
+      if (e?.response?.data?.needCard) {
+        alert('Please enable card payment for auto renewals — add a card first. If you cannot add a card, please contact Admin.');
+      } else {
+        alert('Could not update auto-renew preference: ' + (e?.response?.data?.error || e.message));
+      }
       // Re-fetch subscriptions
       try {
         const subRes = await axios.get(`${API_URL}/customer/my-subscriptions`);
@@ -5704,6 +5751,37 @@ const CustomerSubscriptions = () => {
     <div className="section">
       <h2>📊 My Subscriptions</h2>
       {error && <div style={{ background: '#fff7ed', color: '#9a3412', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 14 }}>{error}</div>}
+
+      {/* Saved card for auto-renewal */}
+      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '14px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>💳 Auto-Renew Payment Card</div>
+          {card?.hasCard ? (
+            <div style={{ fontSize: 13, color: '#334155' }}>
+              {(card.brand || 'Card').toUpperCase()} •••• {card.last4 || '????'} — used to automatically charge your subscription renewals (Workspace, Voice &amp; add-ons).
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: '#64748b' }}>
+              No card saved. Add a card to turn on auto-renew — renewals are then charged automatically on your billing date.
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={addCard} disabled={cardBusy} className="btn btn-primary" style={{ padding: '8px 14px', fontSize: 13 }}>
+            {cardBusy ? 'Please wait…' : (card?.hasCard ? 'Replace Card' : 'Add Card')}
+          </button>
+          {card?.hasCard && (
+            <button onClick={removeCard} disabled={cardBusy} className="btn btn-secondary" style={{ padding: '8px 14px', fontSize: 13 }}>
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+      {cardMsg && (
+        <div style={{ background: cardMsg.startsWith('✓') ? '#f0fdf4' : '#fff7ed', color: cardMsg.startsWith('✓') ? '#15803d' : '#9a3412', border: cardMsg.startsWith('✓') ? '1px solid #bbf7d0' : '1px solid #fed7aa', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13 }}>
+          {cardMsg}
+        </div>
+      )}
 
       {/* Google Workspace + add-on subscriptions (each billed separately) */}
       <h3 style={{ marginTop: 8 }}>Subscriptions</h3>
