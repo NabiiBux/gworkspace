@@ -7559,6 +7559,185 @@ app.post('/api/admin/subscriptions/bulk-attach', authenticateCustomer, requireAd
   }
 });
 
+// Admin: BULK attach with portal login — rows of "domain, email, password". For each row:
+// auto-detect the reseller account, find-or-create the portal customer, link the domain,
+// and sync all its Google subscriptions into the customer's dashboard + billing.
+app.post('/api/admin/customers/bulk-attach-with-login', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    if (rows.length === 0) {
+      return res.status(400).json({ error: 'Please provide at least one row of domain, email, and password.' });
+    }
+
+    const results = [];
+
+    for (const row of rows) {
+      const dom = (row.domain || '').toLowerCase().trim();
+      const emailClean = (row.email || '').toLowerCase().trim();
+      const passwordClean = (row.password || '').trim();
+
+      if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) {
+        results.push({ ok: false, domain: dom || '—', email: emailClean || '—', error: 'Invalid domain name format.' });
+        continue;
+      }
+      if (!emailClean || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailClean)) {
+        results.push({ ok: false, domain: dom, email: emailClean || '—', error: 'Invalid email address format.' });
+        continue;
+      }
+
+      try {
+        // Auto-detect the reseller account by listing subscriptions across PK and USA.
+        let resolvedAccount = null;
+        let googleSubs = [];
+        const lookupErrors = [];
+
+        for (const acct of ['pk', 'usa']) {
+          let auth;
+          try {
+            auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth();
+          } catch (err) {
+            lookupErrors.push(`${acct.toUpperCase()}: auth failed (${err.message})`);
+            continue;
+          }
+
+          const reseller = google.reseller({ version: 'v1', auth });
+          try {
+            const listResp = await reseller.subscriptions.list({ customerId: dom });
+            const subs = listResp.data.subscriptions || [];
+            if (subs.length > 0) {
+              resolvedAccount = acct;
+              googleSubs = subs;
+              break;
+            }
+            // Customer may exist with no subscriptions.
+            try {
+              await reseller.customers.get({ customerId: dom });
+              resolvedAccount = acct;
+              googleSubs = [];
+              break;
+            } catch (_) { }
+          } catch (err) {
+            console.warn(`[bulk-attach-login] ${dom} ${acct.toUpperCase()}: HTTP ${err?.code || '?'} — ${err?.errors?.[0]?.message || err?.message || 'unknown error'}`);
+            const verdict = await classifyResellerLookupError(acct, reseller, err);
+            if (verdict.error) lookupErrors.push(`${acct.toUpperCase()}: ${verdict.error}`);
+          }
+        }
+
+        if (!resolvedAccount) {
+          throw new Error(`Domain not found on either PK or USA reseller account.${lookupErrors.length ? ' ' + lookupErrors.join(' | ') : ''}`);
+        }
+
+        // Find or create the portal customer by businessEmail.
+        let cust = await Customer.findOne({ businessEmail: emailClean });
+        const hashedPassword = passwordClean ? await bcrypt.hash(passwordClean, 10) : undefined;
+
+        if (cust) {
+          cust.domain = dom;
+          cust.account = resolvedAccount;
+          if (hashedPassword) cust.password = hashedPassword;
+          await cust.save();
+        } else {
+          cust = await Customer.create({
+            username: dom.split('.')[0],
+            businessEmail: emailClean,
+            domain: dom,
+            account: resolvedAccount,
+            password: hashedPassword || (await bcrypt.hash('DefaultPass123!', 10)),
+            role: 'customer',
+            status: 'active',
+            firstName: 'Admin',
+            lastName: 'User',
+          });
+        }
+
+        // Sync the Google subscriptions into the portal + billing records.
+        let syncedCount = 0;
+        for (const s of googleSubs) {
+          const planDoc = await Plan.findOne({ skuId: String(s.skuId) });
+          const planName = planDoc ? planDoc.name : (skuName(s.skuId) || s.skuId);
+          const monthlyPrice = planDoc ? planDoc.monthlyPrice : 6.00;
+          const numSeats = s.seats?.numberOfSeats ?? s.seats?.licensedNumberOfSeats ?? 1;
+
+          const orderNumber = `WS-BULK-ATTACH-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          const order = await WorkspaceOrder.create({
+            customerId: cust._id,
+            orderNumber,
+            type: 'workspace',
+            planType: 'flexible',
+            account: resolvedAccount,
+            plan: { id: planDoc ? planDoc.planId : 'business_starter', name: planName, monthlyPrice: monthlyPrice },
+            seats: numSeats,
+            monthlyTotal: monthlyPrice * numSeats,
+            organization: { domain: dom, name: dom.split('.')[0] },
+            contact: { firstName: cust.firstName || 'Admin', lastName: cust.lastName || 'User', email: cust.businessEmail },
+            status: 'provisioned',
+            googleProvisioned: true,
+          });
+
+          await Subscription.findOneAndUpdate(
+            { customerId: cust._id, googleWorkspaceSkuId: String(s.skuId) },
+            {
+              customerId: cust._id,
+              orderId: order._id,
+              subscriptionId: s.subscriptionId,
+              type: 'workspace',
+              plan: planName,
+              seats: numSeats,
+              monthlyPrice: monthlyPrice,
+              status: s.status === 'ACTIVE' ? 'active' : 'suspended',
+              googleWorkspaceSkuId: String(s.skuId),
+              // Auto-renew only turns on when the customer saves a card.
+              autoRenew: !!(cust.stripeCustomerId && cust.cardPmId),
+              nextBillingDate: addDays(new Date(), BILLING_CYCLE_DAYS),
+              updatedAt: new Date()
+            },
+            { upsert: true, new: true }
+          );
+
+          // Seed/update SubBilling so the 29-day cycle tracks it.
+          try {
+            let rec = await SubBilling.findOne({ domain: dom, skuId: String(s.skuId) });
+            if (!rec) {
+              rec = new SubBilling({ account: resolvedAccount, domain: dom, skuId: String(s.skuId), subscriptionId: s.subscriptionId });
+              startNewBillingCycle(rec, new Date());
+            } else if (s.subscriptionId) {
+              rec.subscriptionId = s.subscriptionId;
+            }
+            applyPaymentToCurrentCycle(rec, new Date());
+            await rec.save();
+          } catch (billingErr) {
+            console.error(`[bulk-attach-login] SubBilling seeding failed for ${dom}:`, billingErr.message);
+          }
+
+          syncedCount++;
+        }
+
+        results.push({
+          ok: true,
+          domain: dom,
+          email: emailClean,
+          account: resolvedAccount.toUpperCase(),
+          syncedCount,
+          note: `Attached and synced ${syncedCount} subscription(s) on ${resolvedAccount.toUpperCase()}`
+        });
+      } catch (err) {
+        results.push({ ok: false, domain: dom, email: emailClean, error: err.message });
+      }
+    }
+
+    const successCount = results.filter(r => r.ok).length;
+    res.json({
+      success: true,
+      total: rows.length,
+      attached: successCount,
+      failed: rows.length - successCount,
+      results
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/admin/customers/bulk-apply', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const { customerIds, planId, seats, actionType } = req.body;
