@@ -4953,6 +4953,15 @@ const CustomerPayments = () => {
 
   const paidOrderIds = new Set(payments.filter(p => p.status === 'paid').map(p => String(p.orderId)));
 
+  // Orders that genuinely need the customer to pay. Exclude orders that are already provisioned
+  // or were attached by an admin (bulk/manual attach creates a provisioned order with no Payment) —
+  // those are existing Google subscriptions, not something to pay for here.
+  const awaitingOrders = orders.filter(o =>
+    !paidOrderIds.has(String(o._id)) &&
+    !o.googleProvisioned &&
+    !['provisioned', 'test_paid', 'cancelled'].includes(o.status)
+  );
+
   if (loading) return <div className="loading">Loading your payments…</div>;
 
   return (
@@ -4963,9 +4972,9 @@ const CustomerPayments = () => {
       {msg && <div style={{ background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a', padding: '12px 16px', borderRadius: 10, marginBottom: 20 }}>{msg}</div>}
 
       <h3>Orders awaiting payment</h3>
-      {orders.filter(o => !paidOrderIds.has(String(o._id))).length === 0 ? (
+      {awaitingOrders.length === 0 ? (
         <div style={{ ...card, color: MUTE }}>No orders awaiting payment.</div>
-      ) : orders.filter(o => !paidOrderIds.has(String(o._id))).map(o => (
+      ) : awaitingOrders.map(o => (
         <div key={o._id} style={{ ...card, marginBottom: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <div>
