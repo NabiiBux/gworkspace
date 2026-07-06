@@ -2558,6 +2558,10 @@ const AdminCustomersSection = () => {
     setBulkLookupBusy(true); setAttachMsg(''); setBulkLookupResult(null); setBulkSelectedSubs([]);
     try {
       const r = await axios.post(`${API_URL}/admin/bulk-lookup-domains`, { domains: list });
+      if (!r.data || !r.data.results) {
+        setAttachMsg('Bulk lookup returned no results — the backend may be outdated. Redeploy the backend from the main branch.');
+        return;
+      }
       setBulkLookupResult(r.data.results);
       
       // Auto-select active subscriptions by default
@@ -2586,7 +2590,11 @@ const AdminCustomersSection = () => {
       });
       setBulkSelectedSubs(autoSelected);
     } catch (e) {
-      setAttachMsg(e?.response?.data?.error || 'Bulk lookup failed.');
+      if (e?.response?.status === 404) {
+        setAttachMsg('Bulk lookup is not available on the deployed backend (404). The backend server is running an older version — redeploy it from the main branch, then try again.');
+      } else {
+        setAttachMsg(e?.response?.data?.error || 'Bulk lookup failed.');
+      }
     } finally {
       setBulkLookupBusy(false);
     }
@@ -2611,7 +2619,11 @@ const AdminCustomersSection = () => {
       setAttachMsg(`✓ Successfully attached ${r.data.attached} subscription(s).`);
       setTimeout(() => { setAttaching(null); load(); }, 1500);
     } catch (e) {
-      setAttachMsg(e?.response?.data?.error || 'Bulk attach failed.');
+      if (e?.response?.status === 404) {
+        setAttachMsg('Bulk attach is not available on the deployed backend (404). The backend server is running an older version — redeploy it from the main branch, then try again.');
+      } else {
+        setAttachMsg(e?.response?.data?.error || 'Bulk attach failed.');
+      }
     } finally {
       setAttachBusy(false);
     }
