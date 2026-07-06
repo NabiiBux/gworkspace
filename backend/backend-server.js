@@ -8622,6 +8622,72 @@ app.post('/api/admin/renewal-retry', authenticateCustomer, requireAdmin, async (
   }
 });
 
+// Admin: list payments stuck in 'pending' for longer than N minutes (default 10). These are
+// usually missed provider webhooks — the customer paid but the server was never notified.
+app.get('/api/admin/stuck-payments', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const minutes = Math.max(1, Number(req.query.minutes) || 10);
+    const cutoff = new Date(Date.now() - minutes * 60000);
+    const pend = await Payment.find({ status: 'pending', createdAt: { $lte: cutoff } }).sort({ createdAt: -1 }).limit(200);
+    const payments = pend.map((p) => ({
+      id: String(p._id),
+      orderNumber: p.orderNumber || null,
+      domain: p.domain || null,
+      email: p.customerEmail || null,
+      orderType: p.orderType,
+      isRenewal: !!p.isRenewal,
+      method: p.method,
+      amount: p.amount,
+      isTest: !!p.isTest,
+      createdAt: p.createdAt,
+      ageMinutes: Math.floor((Date.now() - new Date(p.createdAt).getTime()) / 60000),
+    }));
+    res.json({ minutes, count: payments.length, payments });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin: verify a pending payment directly with the provider and, if truly paid, apply it
+// (provision/reactivate). Works for any payment type, not just renewals.
+app.post('/api/admin/payment-verify', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { paymentId } = req.body;
+    if (!paymentId) return res.status(400).json({ error: 'paymentId is required.' });
+    let payment = await Payment.findById(paymentId).catch(() => null);
+    if (!payment) return res.status(404).json({ error: 'Payment not found.' });
+    if (payment.status === 'paid') return res.json({ success: true, alreadyPaid: true, message: 'This payment is already marked paid.' });
+    if (payment.isTest) return res.status(400).json({ error: 'This was a TEST-mode payment — it does not affect real orders.' });
+
+    let confirmed = false, provStatus = payment.status;
+    try {
+      if (payment.method === 'stripe' && payment.providerRef) {
+        const stripe = await getStripeForMode();
+        const session = await stripe.checkout.sessions.retrieve(payment.providerRef);
+        provStatus = session.payment_status || 'pending';
+        confirmed = session.payment_status === 'paid';
+      } else if (payment.method === 'nicky') {
+        const result = await checkNickyPaymentStatus(payment); // marks paid + provisions if Finished
+        provStatus = result.status || 'pending';
+        confirmed = !!result.paid;
+        payment = (await Payment.findById(payment._id)) || payment;
+      } else {
+        return res.status(400).json({ error: 'This payment has no provider reference to verify against.' });
+      }
+    } catch (verErr) {
+      return res.status(502).json({ error: `Could not verify with ${payment.method}: ${verErr.message}` });
+    }
+
+    if (payment.status === 'paid') {
+      return res.json({ success: true, resolved: true, message: 'Payment confirmed with the provider and applied.' });
+    }
+    if (!confirmed) {
+      return res.json({ success: false, paid: false, status: provStatus, message: `Not paid at ${payment.method} (status: ${provStatus}). The customer's payment did not complete.` });
+    }
+    // Confirmed paid at the provider (Stripe path) but not yet applied → apply now.
+    await markPaidAndProvision(payment);
+    res.json({ success: true, resolved: true, message: 'Payment verified with the provider and applied.' });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
 // Admin: check the USA account connection + scopes.
 app.get('/api/admin/usa-account-check', authenticateCustomer, requireAdmin, async (req, res) => {
   try {

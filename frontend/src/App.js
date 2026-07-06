@@ -3862,6 +3862,26 @@ const AdminPaymentsSection = () => {
   const [bulkUnsuspendResult, setBulkUnsuspendResult] = useState(null);
   const [bulkUnsuspendBusy, setBulkUnsuspendBusy] = useState(false);
 
+  // Payments stuck 'pending' (likely missed provider webhooks)
+  const [stuck, setStuck] = useState([]);
+  const [stuckBusy, setStuckBusy] = useState('');
+  const [stuckMsg, setStuckMsg] = useState('');
+  const loadStuck = async () => {
+    try { const r = await axios.get(`${API_URL}/admin/stuck-payments?minutes=10`); setStuck(r.data.payments || []); }
+    catch (_) { }
+  };
+  const verifyStuck = async (id) => {
+    setStuckBusy(id); setStuckMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/admin/payment-verify`, { paymentId: id });
+      setStuckMsg((r.data.success ? '✓ ' : '✗ ') + (r.data.message || 'Done.'));
+      await loadStuck();
+      load();
+    } catch (e) {
+      setStuckMsg('✗ ' + (e?.response?.data?.error || 'Verification failed.'));
+    } finally { setStuckBusy(''); }
+  };
+
   const runBulkUnsuspend = async () => {
     const domains = bulkUnsuspendDomains.split(/[\s,]+/).map(d => d.trim().toLowerCase()).filter(Boolean);
     if (!domains.length) { setSubBillingMsg('Paste at least one domain.'); return; }
@@ -4020,6 +4040,7 @@ const AdminPaymentsSection = () => {
       setTotalPaid(p.data.totalPaid || 0);
     } catch (_) { } finally { setLoading(false); }
     loadBalance();
+    loadStuck();
   };
   useEffect(() => { load(); }, []);
 
@@ -4092,6 +4113,43 @@ const AdminPaymentsSection = () => {
   return (
     <div className="section">
       <h2>💳 Payments</h2>
+
+      {/* Stuck payments alert — pending > 10 min usually means a missed provider webhook */}
+      {stuck.length > 0 && (
+        <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 12, padding: 16, marginBottom: 18 }}>
+          <div style={{ fontWeight: 700, color: '#9a3412', marginBottom: 4 }}>
+            ⚠️ {stuck.length} payment{stuck.length === 1 ? '' : 's'} stuck as “pending” for 10+ minutes
+          </div>
+          <div style={{ fontSize: 13, color: '#9a3412', marginBottom: 10 }}>
+            These usually mean the customer paid but the Stripe/Nicky webhook was missed. Click “Verify &amp; resolve” to check the provider directly and apply the payment if it went through.
+          </div>
+          {stuckMsg && <div style={{ fontSize: 13, marginBottom: 10, color: stuckMsg.startsWith('✓') ? '#166534' : '#b42318', fontWeight: 600 }}>{stuckMsg}</div>}
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', background: '#fff', borderRadius: 8 }}>
+              <thead><tr style={{ textAlign: 'left', color: '#9a3412' }}>
+                <th style={{ padding: '6px 10px' }}>Order #</th><th>Domain</th><th>Type</th><th>Method</th><th>Amount</th><th>Age</th><th></th>
+              </tr></thead>
+              <tbody>
+                {stuck.map(p => (
+                  <tr key={p.id} style={{ borderTop: '1px solid #fee7d1' }}>
+                    <td style={{ padding: '6px 10px', fontFamily: 'monospace', fontSize: 12 }}>{p.orderNumber || p.id.slice(-8)}</td>
+                    <td>{p.domain || p.email || '—'}</td>
+                    <td>{p.isRenewal ? 'renewal' : p.orderType}{p.isTest ? ' (test)' : ''}</td>
+                    <td>{p.method}</td>
+                    <td>${Number(p.amount || 0).toFixed(2)}</td>
+                    <td>{p.ageMinutes >= 60 ? `${Math.floor(p.ageMinutes / 60)}h ${p.ageMinutes % 60}m` : `${p.ageMinutes}m`}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button onClick={() => verifyStuck(p.id)} disabled={stuckBusy === p.id || p.isTest} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>
+                        {stuckBusy === p.id ? '…' : 'Verify & resolve'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
         <button className={`btn ${tab === 'settings' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('settings')}>Settings</button>
