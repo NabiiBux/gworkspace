@@ -9580,6 +9580,22 @@ const AdminOrderWorkspace = () => {
     finally { setRetryBusy(''); }
   };
 
+  // Retry a subscription RENEWAL (RN-...) that was paid but didn't reactivate/apply.
+  const [renewNum, setRenewNum] = useState('');
+  const [renewBusy, setRenewBusy] = useState(false);
+  const [renewMsg, setRenewMsg] = useState('');
+  const retryRenewal = async () => {
+    const num = renewNum.trim();
+    if (!num) { setRenewMsg('Enter the renewal order number (RN-...).'); return; }
+    setRenewBusy(true); setRenewMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/admin/renewal-retry`, { orderNumber: num });
+      setRenewMsg('✓ ' + (r.data.message || 'Renewal re-applied.'));
+    } catch (e) {
+      setRenewMsg('✗ ' + (e?.response?.data?.error || 'Retry failed.'));
+    } finally { setRenewBusy(false); }
+  };
+
   const box = { background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #e5e7eb', marginBottom: 20 };
   const inp = { width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', boxSizing: 'border-box' };
   const lab = { fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 };
@@ -9743,6 +9759,14 @@ example3.com, 3, Acme Inc, admin`}</pre>
           </table>
         </div>
       )}
+
+      <h2 style={{ marginTop: 32 }}>🔄 Retry a subscription renewal</h2>
+      <p style={{ color: '#5b6075' }}>Enter a renewal order number (e.g. <code>RN-1783347896025</code>) that was paid but the subscription didn't reactivate. This re-applies the payment to the billing cycle and reactivates it in Google (if it was suspended by us). If Google itself suspended it, it will tell you.</p>
+      {renewMsg && <div style={{ padding: '8px 12px', borderRadius: 8, marginBottom: 12, background: renewMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: renewMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{renewMsg}</div>}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 24, flexWrap: 'wrap' }}>
+        <input style={{ ...inp, maxWidth: 360 }} value={renewNum} onChange={e => setRenewNum(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') retryRenewal(); }} placeholder="RN-..." />
+        <button onClick={retryRenewal} disabled={renewBusy} className="btn btn-secondary">{renewBusy ? 'Retrying…' : 'Retry renewal'}</button>
+      </div>
 
       <h2 style={{ marginTop: 32 }}>🌐 Domain orders</h2>
       <p style={{ color: '#5b6075' }}>Search domain purchases by order number (DM-...) or domain. Retry registration for orders that were paid but not registered.</p>
