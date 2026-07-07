@@ -289,6 +289,20 @@ const BalanceTransactionSchema = new mongoose.Schema({
 });
 const BalanceTransaction = mongoose.model('BalanceTransaction', BalanceTransactionSchema);
 
+// Per-domain Google Voice authorization. Admin approves specific Voice plan SKUs for a
+// customer on a specific domain. A new/second domain needs its own approval.
+const VoiceApprovalSchema = new mongoose.Schema({
+  customerId: { type: mongoose.Schema.Types.ObjectId, index: true },
+  domain: { type: String, index: true },
+  plans: [String],           // authorized Voice SKUs, e.g. ['1010330003']
+  updatedAt: { type: Date, default: Date.now },
+});
+VoiceApprovalSchema.index({ customerId: 1, domain: 1 }, { unique: true });
+const VoiceApproval = mongoose.model('VoiceApproval', VoiceApprovalSchema);
+
+// The self-serve Voice plans (Starter / Standard / Premier).
+const VOICE_PLAN_SKUS = ['1010330003', '1010330004', '1010330002'];
+
 // Credit or debit a customer's balance atomically and write a ledger entry. `amount` is the
 // positive magnitude; `delta` is +amount (credit) or -amount (debit/withdrawal). Never allows
 // the balance to go below zero. Returns { balance, txn }.
@@ -5704,44 +5718,196 @@ app.post('/api/admin/withdrawal-resolve', authenticateCustomer, requireAdmin, as
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Customer: Google Voice eligibility. Eligible = admin-approved AND has a verified domain.
+// Helper: list a customer's provisioned Workspace domains + which are domain-verified.
+async function customerWorkspaceDomains(customerId) {
+  const wos = await WorkspaceOrder.find({ customerId, 'organization.domain': { $exists: true, $ne: '' } });
+  const map = {};
+  for (const o of wos) {
+    const d = (o.organization?.domain || '').toLowerCase();
+    if (!d) continue;
+    if (!map[d]) map[d] = { domain: d, verified: false };
+    if (o.domainVerified) map[d].verified = true;
+  }
+  return Object.values(map);
+}
+
+// Voice plan catalog (SKU → name + admin price), for the plans we allow self-serve.
+async function voicePlanCatalog() {
+  const plans = await Plan.find({ skuId: { $in: VOICE_PLAN_SKUS } });
+  const priceBySku = {}; plans.forEach((p) => { if (p.skuId) priceBySku[String(p.skuId)] = p.monthlyPrice; });
+  return VOICE_PLAN_SKUS.map((sku) => ({ skuId: sku, name: (SKU_CATALOG[sku]?.name || sku), price: priceBySku[sku] ?? null }));
+}
+
+// Customer: per-domain Google Voice eligibility + which plans are approved for each domain.
 app.get('/api/customer/voice-eligibility', authenticateCustomer, async (req, res) => {
   try {
-    const me = await Customer.findById(req.customerId).select('voiceApproved domain');
-    // Domain is "verified" if any of the customer's workspace orders is domainVerified.
-    const verifiedOrder = await WorkspaceOrder.findOne({ customerId: req.customerId, domainVerified: true }).select('organization.domain');
-    const domainVerified = !!verifiedOrder;
-    const approved = !!me?.voiceApproved;
+    const domains = await customerWorkspaceDomains(req.customerId);
+    const approvals = await VoiceApproval.find({ customerId: req.customerId });
+    const approvalByDomain = {}; approvals.forEach((a) => { approvalByDomain[a.domain] = a.plans || []; });
+    const catalog = await voicePlanCatalog();
+
+    const perDomain = domains.map((d) => {
+      const approvedPlans = approvalByDomain[d.domain] || [];
+      return {
+        domain: d.domain,
+        domainVerified: d.verified,
+        approvedPlans,
+        eligible: approvedPlans.length > 0 && d.verified,
+        plans: catalog.filter((p) => approvedPlans.includes(p.skuId)),
+      };
+    });
+    const anyApproved = perDomain.some((d) => d.approvedPlans.length > 0);
+    const anyEligible = perDomain.some((d) => d.eligible);
+    res.json({ approved: anyApproved, eligible: anyEligible, domains: perDomain, catalog });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin: read a customer's domains + current Voice approvals + the plan catalog.
+app.get('/api/admin/customers/:id/voice-approvals', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const cust = await Customer.findById(req.params.id);
+    if (!cust) return res.status(404).json({ error: 'Customer not found.' });
+    const domains = await customerWorkspaceDomains(cust._id);
+    const approvals = await VoiceApproval.find({ customerId: cust._id });
+    const approvalByDomain = {}; approvals.forEach((a) => { approvalByDomain[a.domain] = a.plans || []; });
+    const catalog = await voicePlanCatalog();
     res.json({
-      approved,
-      domainVerified,
-      eligible: approved && domainVerified,
-      verifiedDomain: verifiedOrder?.organization?.domain || me?.domain || null,
-      reason: !approved ? 'Your account is not yet approved for Google Voice. Please contact Admin.'
-        : !domainVerified ? 'Verify your domain first to unlock Google Voice ordering.'
-        : null,
+      email: cust.businessEmail,
+      catalog,
+      domains: domains.map((d) => ({ domain: d.domain, verified: d.verified, approvedPlans: approvalByDomain[d.domain] || [] })),
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Admin: approve / revoke a customer for Google Voice.
+// Admin: set which Voice plan SKUs a customer is authorized for on a specific domain.
 app.post('/api/admin/customers/:id/voice-approval', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
-    const approved = !!req.body?.approved;
     const cust = await Customer.findById(req.params.id);
     if (!cust) return res.status(404).json({ error: 'Customer not found.' });
-    cust.voiceApproved = approved;
-    cust.voiceApprovedAt = approved ? new Date() : null;
-    await cust.save();
-    if (approved) {
+    const domain = (req.body?.domain || '').toLowerCase().trim();
+    if (!domain) return res.status(400).json({ error: 'Domain is required.' });
+    const plans = Array.isArray(req.body?.plans) ? req.body.plans.map(String).filter((s) => VOICE_PLAN_SKUS.includes(s)) : [];
+
+    if (plans.length === 0) {
+      await VoiceApproval.deleteOne({ customerId: cust._id, domain });
+    } else {
+      await VoiceApproval.findOneAndUpdate(
+        { customerId: cust._id, domain },
+        { customerId: cust._id, domain, plans, updatedAt: new Date() },
+        { upsert: true }
+      );
+    }
+    // Keep the legacy flag in sync (true if the customer has any approval).
+    const any = await VoiceApproval.countDocuments({ customerId: cust._id });
+    cust.voiceApproved = any > 0; cust.voiceApprovedAt = any > 0 ? new Date() : null; await cust.save();
+
+    if (plans.length > 0) {
       try {
-        const html = emailShell('Google Voice unlocked', `
+        const names = plans.map((s) => SKU_CATALOG[s]?.name || s).join(', ');
+        const html = emailShell('Google Voice approved', `
           <p>Hi ${cust.firstName || cust.username || 'there'},</p>
-          <p>Your account has been approved for <strong>Google Voice</strong>. Once your domain is verified, you'll see the option to add Google Voice in your portal.</p>`);
-        await sendEmail(cust.businessEmail, 'You can now add Google Voice', html);
+          <p>You've been approved to add <strong>${names}</strong> for <strong>${domain}</strong>. Once ${domain} is domain-verified, add it from the <strong>Add-ons</strong> page in your portal.</p>`);
+        await sendEmail(cust.businessEmail, `Google Voice approved for ${domain}`, html);
       } catch (_) { }
     }
-    res.json({ success: true, voiceApproved: cust.voiceApproved });
+    res.json({ success: true, domain, plans });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Customer: purchase a Google Voice plan as an add-on for a specific domain. Enforces per-domain
+// admin approval of that plan + domain verification + an active Workspace on the domain.
+app.post('/api/customer/voice/purchase', authenticateCustomer, async (req, res) => {
+  try {
+    const sku = String(req.body?.skuId || '');
+    const dom = String(req.body?.domain || '').toLowerCase().trim();
+    const method = req.body?.method === 'nicky' ? 'nicky' : (req.body?.method === 'balance' ? 'balance' : 'stripe');
+    if (!VOICE_PLAN_SKUS.includes(sku)) return res.status(400).json({ error: 'Invalid Google Voice plan.' });
+    if (!dom) return res.status(400).json({ error: 'Select the Workspace domain to add Voice to.' });
+
+    const me = await Customer.findById(req.customerId);
+
+    // 1) Admin must have approved THIS plan for THIS domain.
+    const approval = await VoiceApproval.findOne({ customerId: req.customerId, domain: dom });
+    if (!approval || !(approval.plans || []).includes(sku)) {
+      return res.status(403).json({ error: `This domain isn't approved for ${SKU_CATALOG[sku]?.name || 'this Voice plan'}. Please get approval from Admin for ${dom}.`, needApproval: true });
+    }
+
+    // 2) The domain must be verified.
+    const verified = await WorkspaceOrder.findOne({ customerId: req.customerId, 'organization.domain': dom, domainVerified: true });
+    if (!verified) return res.status(400).json({ error: `Please verify ${dom} first, then add Google Voice.`, needVerify: true });
+
+    // 3) Price must be configured.
+    const plan = await Plan.findOne({ skuId: sku });
+    if (!plan || !(plan.monthlyPrice > 0)) return res.status(400).json({ error: 'This Voice plan has no price set. Please contact support.' });
+
+    // 4) The domain must have an ACTIVE Workspace subscription; find its reseller account.
+    let account = null;
+    for (const acct of ['pk', 'usa']) {
+      let auth;
+      try { auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
+      const reseller = google.reseller({ version: 'v1', auth });
+      try {
+        const resp = await reseller.subscriptions.list({ customerId: dom });
+        const subs = resp.data.subscriptions || [];
+        // already has Voice?
+        if (subs.some((s) => VOICE_PLAN_SKUS.includes(String(s.skuId)))) {
+          return res.status(400).json({ error: `${dom} already has a Google Voice subscription.` });
+        }
+        const hasWorkspace = subs.some((s) => { const m = SKU_CATALOG[String(s.skuId)]; return s.status === 'ACTIVE' && (!m || m.category === 'workspace'); });
+        if (hasWorkspace) { account = acct; break; }
+      } catch (_) { }
+    }
+    if (!account) return res.status(400).json({ error: `${dom} needs an active Google Workspace subscription before adding Voice.` });
+
+    const subtotal = Number(plan.monthlyPrice);
+    const taxed = await applyTaxAndFee(subtotal);
+    const amount = taxed.total;
+    const orderNumber = `VO-${Date.now()}`;
+    const meta = SKU_CATALOG[sku];
+
+    // Pay from balance → provision immediately.
+    if (method === 'balance') {
+      if (Number(me.balance || 0) + 1e-9 < amount) return res.status(400).json({ error: `Your balance ($${Number(me.balance || 0).toFixed(2)}) doesn't cover this ($${amount.toFixed(2)}).` });
+      const payment = await Payment.create({
+        customerId: me._id, customerEmail: me.businessEmail, domain: dom, orderNumber,
+        orderType: 'addon', amount, subtotal: taxed.subtotal, tax: taxed.tax, fee: taxed.fee, currency: 'USD',
+        method: 'balance', status: 'pending', addonSku: sku, addonAccount: account, addonName: meta.name,
+      });
+      try { await applyBalanceChange(me._id, { type: 'debit', amount, reason: `Paid ${meta.name} for ${dom} from balance`, orderNumber }); }
+      catch (e) { payment.status = 'cancelled'; await payment.save(); return res.status(400).json({ error: e.message }); }
+      payment.status = 'paid'; payment.paidAt = new Date(); await payment.save();
+      await markPaidAndProvision(payment);
+      return res.json({ paid: true, viaBalance: true, message: `${meta.name} added to ${dom} from your balance.` });
+    }
+
+    const payment = await Payment.create({
+      customerId: me._id, customerEmail: me.businessEmail, domain: dom, orderNumber,
+      orderType: 'addon', amount, subtotal: taxed.subtotal, tax: taxed.tax, fee: taxed.fee, currency: 'USD',
+      method, status: 'pending', addonSku: sku, addonAccount: account, addonName: meta.name,
+    });
+    const orderDesc = `${meta.name} for ${dom}`;
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
+
+    if (method === 'stripe') {
+      let stripe; try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const sd = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (sd?.stripeMode || 'test') !== 'live'; await payment.save();
+      const line_items = [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(taxed.subtotal * 100) }, quantity: 1 }];
+      if (taxed.fee > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) }, quantity: 1 });
+      if (taxed.tax > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) }, quantity: 1 });
+      const session = await stripe.checkout.sessions.create({ mode: 'payment', line_items, success_url: successUrl, cancel_url: cancelUrl, client_reference_id: String(payment._id), metadata: { paymentId: String(payment._id), orderType: 'addon' } });
+      payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
+      return res.json({ checkoutUrl: session.url, paymentId: payment._id });
+    }
+    // Nicky
+    try {
+      const nicky = await createNickyPayment({ amount, currency: 'USD', description: orderDesc, orderNumber, reference: String(payment._id), billDescription: orderDesc, customerEmail: me.businessEmail, customerName: me.firstName ? `${me.firstName} ${me.lastName || ''}`.trim() : me.businessEmail, redirectUrl: successUrl, cancelUrl });
+      payment.checkoutUrl = nicky.url; payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id); payment.providerShortId = nicky.shortId || null; await payment.save();
+      return res.json({ checkoutUrl: nicky.url, paymentId: payment._id });
+    } catch (e) {
+      return res.status(500).json({ error: 'Crypto checkout not available: ' + e.message });
+    }
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

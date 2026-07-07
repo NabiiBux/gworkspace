@@ -2478,16 +2478,42 @@ const AdminCustomersSection = () => {
     }
   };
 
-  const toggleVoiceApproval = async (c) => {
+  // Per-domain, per-plan Voice approval modal
+  const [voiceCust, setVoiceCust] = useState(null);   // customer being edited
+  const [voiceData, setVoiceData] = useState(null);   // { catalog, domains:[{domain,verified,approvedPlans}] }
+  const [voiceBusy, setVoiceBusy] = useState('');
+  const [voiceMsg, setVoiceMsg] = useState('');
+  const openVoice = async (c) => {
     const id = c.id || c._id;
-    const next = !c.voiceApproved;
-    if (next && !window.confirm(`Approve ${c.email || 'this customer'} for Google Voice? They'll be able to order Voice once their domain is verified.`)) return;
+    setVoiceCust(c); setVoiceData(null); setVoiceMsg('');
     try {
-      await axios.post(`${API_URL}/admin/customers/${id}/voice-approval`, { approved: next });
+      const r = await axios.get(`${API_URL}/admin/customers/${id}/voice-approvals`);
+      setVoiceData(r.data);
+    } catch (e) { setVoiceMsg(e?.response?.data?.error || 'Could not load Voice approvals.'); }
+  };
+  const toggleVoicePlan = (domain, skuId) => {
+    setVoiceData(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        domains: prev.domains.map(d => {
+          if (d.domain !== domain) return d;
+          const has = d.approvedPlans.includes(skuId);
+          return { ...d, approvedPlans: has ? d.approvedPlans.filter(s => s !== skuId) : [...d.approvedPlans, skuId] };
+        })
+      };
+    });
+  };
+  const saveVoiceDomain = async (domain) => {
+    const id = voiceCust.id || voiceCust._id;
+    const dom = voiceData.domains.find(d => d.domain === domain);
+    setVoiceBusy(domain); setVoiceMsg('');
+    try {
+      await axios.post(`${API_URL}/admin/customers/${id}/voice-approval`, { domain, plans: dom.approvedPlans });
+      setVoiceMsg(`✓ Saved Voice approval for ${domain}.`);
       load();
-    } catch (e) {
-      alert(e?.response?.data?.error || 'Could not update Voice approval.');
-    }
+    } catch (e) { setVoiceMsg('✗ ' + (e?.response?.data?.error || 'Save failed.')); }
+    finally { setVoiceBusy(''); }
   };
 
   // Attach subscription to a customer (auto-detect account from Google)
@@ -2691,9 +2717,9 @@ const AdminCustomersSection = () => {
                       <button
                         className="btn btn-secondary"
                         style={{ fontSize: 12, padding: '4px 10px', background: c.voiceApproved ? '#f0fdf4' : '#fff', color: c.voiceApproved ? '#166534' : '#0369a1', borderColor: c.voiceApproved ? '#bbf7d0' : undefined }}
-                        onClick={() => toggleVoiceApproval(c)}
+                        onClick={() => openVoice(c)}
                       >
-                        {c.voiceApproved ? '✓ Voice approved' : 'Approve Voice'}
+                        {c.voiceApproved ? '✓ Voice access' : 'Voice access'}
                       </button>
                     </div>
                     {resetMsg[c.id || c._id] && <div style={{ fontSize: 12, color: '#166534', marginTop: 4 }}>{resetMsg[c.id || c._id]}</div>}
@@ -2702,6 +2728,36 @@ const AdminCustomersSection = () => {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Voice approval modal — per-domain, per-plan */}
+      {voiceCust && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }} onClick={() => setVoiceCust(null)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 560, width: '100%', maxHeight: '85vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>📞 Google Voice access — {voiceCust.email}</h3>
+            <p style={{ color: '#64748b', fontSize: 13, marginTop: 0 }}>Authorize specific Voice plans per domain. The customer can order an approved plan as an add-on once that domain is verified. A new/second domain needs its own approval.</p>
+            {voiceMsg && <div style={{ fontSize: 13, marginBottom: 10, color: voiceMsg.startsWith('✓') ? '#166534' : '#b42318', fontWeight: 600 }}>{voiceMsg}</div>}
+            {!voiceData ? <p style={{ color: '#64748b' }}>Loading…</p> : voiceData.domains.length === 0 ? (
+              <p style={{ color: '#b45309' }}>This customer has no provisioned Workspace domains yet.</p>
+            ) : voiceData.domains.map(d => (
+              <div key={d.domain} style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontWeight: 700 }}>{d.domain} {d.verified ? <span style={{ color: '#166534', fontSize: 12 }}>· verified ✓</span> : <span style={{ color: '#b45309', fontSize: 12 }}>· not verified</span>}</div>
+                  <button onClick={() => saveVoiceDomain(d.domain)} disabled={voiceBusy === d.domain} className="btn btn-primary" style={{ fontSize: 12, padding: '4px 12px' }}>{voiceBusy === d.domain ? '…' : 'Save'}</button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {voiceData.catalog.map(p => (
+                    <label key={p.skuId} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={d.approvedPlans.includes(p.skuId)} onChange={() => toggleVoicePlan(d.domain, p.skuId)} />
+                      <span>{p.name}{p.price != null ? ` — $${Number(p.price).toFixed(2)}/mo` : ' (no price set)'}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <button onClick={() => setVoiceCust(null)} className="btn btn-secondary" style={{ width: '100%', marginTop: 8 }}>Close</button>
+          </div>
         </div>
       )}
 
@@ -6141,7 +6197,7 @@ const CustomerSubscriptions = () => {
             </div>
           </div>
           {voice.eligible ? (
-            <button onClick={() => { window.location.hash = 'voice'; }} className="btn btn-primary" style={{ padding: '9px 18px' }}>
+            <button onClick={() => { window.location.hash = 'addons'; }} className="btn btn-primary" style={{ padding: '9px 18px' }}>
               ➕ Add Google Voice
             </button>
           ) : (
@@ -6479,13 +6535,35 @@ const CustomerAddons = () => {
   const [chosenDomain, setChosenDomain] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const [voice, setVoice] = useState(null);       // { approved, eligible, domains:[...] }
+  const [voicePick, setVoicePick] = useState(null); // { domain, plan }
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [voiceMsg, setVoiceMsg] = useState('');
+
+  const loadVoice = async () => {
+    try { const r = await axios.get(`${API_URL}/customer/voice-eligibility`); setVoice(r.data); } catch (_) { }
+  };
+
   useEffect(() => {
     (async () => {
       try { const r = await axios.get(`${API_URL}/customer/addons`); setAddons(r.data.addons || []); }
       catch (_) { }
       finally { setLoading(false); }
     })();
+    loadVoice();
   }, []);
+
+  const voiceCheckout = async (method) => {
+    if (!voicePick) return;
+    setVoiceBusy(true); setVoiceMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/customer/voice/purchase`, { skuId: voicePick.plan.skuId, domain: voicePick.domain, method });
+      if (r.data.checkoutUrl) { window.location.href = r.data.checkoutUrl; return; }
+      if (r.data.paid) { setVoiceMsg('✓ ' + (r.data.message || 'Voice added from your balance.')); setVoicePick(null); loadVoice(); }
+      else setVoiceMsg('Could not start checkout.');
+    } catch (e) { setVoiceMsg(e?.response?.data?.error || 'Could not add Voice.'); }
+    finally { setVoiceBusy(false); }
+  };
 
   // When the customer clicks Buy, load their eligible Workspace domains and open the picker.
   const startPurchase = async (a) => {
@@ -6519,6 +6597,42 @@ const CustomerAddons = () => {
 
       {msg && <div style={{ padding: '12px 16px', borderRadius: 8, marginBottom: 16, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a' }}>{msg}</div>}
 
+      {/* Google Voice — approved plans per domain */}
+      {voice?.approved && (
+        <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 14, padding: 20, marginBottom: 20 }}>
+          <h3 style={{ marginTop: 0, marginBottom: 4 }}>📞 Google Voice</h3>
+          <p style={{ color: '#475569', fontSize: 13, marginTop: 0 }}>Admin has approved Google Voice for the domain(s) below. Add an approved plan as an add-on to that domain. A new domain needs its own approval from Admin.</p>
+          {voiceMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: voiceMsg.startsWith('✓') ? '#dcfce7' : '#fef2f2', color: voiceMsg.startsWith('✓') ? '#166534' : '#b42318', fontSize: 13 }}>{voiceMsg}</div>}
+          {voice.domains.length === 0 ? (
+            <p style={{ color: '#64748b', fontSize: 13 }}>No Workspace domains found yet.</p>
+          ) : voice.domains.map(d => (
+            <div key={d.domain} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, marginBottom: 10 }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                {d.domain} {d.domainVerified ? <span style={{ color: '#166534', fontSize: 12 }}>· verified ✓</span> : <span style={{ color: '#b45309', fontSize: 12 }}>· not verified</span>}
+              </div>
+              {d.approvedPlans.length === 0 ? (
+                <div style={{ fontSize: 13, color: '#b45309' }}>
+                  Not approved for Google Voice on this domain yet. Please get approval from Admin for <strong>{d.domain}</strong>.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {d.plans.map(p => (
+                    <div key={p.skuId} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 13 }}><strong>{p.name}</strong>{p.price != null ? ` · $${Number(p.price).toFixed(2)}/mo` : ''}</span>
+                      <button
+                        onClick={() => { setVoiceMsg(''); if (!d.domainVerified) { setVoiceMsg(`Please verify ${d.domain} first (Domains page), then add Voice.`); return; } setVoicePick({ domain: d.domain, plan: p }); }}
+                        className="btn btn-primary" style={{ fontSize: 12, padding: '4px 12px' }}>
+                        Add to cart
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {loading ? <p>Loading add-ons…</p> : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }} className="grid-2">
           {addons.map(a => (
@@ -6532,6 +6646,23 @@ const CustomerAddons = () => {
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Voice checkout method picker */}
+      {voicePick && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 1000 }} onClick={() => !voiceBusy && setVoicePick(null)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 420, width: '100%' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Add {voicePick.plan.name}</h3>
+            <p style={{ color: '#475569', fontSize: 14 }}>For <strong>{voicePick.domain}</strong>{voicePick.plan.price != null ? ` — $${Number(voicePick.plan.price).toFixed(2)}/mo` : ''}. Choose how to pay:</p>
+            {voiceMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: '#fef2f2', color: '#b42318', fontSize: 13 }}>{voiceMsg}</div>}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button onClick={() => voiceCheckout('stripe')} disabled={voiceBusy} className="btn btn-primary">{voiceBusy ? '…' : '💳 Pay by card'}</button>
+              <button onClick={() => voiceCheckout('nicky')} disabled={voiceBusy} className="btn btn-secondary">🪙 Crypto</button>
+              <button onClick={() => voiceCheckout('balance')} disabled={voiceBusy} className="btn btn-secondary">💰 Balance</button>
+            </div>
+            <button onClick={() => setVoicePick(null)} disabled={voiceBusy} className="btn btn-secondary" style={{ width: '100%', marginTop: 14 }}>Cancel</button>
+          </div>
         </div>
       )}
 
