@@ -5536,7 +5536,10 @@ const CustomerDomains = () => {
                   </td>
                   <td>{d.expiresAt ? new Date(d.expiresAt).toLocaleDateString() : '—'}</td>
                   <td style={{ textAlign: 'right' }}>
-                    {d.status === 'registered' && (
+                    {/* Renew shows for every live domain (registered / test / expired / suspended),
+                        not just 'registered' — an expired or suspended domain is exactly when the
+                        customer needs to renew. Only 'failed' and 'pending' hide the actions. */}
+                    {!['failed', 'pending'].includes(d.status) && (
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                         <button onClick={() => setManageDomain(d.domainName)}
                           style={{ background: '#fff', color: INK, border: '1px solid #d8dbe6', borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
