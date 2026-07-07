@@ -647,6 +647,7 @@ const Dashboard = () => {
     'leads': '💼 Prospective Leads',
     'tickets': '🎫 Tickets',
     'payments': '💳 Payments & Settings',
+    'voice': '📞 Voice',
     'emails': '✉️ Emails',
     'domains-ssl': '🔒 Domains & SSL',
     'voice-monitor': '🛡 Abuse Monitor',
@@ -801,6 +802,15 @@ const Dashboard = () => {
           </li>
           <li>
             <button
+              id="menu-voice-btn"
+              className={`menu-item ${activeSection === 'voice' ? 'active' : ''}`}
+              onClick={() => setActiveSection('voice')}
+            >
+              📞 Voice
+            </button>
+          </li>
+          <li>
+            <button
               id="menu-emails-btn"
               className={`menu-item ${activeSection === 'emails' ? 'active' : ''}`}
               onClick={() => setActiveSection('emails')}
@@ -853,6 +863,7 @@ const Dashboard = () => {
         {activeSection === 'leads' && <AdminLeadsSection />}
         {activeSection === 'tickets' && <AdminTicketsSection />}
         {activeSection === 'payments' && <AdminPaymentsSection />}
+        {activeSection === 'voice' && <AdminVoiceSection />}
         {activeSection === 'emails' && <AdminEmailsSection />}
         {activeSection === 'domains-ssl' && <AdminDomainsSslSection />}
         {activeSection === 'voice-monitor' && <AdminVoiceMonitorSection />}
@@ -2391,6 +2402,7 @@ const AdminCustomersSection = () => {
   // Bulk / Batch state
   const [plans, setPlans] = useState([]);
   const [selectedCustomerIds, setSelectedCustomerIds] = useState([]);
+  const [custSearch, setCustSearch] = useState('');
   const [bulkActionPlan, setBulkActionPlan] = useState('');
   const [bulkActionSeats, setBulkActionSeats] = useState(1);
   const [bulkActionType, setBulkActionType] = useState('upgrade');
@@ -2675,16 +2687,31 @@ const AdminCustomersSection = () => {
       {error && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
       <p style={{ color: '#5b6075' }}>{customers.length} registered customer{customers.length === 1 ? '' : 's'}</p>
 
-      {customers.length === 0 ? <p>No customers have registered yet.</p> : (
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <input
+          value={custSearch}
+          onChange={e => setCustSearch(e.target.value)}
+          placeholder="🔍 Search by email, username, or domain…"
+          style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', maxWidth: 360, flex: 1 }}
+        />
+        {custSearch && <button onClick={() => setCustSearch('')} className="btn btn-secondary">Clear</button>}
+      </div>
+
+      {(() => {
+        const term = custSearch.trim().toLowerCase();
+        const shown = term
+          ? customers.filter(c => [c.email, c.username, c.domain].some(v => (v || '').toLowerCase().includes(term)))
+          : customers;
+        return customers.length === 0 ? <p>No customers have registered yet.</p> : shown.length === 0 ? <p style={{ color: '#9ca3af' }}>No customers match “{custSearch}”.</p> : (
         <div style={{ overflowX: 'auto' }}>
           <table className="data-table">
             <thead>
               <tr>
                 <th style={{ width: 40, paddingLeft: 12 }}>
-                  <input 
-                    type="checkbox" 
-                    checked={customers.length > 0 && selectedCustomerIds.length === customers.length} 
-                    onChange={toggleSelectAll} 
+                  <input
+                    type="checkbox"
+                    checked={shown.length > 0 && shown.every(c => selectedCustomerIds.includes(c.id || c._id))}
+                    onChange={toggleSelectAll}
                   />
                 </th>
                 <th>Username</th>
@@ -2696,7 +2723,7 @@ const AdminCustomersSection = () => {
               </tr>
             </thead>
             <tbody>
-              {customers.map(c => (
+              {shown.map(c => (
                 <tr key={c.id || c._id} style={{ backgroundColor: selectedCustomerIds.includes(c.id || c._id) ? '#f0fdf4' : 'transparent' }}>
                   <td style={{ paddingLeft: 12 }}>
                     <input 
@@ -2729,7 +2756,8 @@ const AdminCustomersSection = () => {
             </tbody>
           </table>
         </div>
-      )}
+        );
+      })()}
 
       {/* Voice approval modal — per-domain, per-plan */}
       {voiceCust && (
@@ -3909,6 +3937,135 @@ const AdminEmailsSection = () => {
   );
 };
 
+
+// Admin Voice tab — approvals overview + Voice order/renewal tracking with retry.
+const AdminVoiceSection = () => {
+  const [approvals, setApprovals] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [q, setQ] = useState('');
+  const [retryNum, setRetryNum] = useState('');
+  const [retryBusy, setRetryBusy] = useState('');
+  const [msg, setMsg] = useState('');
+  const card = { background: '#fff', borderRadius: 16, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 18 };
+
+  const loadApprovals = async () => {
+    try { const r = await axios.get(`${API_URL}/admin/voice-approvals${q ? `?q=${encodeURIComponent(q)}` : ''}`); setApprovals(r.data.approvals || []); } catch (_) { }
+  };
+  const loadOrders = async () => {
+    try { const r = await axios.get(`${API_URL}/admin/voice-orders${q ? `?q=${encodeURIComponent(q)}` : ''}`); setOrders(r.data.orders || []); } catch (_) { }
+  };
+  useEffect(() => { loadApprovals(); loadOrders(); }, []);
+
+  const revoke = async (a) => {
+    if (!window.confirm(`Revoke all Voice approvals for ${a.email} on ${a.domain}?`)) return;
+    try { await axios.post(`${API_URL}/admin/voice-approvals/revoke`, { customerId: a.customerId, domain: a.domain }); loadApprovals(); }
+    catch (e) { alert(e?.response?.data?.error || 'Revoke failed.'); }
+  };
+
+  const retryOrder = async (o) => {
+    setRetryBusy(o.id); setMsg('');
+    try {
+      const url = o.kind === 'renewal' ? `${API_URL}/admin/renewal-retry` : `${API_URL}/admin/voice-retry`;
+      const r = await axios.post(url, { orderNumber: o.orderNumber });
+      setMsg('✓ ' + (r.data.message || 'Done.'));
+      loadOrders();
+    } catch (e) { setMsg('✗ ' + (e?.response?.data?.error || 'Retry failed.')); }
+    finally { setRetryBusy(''); }
+  };
+
+  const retryByNumber = async () => {
+    const num = retryNum.trim();
+    if (!num) { setMsg('Enter a VO- or RN- order number.'); return; }
+    setRetryBusy('manual'); setMsg('');
+    try {
+      const url = /^RN-/i.test(num) ? `${API_URL}/admin/renewal-retry` : `${API_URL}/admin/voice-retry`;
+      const r = await axios.post(url, { orderNumber: num });
+      setMsg('✓ ' + (r.data.message || 'Done.'));
+      loadOrders();
+    } catch (e) { setMsg('✗ ' + (e?.response?.data?.error || 'Retry failed.')); }
+    finally { setRetryBusy(''); }
+  };
+
+  return (
+    <div className="section">
+      <h2>📞 Google Voice</h2>
+      {msg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318', fontWeight: 600 }}>{msg}</div>}
+
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { loadApprovals(); loadOrders(); } }} placeholder="Search by email, domain, or order #" style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', maxWidth: 360, flex: 1 }} />
+        <button onClick={() => { loadApprovals(); loadOrders(); }} className="btn btn-secondary">Search</button>
+      </div>
+
+      {/* Retry by order number */}
+      <div style={card}>
+        <h3 style={{ marginTop: 0 }}>🔄 Retry a Voice order / renewal</h3>
+        <p style={{ color: '#6b7280', fontSize: 13, marginTop: 0 }}>Enter a Voice purchase (<code>VO-…</code>) or Voice renewal (<code>RN-…</code>) that was paid but not provisioned/activated. It verifies the payment and (re)provisions the Voice subscription.</p>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <input value={retryNum} onChange={e => setRetryNum(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') retryByNumber(); }} placeholder="VO-… or RN-…" style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', width: 240 }} />
+          <button onClick={retryByNumber} disabled={retryBusy === 'manual'} className="btn btn-primary" style={{ height: 40 }}>{retryBusy === 'manual' ? 'Retrying…' : 'Retry'}</button>
+        </div>
+      </div>
+
+      {/* Voice orders + renewals */}
+      <div style={card}>
+        <h3 style={{ marginTop: 0 }}>Voice orders & renewals</h3>
+        {orders.length === 0 ? <p style={{ color: '#9ca3af' }}>No Voice orders yet.</p> : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+              <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}>
+                <th style={{ padding: '8px 6px' }}>Order #</th><th>Kind</th><th>Plan</th><th>Domain</th><th>Customer</th><th>Amount</th><th>Status</th><th></th>
+              </tr></thead>
+              <tbody>
+                {orders.map(o => (
+                  <tr key={o.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '8px 6px', fontFamily: 'monospace', fontSize: 12 }}>{o.orderNumber}</td>
+                    <td>{o.kind}{o.isTest ? ' (test)' : ''}</td>
+                    <td>{o.plan}</td>
+                    <td style={{ fontWeight: 600 }}>{o.domain}</td>
+                    <td>{o.email}</td>
+                    <td>${Number(o.amount || 0).toFixed(2)}</td>
+                    <td><span style={{ color: o.status === 'paid' ? '#166534' : o.status === 'pending' ? '#b45309' : '#b42318', fontWeight: 600 }}>{o.status}</span></td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button onClick={() => retryOrder(o)} disabled={retryBusy === o.id || o.isTest} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>
+                        {retryBusy === o.id ? '…' : 'Retry'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Approvals overview */}
+      <div style={card}>
+        <h3 style={{ marginTop: 0 }}>Voice approvals</h3>
+        {approvals.length === 0 ? <p style={{ color: '#9ca3af' }}>No Voice approvals yet. Approve customers from the Customers page → “Voice access”.</p> : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+              <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}>
+                <th style={{ padding: '8px 6px' }}>Customer</th><th>Domain</th><th>Approved plans</th><th></th>
+              </tr></thead>
+              <tbody>
+                {approvals.map((a, i) => (
+                  <tr key={i} style={{ borderTop: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '8px 6px' }}>{a.email || a.username || '—'}</td>
+                    <td style={{ fontWeight: 600 }}>{a.domain}</td>
+                    <td>{a.plans.map(p => p.name).join(', ') || '—'}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button onClick={() => revoke(a)} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>Revoke</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 const AdminPaymentsSection = () => {
   const [tab, setTab] = useState('settings'); // 'settings' | 'transactions'

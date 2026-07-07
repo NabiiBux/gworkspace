@@ -5814,6 +5814,143 @@ app.post('/api/admin/customers/:id/voice-approval', authenticateCustomer, requir
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Provision (or re-provision) an add-on/Voice subscription for a paid payment. Idempotent:
+// if the SKU is already on the domain it's treated as success. Returns { ok, provisioned, alreadyExists, error }.
+async function provisionAddonForPayment(payment) {
+  const account = payment.addonAccount || 'pk';
+  const dom = (payment.domain || '').toLowerCase();
+  if (!dom || !payment.addonSku) return { ok: false, error: 'Missing domain or SKU on the order.' };
+  const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+  const reseller = google.reseller({ version: 'v1', auth });
+  // Already present?
+  try {
+    const resp = await reseller.subscriptions.list({ customerId: dom });
+    if ((resp.data.subscriptions || []).some((s) => String(s.skuId) === String(payment.addonSku))) {
+      return { ok: true, alreadyExists: true };
+    }
+  } catch (_) { }
+  try {
+    await reseller.subscriptions.insert({
+      customerId: dom,
+      requestBody: { customerId: dom, skuId: payment.addonSku, plan: { planName: 'FLEXIBLE' }, seats: { maximumNumberOfSeats: 1 }, purchaseOrderId: 'addon-' + Date.now() },
+    });
+    const now = new Date();
+    let rec = await SubBilling.findOne({ domain: dom, skuId: payment.addonSku });
+    if (!rec) { rec = new SubBilling({ account, domain: dom, skuId: payment.addonSku }); startNewBillingCycle(rec, now); }
+    applyPaymentToCurrentCycle(rec, now);
+    await rec.save();
+    console.log(`ADDON reprovisioned: ${payment.addonName || payment.addonSku} for ${dom} on ${account}`);
+    return { ok: true, provisioned: true };
+  } catch (e) {
+    const msg = e?.errors?.[0]?.message || e.message;
+    if (/already exists|duplicate|resource already/i.test(msg)) return { ok: true, alreadyExists: true };
+    return { ok: false, error: msg };
+  }
+}
+
+// Admin: overview of ALL Voice approvals (customer + domain + plans), for the Voice tab.
+app.get('/api/admin/voice-approvals', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const q = (req.query.q || '').toLowerCase().trim();
+    const approvals = await VoiceApproval.find().sort({ updatedAt: -1 }).limit(500);
+    const rows = [];
+    for (const a of approvals) {
+      const c = await Customer.findById(a.customerId).select('businessEmail username');
+      const row = {
+        customerId: String(a.customerId),
+        email: c?.businessEmail || null,
+        username: c?.username || null,
+        domain: a.domain,
+        plans: (a.plans || []).map((s) => ({ skuId: s, name: SKU_CATALOG[s]?.name || s })),
+        updatedAt: a.updatedAt,
+      };
+      if (!q || (row.email || '').toLowerCase().includes(q) || (row.domain || '').toLowerCase().includes(q)) rows.push(row);
+    }
+    res.json({ approvals: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin: revoke all Voice approvals for a customer+domain.
+app.post('/api/admin/voice-approvals/revoke', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { customerId, domain } = req.body;
+    if (!customerId || !domain) return res.status(400).json({ error: 'customerId and domain are required.' });
+    await VoiceApproval.deleteOne({ customerId, domain: String(domain).toLowerCase() });
+    const any = await VoiceApproval.countDocuments({ customerId });
+    await Customer.updateOne({ _id: customerId }, { $set: { voiceApproved: any > 0 } });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin: list Voice orders (VO- purchases) + Voice renewals (RN- for a Voice SKU) for tracking/retry.
+app.get('/api/admin/voice-orders', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    const rx = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
+    const filter = {
+      $or: [
+        { orderType: 'addon', addonSku: { $in: VOICE_PLAN_SKUS } },
+        { isRenewal: true, renewalSkuId: { $in: VOICE_PLAN_SKUS } },
+      ],
+    };
+    let payments = await Payment.find(filter).sort({ createdAt: -1 }).limit(300);
+    if (rx) payments = payments.filter((p) => rx.test(p.orderNumber || '') || rx.test(p.domain || '') || rx.test(p.customerEmail || ''));
+    const orders = payments.map((p) => ({
+      id: String(p._id),
+      orderNumber: p.orderNumber || String(p._id).slice(-8),
+      kind: p.isRenewal ? 'renewal' : 'purchase',
+      skuId: p.isRenewal ? p.renewalSkuId : p.addonSku,
+      plan: SKU_CATALOG[p.isRenewal ? p.renewalSkuId : p.addonSku]?.name || (p.isRenewal ? p.renewalSkuId : p.addonSku),
+      domain: p.domain,
+      email: p.customerEmail,
+      amount: p.amount,
+      method: p.method,
+      status: p.status,
+      isTest: !!p.isTest,
+      createdAt: p.createdAt,
+      paidAt: p.paidAt,
+    }));
+    res.json({ orders });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin: retry a Voice PURCHASE (VO-) that was paid but not provisioned. Verifies payment with
+// the provider if still pending, then (re)provisions the Voice add-on. (Renewals use renewal-retry.)
+app.post('/api/admin/voice-retry', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const raw = (req.body?.orderNumber || '').trim();
+    if (!raw) return res.status(400).json({ error: 'Enter the Voice order number (VO-...).' });
+    let payment = await Payment.findOne({ orderNumber: raw });
+    if (!payment && /^[a-f0-9]{24}$/i.test(raw)) payment = await Payment.findById(raw);
+    if (!payment) return res.status(404).json({ error: `No Voice order found for "${raw}".` });
+    if (payment.orderType !== 'addon' || !VOICE_PLAN_SKUS.includes(String(payment.addonSku))) {
+      return res.status(400).json({ error: 'This is not a Voice purchase order. (Renewals retry from the renewal box.)' });
+    }
+    if (payment.isTest) return res.status(400).json({ error: 'This was a TEST-mode payment — it does not provision real subscriptions.' });
+
+    // Verify with the provider if still pending.
+    if (payment.status !== 'paid') {
+      let confirmed = false, provStatus = payment.status;
+      try {
+        if (payment.method === 'stripe' && payment.providerRef) {
+          const stripe = await getStripeForMode();
+          const session = await stripe.checkout.sessions.retrieve(payment.providerRef);
+          provStatus = session.payment_status || 'pending'; confirmed = session.payment_status === 'paid';
+        } else if (payment.method === 'nicky') {
+          const r = await checkNickyPaymentStatus(payment); provStatus = r.status || 'pending'; confirmed = !!r.paid;
+          payment = (await Payment.findById(payment._id)) || payment;
+        }
+      } catch (e) { return res.status(502).json({ error: `Could not verify payment: ${e.message}` }); }
+      if (!confirmed && payment.status !== 'paid') return res.status(400).json({ error: `This order isn't paid yet (provider status: ${provStatus}).` });
+      if (payment.status !== 'paid') { payment.status = 'paid'; payment.paidAt = payment.paidAt || new Date(); await payment.save(); }
+    }
+
+    const result = await provisionAddonForPayment(payment);
+    if (!result.ok) return res.status(502).json({ error: `Provisioning failed: ${result.error}` });
+    res.json({ success: true, orderNumber: raw, domain: payment.domain, plan: SKU_CATALOG[payment.addonSku]?.name || payment.addonSku, message: result.alreadyExists ? 'Voice was already provisioned on this domain.' : 'Voice provisioned successfully.' });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
 // Customer: purchase a Google Voice plan as an add-on for a specific domain. Enforces per-domain
 // admin approval of that plan + domain verification + an active Workspace on the domain.
 app.post('/api/customer/voice/purchase', authenticateCustomer, async (req, res) => {
