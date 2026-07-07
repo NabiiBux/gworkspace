@@ -1854,6 +1854,11 @@ app.post('/api/customer/subscriptions/change-seats', authenticateCustomer, async
     const wantSeats = parseInt(newSeats, 10);
     if (!wantSeats || wantSeats < 1) return res.status(400).json({ error: 'Enter a valid number of users.' });
 
+    // Google Voice is limited to ONE license per domain — seat increases are not allowed.
+    if (VOICE_PLAN_SKUS.includes(String(skuId))) {
+      return res.status(400).json({ error: 'You have already purchased a voice license. Please contact your admin.' });
+    }
+
     const account = me.account || 'pk';
     // Read current seats from Google.
     let currentSeats = 1, subscriptionId = null, planName = 'FLEXIBLE';
@@ -3335,13 +3340,16 @@ async function markPaidAndProvision(payment) {
       const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
       const reseller = google.reseller({ version: 'v1', auth });
       const dom = (payment.domain || '').toLowerCase();
+      // Voice must be exactly ONE license. FLEXIBLE with numberOfSeats + maximumNumberOfSeats both
+      // pinned to 1 prevents Google from provisioning a block of (e.g. 10) Voice licenses.
+      const isVoice = VOICE_PLAN_SKUS.includes(String(payment.addonSku));
       await reseller.subscriptions.insert({
         customerId: dom,
         requestBody: {
           customerId: dom,
           skuId: payment.addonSku,
           plan: { planName: 'FLEXIBLE' },
-          seats: { maximumNumberOfSeats: 1 },
+          seats: isVoice ? { numberOfSeats: 1, maximumNumberOfSeats: 1 } : { maximumNumberOfSeats: 1 },
           purchaseOrderId: 'addon-' + Date.now(),
         },
       });
@@ -5830,9 +5838,11 @@ async function provisionAddonForPayment(payment) {
     }
   } catch (_) { }
   try {
+    // Voice = exactly one license (both seat fields pinned to 1); other add-ons cap at 1.
+    const isVoice = VOICE_PLAN_SKUS.includes(String(payment.addonSku));
     await reseller.subscriptions.insert({
       customerId: dom,
-      requestBody: { customerId: dom, skuId: payment.addonSku, plan: { planName: 'FLEXIBLE' }, seats: { maximumNumberOfSeats: 1 }, purchaseOrderId: 'addon-' + Date.now() },
+      requestBody: { customerId: dom, skuId: payment.addonSku, plan: { planName: 'FLEXIBLE' }, seats: isVoice ? { numberOfSeats: 1, maximumNumberOfSeats: 1 } : { maximumNumberOfSeats: 1 }, purchaseOrderId: 'addon-' + Date.now() },
     });
     const now = new Date();
     let rec = await SubBilling.findOne({ domain: dom, skuId: payment.addonSku });
@@ -5895,21 +5905,54 @@ app.get('/api/admin/voice-orders', authenticateCustomer, requireAdmin, async (re
     };
     let payments = await Payment.find(filter).sort({ createdAt: -1 }).limit(300);
     if (rx) payments = payments.filter((p) => rx.test(p.orderNumber || '') || rx.test(p.domain || '') || rx.test(p.customerEmail || ''));
-    const orders = payments.map((p) => ({
-      id: String(p._id),
-      orderNumber: p.orderNumber || String(p._id).slice(-8),
-      kind: p.isRenewal ? 'renewal' : 'purchase',
-      skuId: p.isRenewal ? p.renewalSkuId : p.addonSku,
-      plan: SKU_CATALOG[p.isRenewal ? p.renewalSkuId : p.addonSku]?.name || (p.isRenewal ? p.renewalSkuId : p.addonSku),
-      domain: p.domain,
-      email: p.customerEmail,
-      amount: p.amount,
-      method: p.method,
-      status: p.status,
-      isTest: !!p.isTest,
-      createdAt: p.createdAt,
-      paidAt: p.paidAt,
-    }));
+
+    // Live "provisioned in Google?" check — one reseller call per unique domain (bounded).
+    // Opt-in via `check=1` (it's slower); the default load skips it for speed.
+    const doCheck = req.query.check === '1';
+    const voiceByDomain = {};
+    if (doCheck) {
+      const domains = [...new Set(payments.filter((p) => p.domain).map((p) => p.domain.toLowerCase()))].slice(0, 80);
+      for (const dom of domains) {
+        let found = null;
+        for (const acct of ['pk', 'usa']) {
+          let auth;
+          try { auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
+          const reseller = google.reseller({ version: 'v1', auth });
+          try {
+            const resp = await reseller.subscriptions.list({ customerId: dom });
+            const skus = (resp.data.subscriptions || []).map((s) => String(s.skuId));
+            found = new Set(skus.filter((s) => VOICE_PLAN_SKUS.includes(s)));
+            break;
+          } catch (_) { /* try next account */ }
+        }
+        voiceByDomain[dom] = found; // null = couldn't read (unknown)
+      }
+    }
+
+    const orders = payments.map((p) => {
+      const sku = String(p.isRenewal ? p.renewalSkuId : p.addonSku);
+      const dom = (p.domain || '').toLowerCase();
+      let provisioned = null; // null = unknown/not checked
+      if (doCheck && voiceByDomain[dom] !== undefined) {
+        provisioned = voiceByDomain[dom] === null ? null : voiceByDomain[dom].has(sku);
+      }
+      return {
+        id: String(p._id),
+        orderNumber: p.orderNumber || String(p._id).slice(-8),
+        kind: p.isRenewal ? 'renewal' : 'purchase',
+        skuId: sku,
+        plan: SKU_CATALOG[sku]?.name || sku,
+        domain: p.domain,
+        email: p.customerEmail,
+        amount: p.amount,
+        method: p.method,
+        status: p.status,
+        isTest: !!p.isTest,
+        provisioned,
+        createdAt: p.createdAt,
+        paidAt: p.paidAt,
+      };
+    });
     res.json({ orders });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -5986,9 +6029,9 @@ app.post('/api/customer/voice/purchase', authenticateCustomer, async (req, res) 
       try {
         const resp = await reseller.subscriptions.list({ customerId: dom });
         const subs = resp.data.subscriptions || [];
-        // already has Voice?
+        // already has Voice? One Voice license per domain — block a second purchase.
         if (subs.some((s) => VOICE_PLAN_SKUS.includes(String(s.skuId)))) {
-          return res.status(400).json({ error: `${dom} already has a Google Voice subscription.` });
+          return res.status(400).json({ error: 'You have already purchased a voice license. Please contact your admin.', alreadyHasVoice: true });
         }
         const hasWorkspace = subs.some((s) => { const m = SKU_CATALOG[String(s.skuId)]; return s.status === 'ACTIVE' && (!m || m.category === 'workspace'); });
         if (hasWorkspace) { account = acct; break; }

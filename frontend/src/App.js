@@ -3951,8 +3951,16 @@ const AdminVoiceSection = () => {
   const loadApprovals = async () => {
     try { const r = await axios.get(`${API_URL}/admin/voice-approvals${q ? `?q=${encodeURIComponent(q)}` : ''}`); setApprovals(r.data.approvals || []); } catch (_) { }
   };
-  const loadOrders = async () => {
-    try { const r = await axios.get(`${API_URL}/admin/voice-orders${q ? `?q=${encodeURIComponent(q)}` : ''}`); setOrders(r.data.orders || []); } catch (_) { }
+  const [checking, setChecking] = useState(false);
+  const loadOrders = async (check) => {
+    if (check) setChecking(true);
+    try {
+      const params = [];
+      if (q) params.push(`q=${encodeURIComponent(q)}`);
+      if (check) params.push('check=1');
+      const r = await axios.get(`${API_URL}/admin/voice-orders${params.length ? `?${params.join('&')}` : ''}`);
+      setOrders(r.data.orders || []);
+    } catch (_) { } finally { if (check) setChecking(false); }
   };
   useEffect(() => { loadApprovals(); loadOrders(); }, []);
 
@@ -4008,12 +4016,17 @@ const AdminVoiceSection = () => {
 
       {/* Voice orders + renewals */}
       <div style={card}>
-        <h3 style={{ marginTop: 0 }}>Voice orders & renewals</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <h3 style={{ marginTop: 0, marginBottom: 8 }}>Voice orders & renewals</h3>
+          <button onClick={() => loadOrders(true)} disabled={checking} className="btn btn-secondary" style={{ fontSize: 12, padding: '6px 12px' }}>
+            {checking ? 'Checking Google…' : 'Check provisioning in Google'}
+          </button>
+        </div>
         {orders.length === 0 ? <p style={{ color: '#9ca3af' }}>No Voice orders yet.</p> : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
               <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}>
-                <th style={{ padding: '8px 6px' }}>Order #</th><th>Kind</th><th>Plan</th><th>Domain</th><th>Customer</th><th>Amount</th><th>Status</th><th></th>
+                <th style={{ padding: '8px 6px' }}>Order #</th><th>Kind</th><th>Plan</th><th>Domain</th><th>Customer</th><th>Amount</th><th>Status</th><th>In Google</th><th></th>
               </tr></thead>
               <tbody>
                 {orders.map(o => (
@@ -4025,6 +4038,7 @@ const AdminVoiceSection = () => {
                     <td>{o.email}</td>
                     <td>${Number(o.amount || 0).toFixed(2)}</td>
                     <td><span style={{ color: o.status === 'paid' ? '#166534' : o.status === 'pending' ? '#b45309' : '#b42318', fontWeight: 600 }}>{o.status}</span></td>
+                    <td>{o.provisioned === true ? <span style={{ color: '#166534', fontWeight: 700 }}>✓</span> : o.provisioned === false ? <span style={{ color: '#b42318', fontWeight: 700 }}>✗ missing</span> : <span style={{ color: '#9ca3af' }}>—</span>}</td>
                     <td style={{ textAlign: 'right' }}>
                       <button onClick={() => retryOrder(o)} disabled={retryBusy === o.id || o.isTest} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>
                         {retryBusy === o.id ? '…' : 'Retry'}
