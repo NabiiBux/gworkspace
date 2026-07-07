@@ -2478,6 +2478,18 @@ const AdminCustomersSection = () => {
     }
   };
 
+  const toggleVoiceApproval = async (c) => {
+    const id = c.id || c._id;
+    const next = !c.voiceApproved;
+    if (next && !window.confirm(`Approve ${c.email || 'this customer'} for Google Voice? They'll be able to order Voice once their domain is verified.`)) return;
+    try {
+      await axios.post(`${API_URL}/admin/customers/${id}/voice-approval`, { approved: next });
+      load();
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Could not update Voice approval.');
+    }
+  };
+
   // Attach subscription to a customer (auto-detect account from Google)
   const [attaching, setAttaching] = useState(null); // customer object
   const [attachDom, setAttachDom] = useState('');
@@ -2676,6 +2688,13 @@ const AdminCustomersSection = () => {
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => resetPassword(c.id || c._id)}>Reset pwd</button>
                       <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openAttach(c)}>Attach subscription</button>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: 12, padding: '4px 10px', background: c.voiceApproved ? '#f0fdf4' : '#fff', color: c.voiceApproved ? '#166534' : '#0369a1', borderColor: c.voiceApproved ? '#bbf7d0' : undefined }}
+                        onClick={() => toggleVoiceApproval(c)}
+                      >
+                        {c.voiceApproved ? '✓ Voice approved' : 'Approve Voice'}
+                      </button>
                     </div>
                     {resetMsg[c.id || c._id] && <div style={{ fontSize: 12, color: '#166534', marginTop: 4 }}>{resetMsg[c.id || c._id]}</div>}
                   </td>
@@ -5933,6 +5952,13 @@ const CustomerSubscriptions = () => {
   const [card, setCard] = useState(null);       // { hasCard, brand, last4 } | null while loading
   const [cardBusy, setCardBusy] = useState(false);
   const [cardMsg, setCardMsg] = useState('');
+  const [voice, setVoice] = useState(null);     // { approved, domainVerified, eligible, reason }
+
+  useEffect(() => {
+    (async () => {
+      try { const r = await axios.get(`${API_URL}/customer/voice-eligibility`); setVoice(r.data); } catch (_) { }
+    })();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -6103,6 +6129,29 @@ const CustomerSubscriptions = () => {
         </div>
       )}
 
+      {/* Google Voice — shown only to admin-approved customers */}
+      {voice?.approved && (
+        <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 12, padding: '14px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>📞 Google Voice</div>
+            <div style={{ fontSize: 13, color: '#1e40af' }}>
+              {voice.eligible
+                ? 'Your account is approved for Google Voice. Add it to your workspace now.'
+                : 'Your account is approved for Google Voice. Verify your domain first to unlock ordering.'}
+            </div>
+          </div>
+          {voice.eligible ? (
+            <button onClick={() => { window.location.hash = 'voice'; }} className="btn btn-primary" style={{ padding: '9px 18px' }}>
+              ➕ Add Google Voice
+            </button>
+          ) : (
+            <button onClick={() => { window.location.hash = 'domains'; }} className="btn btn-secondary" style={{ padding: '9px 18px' }}>
+              Verify domain
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Google Workspace + add-on subscriptions (each billed separately) */}
       <h3 style={{ marginTop: 8 }}>Subscriptions</h3>
       {data?.domain && <p style={{ color: '#5b6075', marginTop: 0 }}>Domain: <strong>{data.domain}</strong>{data.account ? ` · ${data.account.toUpperCase()} account` : ''}</p>}
@@ -6153,7 +6202,16 @@ const CustomerSubscriptions = () => {
                     )}
                   </td>
                   <td>
-                    <span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span>
+                    {s.needsDomainVerification ? (
+                      <span style={{ display: 'inline-block', background: '#fef3c7', color: '#92600a', padding: '2px 8px', borderRadius: 99, fontSize: 12, fontWeight: 600 }}>Pending verification</span>
+                    ) : (
+                      <span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span>
+                    )}
+                    {s.needsDomainVerification && (
+                      <div style={{ fontSize: 11, color: '#92600a', marginTop: 4, maxWidth: 240, lineHeight: 1.35 }}>
+                        Verify your domain to activate this subscription. Go to <strong>Domains</strong> and add the verification record.
+                      </div>
+                    )}
                     {s.suspendedByGoogle && (
                       <div style={{ fontSize: 11, color: '#b42318', marginTop: 4, maxWidth: 220, lineHeight: 1.35 }}>
                         ⚠️ Suspended by Google — a payment can’t reactivate this. {s.activationNote || 'Please contact support to resolve it with Google.'}
@@ -6518,16 +6576,50 @@ const CustomerAddons = () => {
 
 const CustomerVoice = () => {
   const { user } = useAuth();
+  const [voice, setVoice] = useState(null);
+  useEffect(() => {
+    (async () => { try { const r = await axios.get(`${API_URL}/customer/voice-eligibility`); setVoice(r.data); } catch (_) { setVoice({ approved: false }); } })();
+  }, []);
+
+  // Gate Voice ordering: must be admin-approved AND domain-verified.
+  if (voice && !voice.eligible) {
+    return (
+      <div className="section">
+        <h2>📞 Google Voice</h2>
+        <div style={{ background: voice.approved ? '#fffbea' : '#f8fafc', border: `1px solid ${voice.approved ? '#fde68a' : '#e2e8f0'}`, borderRadius: 12, padding: 24, maxWidth: 620 }}>
+          {!voice.approved ? (
+            <>
+              <h3 style={{ marginTop: 0 }}>Google Voice is not enabled for your account yet</h3>
+              <p style={{ color: '#5b6075' }}>Google Voice is available to approved Workspace customers. Please contact our Admin/support team to request access, and once approved you'll be able to add Google Voice here.</p>
+              <button onClick={() => { window.location.hash = 'support'; }} className="btn btn-primary">Contact support</button>
+            </>
+          ) : (
+            <>
+              <h3 style={{ marginTop: 0 }}>Verify your domain to unlock Google Voice</h3>
+              <p style={{ color: '#5b6075' }}>Your account is <strong>approved</strong> for Google Voice. Before you can order it, please verify your domain ownership.</p>
+              <button onClick={() => { window.location.hash = 'domains'; }} className="btn btn-primary">Verify my domain</button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="section">
       <h2>📞 Google Voice</h2>
+      {voice?.eligible && (
+        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: '12px 16px', marginBottom: 16, color: '#166534', fontWeight: 600, fontSize: 14 }}>
+          ✓ Your account is approved and your domain is verified — you can add Google Voice.
+        </div>
+      )}
       <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 20, marginBottom: 16 }}>
         <p style={{ marginTop: 0 }}>
           Google Voice adds business phone numbers to your Workspace. Voice is available in supported countries
           (US, Canada, UK, and parts of Europe). One Voice subscription per account.
         </p>
         <p style={{ marginBottom: 0, color: '#5b6075' }}>
-          To request Voice for your domain, please open a support ticket and our team will provision it for you.
+          To add Voice for your domain, open a support ticket and our team will provision it for you.
         </p>
       </div>
 

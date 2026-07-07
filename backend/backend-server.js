@@ -102,6 +102,10 @@ const CustomerSchema = new mongoose.Schema({
   // Account credit balance (USD). Funded by admin refunds of cancelled/refunded orders.
   // Spendable on any order, or withdrawable as crypto. Never goes negative.
   balance: { type: Number, default: 0 },
+  // Google Voice approved list: admin approves a Workspace customer for Voice. Combined with
+  // domain verification, this unlocks the "Add Google Voice" option in the portal.
+  voiceApproved: { type: Boolean, default: false },
+  voiceApprovedAt: Date,
   // Saved card for automatic renewal charging (Stripe). Auto-renew can only be ON with a card.
   stripeCustomerId: String,
   cardPmId: String,        // default Stripe PaymentMethod id used for off-session charges
@@ -660,6 +664,10 @@ const WorkspaceOrderSchema = new mongoose.Schema(
     draftData: { type: mongoose.Schema.Types.Mixed }, // saved in-progress form for resume
     draftStep: { type: Number, default: 0 },          // which step the customer was on
     domainVerified: { type: Boolean, default: false },
+    // Set on genuine new customer purchases. When true and domainVerified is false, the portal
+    // shows the subscription as "Pending domain verification" instead of Active — so accepting
+    // the reseller ToS alone doesn't make it look active; the customer must verify their domain.
+    requiresDomainVerification: { type: Boolean, default: false },
     googleProvisioned: { type: Boolean, default: false },
     txtRecord: String,
     voiceEligible: { type: Boolean, default: true }, // one Voice sub per domain (Stage 2)
@@ -1459,9 +1467,18 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
     // (e.g. bulk attach). Primary domain + every domain on their workspace orders.
     const domainSet = new Set();
     if (domain) domainSet.add(domain.toLowerCase());
+    // Per-domain "needs domain verification" flag: true only for genuine NEW purchases
+    // (requiresDomainVerification) that haven't been verified yet. Existing/attached subs are
+    // never flagged, so they keep showing their real Google status.
+    const domainNeedsVerify = {};
     try {
       const wos = await WorkspaceOrder.find({ customerId: me._id, 'organization.domain': { $exists: true, $ne: '' } });
-      wos.forEach((o) => { const d = (o.organization?.domain || '').toLowerCase(); if (d) domainSet.add(d); });
+      wos.forEach((o) => {
+        const d = (o.organization?.domain || '').toLowerCase();
+        if (!d) return;
+        domainSet.add(d);
+        if (o.requiresDomainVerification && !o.domainVerified) domainNeedsVerify[d] = true;
+      });
     } catch (_) { }
     const domains = [...domainSet];
 
@@ -1548,6 +1565,8 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
           // If Google itself suspended it, a payment can't reactivate it — tell the customer.
           suspendedByGoogle: !!rec?.suspendedByGoogle,
           activationNote: rec?.activationNote || null,
+          // New purchase not yet domain-verified → show as pending verification, not Active.
+          needsDomainVerification: !!domainNeedsVerify[dom],
         });
       }
     }
@@ -2326,6 +2345,7 @@ app.get('/api/admin/customers', authenticateCustomer, requireAdmin, async (req, 
       registrationIp: c.registrationIp,
       lastLoginIp: c.lastLoginIp,
       status: c.status,
+      voiceApproved: !!c.voiceApproved,
       createdAt: c.createdAt,
       lastLogin: c.lastLogin,
     }));
@@ -3561,6 +3581,9 @@ async function markPaidAndProvision(payment) {
         order.lastPaymentDate = now;
         order.nextBillingDate = nextMonthlyRenewal(order.createdAt || now, now);
         order.renewalWarnedAt = null;
+        // Genuine customer purchase → the portal should show it Active only after the customer
+        // verifies their domain (not merely when the reseller ToS is accepted).
+        if (!order.domainVerified) order.requiresDomainVerification = true;
 
         // First-time provisioning
         if (!order.googleProvisioned) {
@@ -5678,6 +5701,47 @@ app.post('/api/admin/withdrawal-resolve', authenticateCustomer, requireAdmin, as
       await sendEmail(c?.businessEmail, `Withdrawal of $${txn.amount.toFixed(2)} sent`, html);
     } catch (_) { }
     res.json({ success: true, message: 'Withdrawal marked paid.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Customer: Google Voice eligibility. Eligible = admin-approved AND has a verified domain.
+app.get('/api/customer/voice-eligibility', authenticateCustomer, async (req, res) => {
+  try {
+    const me = await Customer.findById(req.customerId).select('voiceApproved domain');
+    // Domain is "verified" if any of the customer's workspace orders is domainVerified.
+    const verifiedOrder = await WorkspaceOrder.findOne({ customerId: req.customerId, domainVerified: true }).select('organization.domain');
+    const domainVerified = !!verifiedOrder;
+    const approved = !!me?.voiceApproved;
+    res.json({
+      approved,
+      domainVerified,
+      eligible: approved && domainVerified,
+      verifiedDomain: verifiedOrder?.organization?.domain || me?.domain || null,
+      reason: !approved ? 'Your account is not yet approved for Google Voice. Please contact Admin.'
+        : !domainVerified ? 'Verify your domain first to unlock Google Voice ordering.'
+        : null,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin: approve / revoke a customer for Google Voice.
+app.post('/api/admin/customers/:id/voice-approval', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const approved = !!req.body?.approved;
+    const cust = await Customer.findById(req.params.id);
+    if (!cust) return res.status(404).json({ error: 'Customer not found.' });
+    cust.voiceApproved = approved;
+    cust.voiceApprovedAt = approved ? new Date() : null;
+    await cust.save();
+    if (approved) {
+      try {
+        const html = emailShell('Google Voice unlocked', `
+          <p>Hi ${cust.firstName || cust.username || 'there'},</p>
+          <p>Your account has been approved for <strong>Google Voice</strong>. Once your domain is verified, you'll see the option to add Google Voice in your portal.</p>`);
+        await sendEmail(cust.businessEmail, 'You can now add Google Voice', html);
+      } catch (_) { }
+    }
+    res.json({ success: true, voiceApproved: cust.voiceApproved });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
