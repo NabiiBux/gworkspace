@@ -5726,17 +5726,37 @@ app.post('/api/admin/withdrawal-resolve', authenticateCustomer, requireAdmin, as
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Helper: list a customer's provisioned Workspace domains + which are domain-verified.
+// Helper: does a domain have an ACTIVE Google Workspace subscription on either reseller account?
+// This is the "verified" signal for Voice — an active Workspace means the domain is real and set up.
+async function domainHasActiveWorkspace(dom) {
+  const d = (dom || '').toLowerCase();
+  for (const acct of ['pk', 'usa']) {
+    let auth;
+    try { auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
+    const reseller = google.reseller({ version: 'v1', auth });
+    try {
+      const resp = await reseller.subscriptions.list({ customerId: d });
+      const subs = resp.data.subscriptions || [];
+      const hasWs = subs.some((s) => { const m = SKU_CATALOG[String(s.skuId)]; return s.status === 'ACTIVE' && (!m || m.category === 'workspace'); });
+      if (hasWs) return { active: true, account: acct };
+    } catch (_) { /* not on this account */ }
+  }
+  return { active: false, account: null };
+}
+
+// Helper: a customer's Workspace domains + whether each has an ACTIVE Workspace subscription
+// (reseller API). "verified" here = active Workspace, per the rule that an active subscription
+// is proof enough to proceed with Voice.
 async function customerWorkspaceDomains(customerId) {
   const wos = await WorkspaceOrder.find({ customerId, 'organization.domain': { $exists: true, $ne: '' } });
-  const map = {};
-  for (const o of wos) {
-    const d = (o.organization?.domain || '').toLowerCase();
-    if (!d) continue;
-    if (!map[d]) map[d] = { domain: d, verified: false };
-    if (o.domainVerified) map[d].verified = true;
+  const domSet = new Set();
+  for (const o of wos) { const d = (o.organization?.domain || '').toLowerCase(); if (d) domSet.add(d); }
+  const out = [];
+  for (const d of domSet) {
+    const ws = await domainHasActiveWorkspace(d);
+    out.push({ domain: d, verified: ws.active, account: ws.account });
   }
-  return Object.values(map);
+  return out;
 }
 
 // Voice plan catalog (SKU → name + admin price), for the plans we allow self-serve.
@@ -6012,15 +6032,12 @@ app.post('/api/customer/voice/purchase', authenticateCustomer, async (req, res) 
       return res.status(403).json({ error: `This domain isn't approved for ${SKU_CATALOG[sku]?.name || 'this Voice plan'}. Please get approval from Admin for ${dom}.`, needApproval: true });
     }
 
-    // 2) The domain must be verified.
-    const verified = await WorkspaceOrder.findOne({ customerId: req.customerId, 'organization.domain': dom, domainVerified: true });
-    if (!verified) return res.status(400).json({ error: `Please verify ${dom} first, then add Google Voice.`, needVerify: true });
-
-    // 3) Price must be configured.
+    // 2) Price must be configured.
     const plan = await Plan.findOne({ skuId: sku });
     if (!plan || !(plan.monthlyPrice > 0)) return res.status(400).json({ error: 'This Voice plan has no price set. Please contact support.' });
 
-    // 4) The domain must have an ACTIVE Workspace subscription; find its reseller account.
+    // 3) The domain must have an ACTIVE Workspace subscription (reseller API). An active
+    //    Workspace subscription is the "verified" signal — no separate TXT step is required.
     let account = null;
     for (const acct of ['pk', 'usa']) {
       let auth;
