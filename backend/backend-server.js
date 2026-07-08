@@ -1509,6 +1509,7 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
     const rows = [];
     const seenKeys = new Set();        // `${domain}::${skuId}` dedupe
     const matchedDbKeys = new Set();   // which DB subs got a live Google row
+    const verifiedNowDomains = new Set(); // fresh-purchase domains Google now reports ACTIVE
     let primaryAccount = null;
 
     // Query each attached domain across the reseller accounts and merge the results.
@@ -1559,6 +1560,13 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
         if (dbSub) { if (dbSub.subscriptionId) matchedDbKeys.add(String(dbSub.subscriptionId)); if (dbSub.googleWorkspaceSkuId) matchedDbKeys.add(String(dbSub.googleWorkspaceSkuId)); }
         const autoRenew = dbSub ? dbSub.autoRenew !== false : true;
 
+        // Domain-verification gate (item #3): Google keeps a fresh Workspace SUSPENDED until the
+        // customer completes domain verification at their host, then flips it ACTIVE. So we trust
+        // Google's status — a fresh purchase is "pending verification" only while it's not ACTIVE.
+        const isFreshPurchase = !!domainNeedsVerify[dom];
+        const needsDomainVerification = isFreshPurchase && s.status !== 'ACTIVE';
+        if (isFreshPurchase && isPrimarySku(s.skuId) && s.status === 'ACTIVE') verifiedNowDomains.add(dom);
+
         rows.push({
           domain: s.customerDomain || dom,
           skuId: s.skuId,
@@ -1579,10 +1587,21 @@ app.get('/api/customer/my-subscriptions', authenticateCustomer, async (req, res)
           // If Google itself suspended it, a payment can't reactivate it — tell the customer.
           suspendedByGoogle: !!rec?.suspendedByGoogle,
           activationNote: rec?.activationNote || null,
-          // New purchase not yet domain-verified → show as pending verification, not Active.
-          needsDomainVerification: !!domainNeedsVerify[dom],
+          // New purchase Google still keeps non-ACTIVE → pending domain verification.
+          needsDomainVerification,
         });
       }
+    }
+
+    // Once Google reports a fresh purchase ACTIVE, verification is complete — persist that so the
+    // domain is never re-flagged and future SUSPENDED states read as billing suspensions.
+    if (verifiedNowDomains.size) {
+      try {
+        await WorkspaceOrder.updateMany(
+          { customerId: me._id, 'organization.domain': { $in: [...verifiedNowDomains] }, requiresDomainVerification: true },
+          { $set: { domainVerified: true, requiresDomainVerification: false } }
+        );
+      } catch (_) { }
     }
 
     // Remember the account we found subs on (faster future loads + correct billing).
