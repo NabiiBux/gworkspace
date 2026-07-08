@@ -6364,7 +6364,7 @@ const CustomerSubscriptions = () => {
             <div style={{ fontSize: 13, color: '#1e40af' }}>
               {voice.eligible
                 ? 'Your account is approved for Google Voice. Add it to your workspace now.'
-                : 'Your account is approved for Google Voice. Verify your domain first to unlock ordering.'}
+                : 'Your account is approved for Google Voice. It unlocks once your Google Workspace subscription is active.'}
             </div>
           </div>
           {voice.eligible ? (
@@ -6372,8 +6372,8 @@ const CustomerSubscriptions = () => {
               ➕ Add Google Voice
             </button>
           ) : (
-            <button onClick={() => { window.location.hash = 'domains'; }} className="btn btn-secondary" style={{ padding: '9px 18px' }}>
-              Verify domain
+            <button onClick={() => { window.location.hash = 'dashboard'; }} className="btn btn-secondary" style={{ padding: '9px 18px' }}>
+              View subscriptions
             </button>
           )}
         </div>
@@ -6779,7 +6779,7 @@ const CustomerAddons = () => {
           ) : voice.domains.map(d => (
             <div key={d.domain} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, marginBottom: 10 }}>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                {d.domain} {d.domainVerified ? <span style={{ color: '#166534', fontSize: 12 }}>· verified ✓</span> : <span style={{ color: '#b45309', fontSize: 12 }}>· not verified</span>}
+                {d.domain} {d.domainVerified ? <span style={{ color: '#166534', fontSize: 12 }}>· Workspace active ✓</span> : <span style={{ color: '#b45309', fontSize: 12 }}>· no active Workspace</span>}
               </div>
               {d.approvedPlans.length === 0 ? (
                 <div style={{ fontSize: 13, color: '#b45309' }}>
@@ -6791,7 +6791,7 @@ const CustomerAddons = () => {
                     <div key={p.skuId} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span style={{ fontSize: 13 }}><strong>{p.name}</strong>{p.price != null ? ` · $${Number(p.price).toFixed(2)}/mo` : ''}</span>
                       <button
-                        onClick={() => { setVoiceMsg(''); if (!d.domainVerified) { setVoiceMsg(`Please verify ${d.domain} first (Domains page), then add Voice.`); return; } setVoicePick({ domain: d.domain, plan: p }); }}
+                        onClick={() => { setVoiceMsg(''); if (!d.domainVerified) { setVoiceMsg(`${d.domain} needs an active Google Workspace subscription first.`); return; } setVoicePick({ domain: d.domain, plan: p }); }}
                         className="btn btn-primary" style={{ fontSize: 12, padding: '4px 12px' }}>
                         Add to cart
                       </button>
@@ -6897,9 +6897,9 @@ const CustomerVoice = () => {
             </>
           ) : (
             <>
-              <h3 style={{ marginTop: 0 }}>Verify your domain to unlock Google Voice</h3>
-              <p style={{ color: '#5b6075' }}>Your account is <strong>approved</strong> for Google Voice. Before you can order it, please verify your domain ownership.</p>
-              <button onClick={() => { window.location.hash = 'domains'; }} className="btn btn-primary">Verify my domain</button>
+              <h3 style={{ marginTop: 0 }}>Google Voice unlocks with an active Workspace</h3>
+              <p style={{ color: '#5b6075' }}>Your account is <strong>approved</strong> for Google Voice. It becomes available once your Google Workspace subscription for the domain is active.</p>
+              <button onClick={() => { window.location.hash = 'addons'; }} className="btn btn-primary">Go to Add-ons</button>
             </>
           )}
         </div>
