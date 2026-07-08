@@ -6435,8 +6435,8 @@ const CustomerSubscriptions = () => {
                       <span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span>
                     )}
                     {s.needsDomainVerification && (
-                      <div style={{ fontSize: 11, color: '#92600a', marginTop: 4, maxWidth: 240, lineHeight: 1.35 }}>
-                        Verify your domain to activate this subscription. Go to <strong>Domains</strong> and add the verification record.
+                      <div style={{ fontSize: 11, color: '#92600a', marginTop: 4, maxWidth: 260, lineHeight: 1.35 }}>
+                        Complete domain verification: open your <strong>Google Admin console</strong>, copy the verification record, and add it at your domain host (Namecheap, etc.). Google activates this subscription automatically once verified.
                       </div>
                     )}
                     {s.suspendedByGoogle && (
