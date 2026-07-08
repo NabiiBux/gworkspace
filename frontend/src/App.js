@@ -6728,11 +6728,12 @@ const CustomerAddons = () => {
     if (!voicePick) return;
     setVoiceBusy(true); setVoiceMsg('');
     try {
-      const r = await axios.post(`${API_URL}/customer/voice/purchase`, { skuId: voicePick.plan.skuId, domain: voicePick.domain, method });
+      const url = voicePick.mode === 'change' ? `${API_URL}/customer/voice/change` : `${API_URL}/customer/voice/purchase`;
+      const r = await axios.post(url, { skuId: voicePick.plan.skuId, domain: voicePick.domain, method });
       if (r.data.checkoutUrl) { window.location.href = r.data.checkoutUrl; return; }
-      if (r.data.paid) { setVoiceMsg('✓ ' + (r.data.message || 'Voice added from your balance.')); setVoicePick(null); loadVoice(); }
+      if (r.data.paid) { setVoiceMsg('✓ ' + (r.data.message || 'Done.')); setVoicePick(null); loadVoice(); }
       else setVoiceMsg('Could not start checkout.');
-    } catch (e) { setVoiceMsg(e?.response?.data?.error || 'Could not add Voice.'); }
+    } catch (e) { setVoiceMsg(e?.response?.data?.error || 'Could not complete this Voice order.'); }
     finally { setVoiceBusy(false); }
   };
 
@@ -6768,8 +6769,8 @@ const CustomerAddons = () => {
 
       {msg && <div style={{ padding: '12px 16px', borderRadius: 8, marginBottom: 16, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a' }}>{msg}</div>}
 
-      {/* Google Voice — approved plans per domain */}
-      {voice?.approved && (
+      {/* Google Voice — approved plans + upgrade/downgrade per domain */}
+      {(voice?.approved || voice?.domains?.some(d => d.currentVoiceSku)) && (
         <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 14, padding: 20, marginBottom: 20 }}>
           <h3 style={{ marginTop: 0, marginBottom: 4 }}>📞 Google Voice</h3>
           <p style={{ color: '#475569', fontSize: 13, marginTop: 0 }}>Admin has approved Google Voice for the domain(s) below. Add an approved plan as an add-on to that domain. A new domain needs its own approval from Admin.</p>
@@ -6781,7 +6782,25 @@ const CustomerAddons = () => {
               <div style={{ fontWeight: 700, marginBottom: 6 }}>
                 {d.domain} {d.domainVerified ? <span style={{ color: '#166534', fontSize: 12 }}>· Workspace active ✓</span> : <span style={{ color: '#b45309', fontSize: 12 }}>· no active Workspace</span>}
               </div>
-              {d.approvedPlans.length === 0 ? (
+              {d.currentVoiceSku ? (
+                /* Domain already has Voice → show current plan + upgrade/downgrade to the other two. */
+                <div>
+                  <div style={{ fontSize: 13, marginBottom: 8 }}>Current plan: <strong>{d.currentVoicePlan}</strong></div>
+                  <div style={{ color: '#64748b', fontSize: 12, marginBottom: 8 }}>Changing plans cancels the current Voice license and starts the new one — you pay the new plan price. One Voice license per domain.</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {d.changeOptions.map(p => (
+                      <div key={p.skuId} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 13 }}><strong>{p.name}</strong>{p.price != null ? ` · $${Number(p.price).toFixed(2)}/mo` : ''}</span>
+                        <button
+                          onClick={() => { setVoiceMsg(''); setVoicePick({ domain: d.domain, plan: p, mode: 'change', direction: p.direction }); }}
+                          className="btn btn-primary" style={{ fontSize: 12, padding: '4px 12px', background: p.direction === 'downgrade' ? '#b45309' : undefined, borderColor: p.direction === 'downgrade' ? '#b45309' : undefined }}>
+                          {p.direction === 'upgrade' ? '⬆ Upgrade' : '⬇ Downgrade'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : d.approvedPlans.length === 0 ? (
                 <div style={{ fontSize: 13, color: '#b45309' }}>
                   Not approved for Google Voice on this domain yet. Please get approval from Admin for <strong>{d.domain}</strong>.
                 </div>
@@ -6791,7 +6810,7 @@ const CustomerAddons = () => {
                     <div key={p.skuId} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span style={{ fontSize: 13 }}><strong>{p.name}</strong>{p.price != null ? ` · $${Number(p.price).toFixed(2)}/mo` : ''}</span>
                       <button
-                        onClick={() => { setVoiceMsg(''); if (!d.domainVerified) { setVoiceMsg(`${d.domain} needs an active Google Workspace subscription first.`); return; } setVoicePick({ domain: d.domain, plan: p }); }}
+                        onClick={() => { setVoiceMsg(''); if (!d.domainVerified) { setVoiceMsg(`${d.domain} needs an active Google Workspace subscription first.`); return; } setVoicePick({ domain: d.domain, plan: p, mode: 'add' }); }}
                         className="btn btn-primary" style={{ fontSize: 12, padding: '4px 12px' }}>
                         Add to cart
                       </button>
@@ -6824,8 +6843,8 @@ const CustomerAddons = () => {
       {voicePick && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 1000 }} onClick={() => !voiceBusy && setVoicePick(null)}>
           <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 420, width: '100%' }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0 }}>Add {voicePick.plan.name}</h3>
-            <p style={{ color: '#475569', fontSize: 14 }}>For <strong>{voicePick.domain}</strong>{voicePick.plan.price != null ? ` — $${Number(voicePick.plan.price).toFixed(2)}/mo` : ''}. Choose how to pay:</p>
+            <h3 style={{ marginTop: 0 }}>{voicePick.mode === 'change' ? (voicePick.direction === 'downgrade' ? 'Downgrade to ' : 'Upgrade to ') : 'Add '}{voicePick.plan.name}</h3>
+            <p style={{ color: '#475569', fontSize: 14 }}>For <strong>{voicePick.domain}</strong>{voicePick.plan.price != null ? ` — $${Number(voicePick.plan.price).toFixed(2)}/mo` : ''}. {voicePick.mode === 'change' ? 'Your current Voice plan will be cancelled and this one started (one license). Pay the new plan price:' : 'Choose how to pay:'}</p>
             {voiceMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: '#fef2f2', color: '#b42318', fontSize: 13 }}>{voiceMsg}</div>}
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button onClick={() => voiceCheckout('stripe')} disabled={voiceBusy} className="btn btn-primary">{voiceBusy ? '…' : '💳 Pay by card'}</button>
