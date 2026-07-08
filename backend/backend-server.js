@@ -4671,7 +4671,7 @@ app.get('/api/customer/addon-domains', authenticateCustomer, async (req, res) =>
           // A Workspace plan = a non-addon SKU that's ACTIVE.
           const hasWorkspace = subs.some((s) => {
             const meta = SKU_CATALOG[String(s.skuId)];
-            return s.status === 'ACTIVE' && (!meta || meta.category === 'workspace');
+            return s.status === 'ACTIVE' && (!meta || meta.category === 'workspace' || meta.category === 'core');
           });
           if (hasWorkspace) { domains.push({ domain: dom, account }); break; } // found on this account
         } catch (_) { /* not on this account */ }
@@ -4710,7 +4710,7 @@ app.post('/api/customer/addons/purchase', authenticateCustomer, async (req, res)
         const subs = resp.data.subscriptions || [];
         const hasWorkspace = subs.some((s) => {
           const m = SKU_CATALOG[String(s.skuId)];
-          return s.status === 'ACTIVE' && (!m || m.category === 'workspace');
+          return s.status === 'ACTIVE' && (!m || m.category === 'workspace' || m.category === 'core');
         });
         if (hasWorkspace) { account = acct; break; }
       } catch (_) { }
@@ -5779,7 +5779,7 @@ async function domainHasActiveWorkspace(dom) {
     try {
       const resp = await reseller.subscriptions.list({ customerId: d });
       const subs = resp.data.subscriptions || [];
-      const hasWs = subs.some((s) => { const m = SKU_CATALOG[String(s.skuId)]; return s.status === 'ACTIVE' && (!m || m.category === 'workspace'); });
+      const hasWs = subs.some((s) => { const m = SKU_CATALOG[String(s.skuId)]; return s.status === 'ACTIVE' && (!m || m.category === 'workspace' || m.category === 'core'); });
       const voiceSub = subs.find((s) => VOICE_PLAN_SKUS.includes(String(s.skuId)));
       if (hasWs) return { active: true, account: acct, voiceSku: voiceSub ? String(voiceSub.skuId) : null };
     } catch (_) { /* not on this account */ }
@@ -6144,7 +6144,7 @@ app.post('/api/customer/voice/purchase', authenticateCustomer, async (req, res) 
         if (subs.some((s) => VOICE_PLAN_SKUS.includes(String(s.skuId)))) {
           return res.status(400).json({ error: 'You have already purchased a voice license. Please contact your admin.', alreadyHasVoice: true });
         }
-        const hasWorkspace = subs.some((s) => { const m = SKU_CATALOG[String(s.skuId)]; return s.status === 'ACTIVE' && (!m || m.category === 'workspace'); });
+        const hasWorkspace = subs.some((s) => { const m = SKU_CATALOG[String(s.skuId)]; return s.status === 'ACTIVE' && (!m || m.category === 'workspace' || m.category === 'core'); });
         if (hasWorkspace) { account = acct; break; }
       } catch (_) { }
     }
