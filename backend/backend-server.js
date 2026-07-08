@@ -245,7 +245,7 @@ const PaymentSchema = new mongoose.Schema({
   domain: String,
   orderNumber: String,       // human-facing reference (e.g. RN-... for renewals) for admin retry/lookup
   orderId: mongoose.Schema.Types.ObjectId,
-  orderType: { type: String, enum: ['workspace', 'domain', 'domain_transfer', 'workspace_transfer', 'ssl', 'hosting', 'addon', 'seat_change'], default: 'workspace' },
+  orderType: { type: String, enum: ['workspace', 'domain', 'domain_transfer', 'workspace_transfer', 'ssl', 'hosting', 'addon', 'seat_change', 'voice_change'], default: 'workspace' },
   amount: Number,            // total charged (subtotal + tax)
   subtotal: Number,          // pre-tax amount
   tax: Number,               // tax portion
@@ -253,6 +253,7 @@ const PaymentSchema = new mongoose.Schema({
   addonSku: String,          // for addon orders: the SKU to provision
   addonAccount: String,      // which reseller account the addon bills to ('pk'/'usa')
   addonName: String,
+  voiceChangeFromSku: String, // for voice_change orders: the Voice SKU being cancelled (replaced by addonSku)
   isRenewal: { type: Boolean, default: false },  // true = Workspace renewal payment
   renewalSkuId: String,      // which subscription SKU is being renewed
   seatChangeSku: String,     // for seat_change orders: the SKU to resize
@@ -302,6 +303,8 @@ const VoiceApproval = mongoose.model('VoiceApproval', VoiceApprovalSchema);
 
 // The self-serve Voice plans (Starter / Standard / Premier).
 const VOICE_PLAN_SKUS = ['1010330003', '1010330004', '1010330002'];
+// Tier order for upgrade/downgrade (Starter < Standard < Premier).
+const VOICE_PLAN_RANK = { '1010330003': 1, '1010330004': 2, '1010330002': 3 };
 
 // Credit or debit a customer's balance atomically and write a ledger entry. `amount` is the
 // positive magnitude; `delta` is +amount (credit) or -amount (debit/withdrawal). Never allows
@@ -3348,6 +3351,26 @@ async function markPaidAndProvision(payment) {
     return;
   }
 
+  // VOICE CHANGE orders (upgrade/downgrade): cancel the old Voice plan, provision the new one.
+  if (payment.orderType === 'voice_change') {
+    try {
+      if (payment.isTest) { console.log('TEST PAYMENT — voice change not applied for', payment.domain); return; }
+      const result = await changeVoicePlanForPayment(payment);
+      if (!result.ok) { console.error('VOICE CHANGE FAILED for payment', String(payment._id), result.error); return; }
+      const me = await Customer.findById(payment.customerId);
+      try {
+        const toName = SKU_CATALOG[payment.addonSku]?.name || payment.addonSku;
+        const html = emailShell('Google Voice plan changed', `
+          <p>Hi ${me?.firstName || me?.username || 'there'},</p>
+          <p>Your Google Voice plan for <strong>${payment.domain}</strong> is now <strong>${toName}</strong>.</p>`);
+        await sendEmail(me?.businessEmail, `Google Voice plan changed: ${toName}`, html);
+      } catch (_) { }
+    } catch (e) {
+      console.error('VOICE CHANGE ERROR for payment', String(payment._id), e.message);
+    }
+    return;
+  }
+
   // ADD-ON orders: provision the add-on subscription on the domain's reseller account.
   if (payment.orderType === 'addon') {
     try {
@@ -5757,10 +5780,11 @@ async function domainHasActiveWorkspace(dom) {
       const resp = await reseller.subscriptions.list({ customerId: d });
       const subs = resp.data.subscriptions || [];
       const hasWs = subs.some((s) => { const m = SKU_CATALOG[String(s.skuId)]; return s.status === 'ACTIVE' && (!m || m.category === 'workspace'); });
-      if (hasWs) return { active: true, account: acct };
+      const voiceSub = subs.find((s) => VOICE_PLAN_SKUS.includes(String(s.skuId)));
+      if (hasWs) return { active: true, account: acct, voiceSku: voiceSub ? String(voiceSub.skuId) : null };
     } catch (_) { /* not on this account */ }
   }
-  return { active: false, account: null };
+  return { active: false, account: null, voiceSku: null };
 }
 
 // Helper: a customer's Workspace domains + whether each has an ACTIVE Workspace subscription
@@ -5773,7 +5797,7 @@ async function customerWorkspaceDomains(customerId) {
   const out = [];
   for (const d of domSet) {
     const ws = await domainHasActiveWorkspace(d);
-    out.push({ domain: d, verified: ws.active, account: ws.account });
+    out.push({ domain: d, verified: ws.active, account: ws.account, voiceSku: ws.voiceSku || null });
   }
   return out;
 }
@@ -5795,12 +5819,22 @@ app.get('/api/customer/voice-eligibility', authenticateCustomer, async (req, res
 
     const perDomain = domains.map((d) => {
       const approvedPlans = approvalByDomain[d.domain] || [];
+      const currentVoiceSku = d.voiceSku || null;
       return {
         domain: d.domain,
         domainVerified: d.verified,
         approvedPlans,
         eligible: approvedPlans.length > 0 && d.verified,
         plans: catalog.filter((p) => approvedPlans.includes(p.skuId)),
+        // Current Voice subscription (if any) + the OTHER two plans as upgrade/downgrade options.
+        currentVoiceSku,
+        currentVoicePlan: currentVoiceSku ? (SKU_CATALOG[currentVoiceSku]?.name || currentVoiceSku) : null,
+        changeOptions: currentVoiceSku
+          ? catalog.filter((p) => p.skuId !== currentVoiceSku).map((p) => ({
+              ...p,
+              direction: (VOICE_PLAN_RANK[p.skuId] || 0) > (VOICE_PLAN_RANK[currentVoiceSku] || 0) ? 'upgrade' : 'downgrade',
+            }))
+          : [],
       };
     });
     const anyApproved = perDomain.some((d) => d.approvedPlans.length > 0);
@@ -5897,6 +5931,44 @@ async function provisionAddonForPayment(payment) {
   }
 }
 
+// Change a Voice plan: cancel the current Voice subscription, then provision the new one (1 seat).
+// Google has no in-place Voice plan change — it's a cancel + fresh purchase. Idempotent enough to
+// retry: a missing/already-cancelled old sub is fine, and the insert is guarded by existence.
+async function changeVoicePlanForPayment(payment) {
+  const account = payment.addonAccount || 'pk';
+  const dom = (payment.domain || '').toLowerCase();
+  const fromSku = String(payment.voiceChangeFromSku || '');
+  const toSku = String(payment.addonSku || '');
+  if (!dom || !toSku) return { ok: false, error: 'Missing domain or target plan.' };
+
+  const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+  const reseller = google.reseller({ version: 'v1', auth });
+
+  // Cancel the old Voice plan (if it's still there and isn't already the target).
+  try {
+    const resp = await reseller.subscriptions.list({ customerId: dom });
+    const subs = resp.data.subscriptions || [];
+    if (subs.some((s) => String(s.skuId) === toSku)) {
+      // Target already present (e.g. a retry after it provisioned) — nothing more to do.
+      return { ok: true, alreadyExists: true };
+    }
+    const oldSub = subs.find((s) => String(s.skuId) === fromSku) || subs.find((s) => VOICE_PLAN_SKUS.includes(String(s.skuId)));
+    if (oldSub && oldSub.subscriptionId) {
+      await reseller.subscriptions.delete({ customerId: dom, subscriptionId: oldSub.subscriptionId, deletionType: 'cancel' });
+      console.log(`VOICE CHANGE: cancelled ${oldSub.skuId} for ${dom}`);
+      try { await SubBilling.deleteOne({ domain: dom, skuId: String(oldSub.skuId) }); } catch (_) { }
+    }
+  } catch (e) {
+    const msg = e?.errors?.[0]?.message || e.message;
+    if (!/not found|does not exist|invalid|no longer/i.test(msg)) {
+      return { ok: false, error: 'Could not cancel the current plan: ' + msg };
+    }
+  }
+
+  // Provision the new plan (exactly one license) via the shared idempotent helper.
+  return await provisionAddonForPayment(payment);
+}
+
 // Admin: overview of ALL Voice approvals (customer + domain + plans), for the Voice tab.
 app.get('/api/admin/voice-approvals', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
@@ -5939,6 +6011,7 @@ app.get('/api/admin/voice-orders', authenticateCustomer, requireAdmin, async (re
     const filter = {
       $or: [
         { orderType: 'addon', addonSku: { $in: VOICE_PLAN_SKUS } },
+        { orderType: 'voice_change' },
         { isRenewal: true, renewalSkuId: { $in: VOICE_PLAN_SKUS } },
       ],
     };
@@ -5978,7 +6051,7 @@ app.get('/api/admin/voice-orders', authenticateCustomer, requireAdmin, async (re
       return {
         id: String(p._id),
         orderNumber: p.orderNumber || String(p._id).slice(-8),
-        kind: p.isRenewal ? 'renewal' : 'purchase',
+        kind: p.orderType === 'voice_change' ? 'change' : (p.isRenewal ? 'renewal' : 'purchase'),
         skuId: sku,
         plan: SKU_CATALOG[sku]?.name || sku,
         domain: p.domain,
@@ -6005,8 +6078,10 @@ app.post('/api/admin/voice-retry', authenticateCustomer, requireAdmin, async (re
     let payment = await Payment.findOne({ orderNumber: raw });
     if (!payment && /^[a-f0-9]{24}$/i.test(raw)) payment = await Payment.findById(raw);
     if (!payment) return res.status(404).json({ error: `No Voice order found for "${raw}".` });
-    if (payment.orderType !== 'addon' || !VOICE_PLAN_SKUS.includes(String(payment.addonSku))) {
-      return res.status(400).json({ error: 'This is not a Voice purchase order. (Renewals retry from the renewal box.)' });
+    const isVoicePurchase = payment.orderType === 'addon' && VOICE_PLAN_SKUS.includes(String(payment.addonSku));
+    const isVoiceChange = payment.orderType === 'voice_change';
+    if (!isVoicePurchase && !isVoiceChange) {
+      return res.status(400).json({ error: 'This is not a Voice purchase/change order. (Renewals retry from the renewal box.)' });
     }
     if (payment.isTest) return res.status(400).json({ error: 'This was a TEST-mode payment — it does not provision real subscriptions.' });
 
@@ -6027,9 +6102,9 @@ app.post('/api/admin/voice-retry', authenticateCustomer, requireAdmin, async (re
       if (payment.status !== 'paid') { payment.status = 'paid'; payment.paidAt = payment.paidAt || new Date(); await payment.save(); }
     }
 
-    const result = await provisionAddonForPayment(payment);
+    const result = isVoiceChange ? await changeVoicePlanForPayment(payment) : await provisionAddonForPayment(payment);
     if (!result.ok) return res.status(502).json({ error: `Provisioning failed: ${result.error}` });
-    res.json({ success: true, orderNumber: raw, domain: payment.domain, plan: SKU_CATALOG[payment.addonSku]?.name || payment.addonSku, message: result.alreadyExists ? 'Voice was already provisioned on this domain.' : 'Voice provisioned successfully.' });
+    res.json({ success: true, orderNumber: raw, domain: payment.domain, plan: SKU_CATALOG[payment.addonSku]?.name || payment.addonSku, message: result.alreadyExists ? 'Voice was already provisioned on this domain.' : (isVoiceChange ? 'Voice plan change applied.' : 'Voice provisioned successfully.') });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
@@ -6117,6 +6192,88 @@ app.post('/api/customer/voice/purchase', authenticateCustomer, async (req, res) 
       return res.json({ checkoutUrl: session.url, paymentId: payment._id });
     }
     // Nicky
+    try {
+      const nicky = await createNickyPayment({ amount, currency: 'USD', description: orderDesc, orderNumber, reference: String(payment._id), billDescription: orderDesc, customerEmail: me.businessEmail, customerName: me.firstName ? `${me.firstName} ${me.lastName || ''}`.trim() : me.businessEmail, redirectUrl: successUrl, cancelUrl });
+      payment.checkoutUrl = nicky.url; payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id); payment.providerShortId = nicky.shortId || null; await payment.save();
+      return res.json({ checkoutUrl: nicky.url, paymentId: payment._id });
+    } catch (e) {
+      return res.status(500).json({ error: 'Crypto checkout not available: ' + e.message });
+    }
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Customer: upgrade/downgrade the Google Voice plan on a domain. Google has no in-place change,
+// so this is cancel-old + buy-new: the customer pays the new plan price, then on payment the old
+// Voice plan is cancelled and the new one provisioned (1 license). No approval needed — the domain
+// already has an approved+active Voice subscription.
+app.post('/api/customer/voice/change', authenticateCustomer, async (req, res) => {
+  try {
+    const toSku = String(req.body?.skuId || '');
+    const dom = String(req.body?.domain || '').toLowerCase().trim();
+    const method = req.body?.method === 'nicky' ? 'nicky' : (req.body?.method === 'balance' ? 'balance' : 'stripe');
+    if (!VOICE_PLAN_SKUS.includes(toSku)) return res.status(400).json({ error: 'Invalid Google Voice plan.' });
+    if (!dom) return res.status(400).json({ error: 'Select the Workspace domain.' });
+    const me = await Customer.findById(req.customerId);
+
+    // The domain must currently HAVE a Voice subscription (different from the target). Find account.
+    let account = null, fromSku = null;
+    for (const acct of ['pk', 'usa']) {
+      let auth;
+      try { auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
+      const reseller = google.reseller({ version: 'v1', auth });
+      try {
+        const resp = await reseller.subscriptions.list({ customerId: dom });
+        const subs = resp.data.subscriptions || [];
+        const voiceSub = subs.find((s) => VOICE_PLAN_SKUS.includes(String(s.skuId)));
+        if (voiceSub) { account = acct; fromSku = String(voiceSub.skuId); break; }
+      } catch (_) { }
+    }
+    if (!account || !fromSku) return res.status(400).json({ error: `${dom} doesn't have a Google Voice plan to change. Add Voice first.` });
+    if (fromSku === toSku) return res.status(400).json({ error: `${dom} is already on ${SKU_CATALOG[toSku]?.name || 'this plan'}.` });
+
+    const plan = await Plan.findOne({ skuId: toSku });
+    if (!plan || !(plan.monthlyPrice > 0)) return res.status(400).json({ error: 'The target Voice plan has no price set. Please contact support.' });
+
+    const subtotal = Number(plan.monthlyPrice);
+    const taxed = await applyTaxAndFee(subtotal);
+    const amount = taxed.total;
+    const orderNumber = `VO-${Date.now()}`;
+    const meta = SKU_CATALOG[toSku];
+    const dir = (VOICE_PLAN_RANK[toSku] || 0) > (VOICE_PLAN_RANK[fromSku] || 0) ? 'Upgrade' : 'Downgrade';
+    const orderDesc = `${dir} to ${meta.name} for ${dom}`;
+
+    const commonFields = {
+      customerId: me._id, customerEmail: me.businessEmail, domain: dom, orderNumber,
+      orderType: 'voice_change', amount, subtotal: taxed.subtotal, tax: taxed.tax, fee: taxed.fee, currency: 'USD',
+      addonSku: toSku, addonAccount: account, addonName: meta.name, voiceChangeFromSku: fromSku,
+    };
+
+    // Pay from balance → apply immediately.
+    if (method === 'balance') {
+      if (Number(me.balance || 0) + 1e-9 < amount) return res.status(400).json({ error: `Your balance ($${Number(me.balance || 0).toFixed(2)}) doesn't cover this ($${amount.toFixed(2)}).` });
+      const payment = await Payment.create({ ...commonFields, method: 'balance', status: 'pending' });
+      try { await applyBalanceChange(me._id, { type: 'debit', amount, reason: `${dir} to ${meta.name} for ${dom} from balance`, orderNumber }); }
+      catch (e) { payment.status = 'cancelled'; await payment.save(); return res.status(400).json({ error: e.message }); }
+      payment.status = 'paid'; payment.paidAt = new Date(); await payment.save();
+      await markPaidAndProvision(payment);
+      return res.json({ paid: true, viaBalance: true, message: `${dir} to ${meta.name} applied for ${dom}.` });
+    }
+
+    const payment = await Payment.create({ ...commonFields, method, status: 'pending' });
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
+
+    if (method === 'stripe') {
+      let stripe; try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const sd = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (sd?.stripeMode || 'test') !== 'live'; await payment.save();
+      const line_items = [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(taxed.subtotal * 100) }, quantity: 1 }];
+      if (taxed.fee > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) }, quantity: 1 });
+      if (taxed.tax > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) }, quantity: 1 });
+      const session = await stripe.checkout.sessions.create({ mode: 'payment', line_items, success_url: successUrl, cancel_url: cancelUrl, client_reference_id: String(payment._id), metadata: { paymentId: String(payment._id), orderType: 'voice_change' } });
+      payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
+      return res.json({ checkoutUrl: session.url, paymentId: payment._id });
+    }
     try {
       const nicky = await createNickyPayment({ amount, currency: 'USD', description: orderDesc, orderNumber, reference: String(payment._id), billDescription: orderDesc, customerEmail: me.businessEmail, customerName: me.firstName ? `${me.firstName} ${me.lastName || ''}`.trim() : me.businessEmail, redirectUrl: successUrl, cancelUrl });
       payment.checkoutUrl = nicky.url; payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id); payment.providerShortId = nicky.shortId || null; await payment.save();
