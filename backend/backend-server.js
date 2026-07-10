@@ -3315,18 +3315,26 @@ async function markPaidAndProvision(payment) {
     try {
       if (payment.isTest) { console.log('TEST PAYMENT — seat change not applied for', payment.domain); return; }
       const me = await Customer.findById(payment.customerId);
-      const account = me?.account || 'pk';
       const dom = (payment.domain || '').toLowerCase();
-      const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
-      const reseller = google.reseller({ version: 'v1', auth });
-
-      // Find the subscription to get its current plan type (FLEXIBLE vs ANNUAL).
-      const resp = await reseller.subscriptions.list({ customerId: dom });
-      const sub = (resp.data.subscriptions || []).find((s) => String(s.skuId) === String(payment.seatChangeSku));
-      if (!sub) throw new Error('Subscription not found to change seats.');
-      const planName = sub.plan?.planName || 'FLEXIBLE';
       const newSeats = payment.seatChangeNewSeats;
-      // FLEXIBLE uses maximumNumberOfSeats; ANNUAL uses numberOfSeats.
+
+      // Find the subscription on whichever reseller account it actually lives on (pk or usa) —
+      // don't assume me.account, or the changeSeats call silently targets the wrong account.
+      let reseller = null, sub = null;
+      const tryAccounts = me?.account ? [me.account, me.account === 'pk' ? 'usa' : 'pk'] : ['pk', 'usa'];
+      for (const acct of tryAccounts) {
+        let auth; try { auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
+        const r = google.reseller({ version: 'v1', auth });
+        try {
+          const resp = await r.subscriptions.list({ customerId: dom });
+          const found = (resp.data.subscriptions || []).find((s) => String(s.skuId) === String(payment.seatChangeSku));
+          if (found) { reseller = r; sub = found; break; }
+        } catch (_) { }
+      }
+      if (!sub || !reseller) throw new Error('Subscription not found to change seats.');
+      const planName = sub.plan?.planName || 'FLEXIBLE';
+      // FLEXIBLE uses maximumNumberOfSeats; ANNUAL uses numberOfSeats. The Reseller API's changeSeats
+      // expects the Seats fields DIRECTLY in the request body — NOT nested under a `seats` key.
       const seatsBody = /ANNUAL/i.test(planName)
         ? { numberOfSeats: newSeats }
         : { maximumNumberOfSeats: newSeats };
@@ -3334,9 +3342,12 @@ async function markPaidAndProvision(payment) {
       await reseller.subscriptions.changeSeats({
         customerId: dom,
         subscriptionId: sub.subscriptionId,
-        requestBody: { seats: seatsBody },
+        requestBody: seatsBody,
       });
       console.log(`SEAT CHANGE applied: ${dom} ${payment.seatChangeSku} → ${newSeats} seats (${planName})`);
+
+      // Reflect the new seat count locally so admin views match Google.
+      try { await Subscription.updateOne({ customerId: payment.customerId, googleWorkspaceSkuId: String(payment.seatChangeSku) }, { $set: { seats: newSeats, updatedAt: new Date() } }); } catch (_) { }
 
       try {
         const html = emailShell('Users added', `
