@@ -1969,13 +1969,58 @@ const AdminCustomersSection = () => {
     finally { setAttachBusy(false); }
   };
 
+  // Bulk attach: paste many "email, domain" lines and attach them all in one go.
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResults, setBulkResults] = useState(null); // { dryRun, results, attached, failed } | null
+  const [bulkMsg, setBulkMsg] = useState('');
+  const [bulkForce, setBulkForce] = useState(false);
+  const [bulkForceAcct, setBulkForceAcct] = useState('pk');
+
+  const openBulk = () => { setBulkOpen(true); setBulkText(''); setBulkResults(null); setBulkMsg(''); setBulkForce(false); };
+  // Lines look like: "customer@email.com, workspacedomain.com" (optional 3rd column: pk or usa).
+  const parseBulkRows = () => bulkText.split('\n')
+    .map(l => l.trim())
+    .filter(l => l && !l.startsWith('#'))
+    .map(l => {
+      const parts = l.split(/[,;\t]+|\s+/).map(p => p.trim()).filter(Boolean);
+      const row = { email: parts[0] || '', domain: parts[1] || '' };
+      const acct = (parts[2] || '').toLowerCase();
+      if (acct === 'pk' || acct === 'usa') row.account = acct;
+      return row;
+    });
+  // Prefill one line per customer that has no domain yet, guessing the domain from their email.
+  const prefillBulk = () => {
+    const lines = customers.filter(c => !c.domain).map(c => `${c.email}, ${(c.email || '').split('@')[1] || ''}`);
+    setBulkText(lines.join('\n'));
+    setBulkResults(null); setBulkMsg(lines.length ? '' : 'All customers already have a domain attached.');
+  };
+  const runBulk = async (dryRun) => {
+    const rows = parseBulkRows();
+    if (rows.length === 0) { setBulkMsg('Add at least one line: customer@email.com, domain.com'); return; }
+    setBulkBusy(true); setBulkMsg(''); if (!dryRun) setBulkResults(null);
+    try {
+      const r = await axios.post(`${API_URL}/admin/customers/bulk-attach-domains`, {
+        rows, dryRun, force: !dryRun && bulkForce, forceAccount: bulkForceAcct,
+      });
+      setBulkResults(r.data);
+      if (dryRun) setBulkMsg(`Verified: ${r.data.attached} of ${r.data.total} row${r.data.total === 1 ? '' : 's'} can be attached.`);
+      else { setBulkMsg(`✓ Attached ${r.data.attached} of ${r.data.total} row${r.data.total === 1 ? '' : 's'}.${r.data.failed ? ` ${r.data.failed} failed — see below.` : ''}`); load(); }
+    } catch (e) { setBulkMsg(e?.response?.data?.error || 'Bulk attach failed.'); }
+    finally { setBulkBusy(false); }
+  };
+
   if (loading) return <div className="loading">Loading customers…</div>;
 
   return (
     <div className="section">
       <h2>👥 Customers</h2>
       {error && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 16 }}>{error}</div>}
-      <p style={{ color: '#5b6075' }}>{customers.length} registered customer{customers.length === 1 ? '' : 's'}</p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+        <p style={{ color: '#5b6075', margin: 0 }}>{customers.length} registered customer{customers.length === 1 ? '' : 's'}</p>
+        <button className="btn btn-secondary" style={{ fontSize: 13 }} onClick={openBulk}>Bulk attach subscriptions</button>
+      </div>
       {customers.length === 0 ? <p>No customers have registered yet.</p> : (
         <div style={{ overflowX: 'auto' }}>
           <table className="data-table">
@@ -2064,6 +2109,82 @@ const AdminCustomersSection = () => {
               </div>
             )}
             <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 10, marginBottom: 0 }}>The account (Pakistan/USA) is detected automatically from where the subscription lives.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk attach subscriptions modal */}
+      {bulkOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 1000 }} onClick={() => !bulkBusy && setBulkOpen(false)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 720, width: '100%', maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Bulk attach Workspace subscriptions</h3>
+            <p style={{ color: '#6b7280', marginTop: 0, fontSize: 13 }}>
+              One customer per line: <code>customer@email.com, workspacedomain.com</code> — optionally add <code>, pk</code> or <code>, usa</code> to pin the account.
+              Verify first to preview what will be attached, then attach everything in one go. The PK/USA account is detected automatically from where each subscription lives.
+            </p>
+
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={prefillBulk} disabled={bulkBusy}>
+                Prefill customers without a domain
+              </button>
+            </div>
+            <textarea
+              value={bulkText}
+              onChange={e => { setBulkText(e.target.value); setBulkResults(null); }}
+              placeholder={'customer1@email.com, customer1domain.com\ncustomer2@email.com, customer2domain.com, usa'}
+              rows={8}
+              style={{ width: '100%', borderRadius: 8, border: '1px solid #d8dbe6', padding: 10, fontFamily: 'monospace', fontSize: 13, boxSizing: 'border-box', marginBottom: 12 }}
+            />
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#374151', marginBottom: 12, flexWrap: 'wrap' }}>
+              <input type="checkbox" checked={bulkForce} onChange={e => setBulkForce(e.target.checked)} />
+              Force-link rows not found on Google (manually-managed domains) to
+              <select value={bulkForceAcct} onChange={e => setBulkForceAcct(e.target.value)} style={{ height: 32, borderRadius: 6, border: '1px solid #d8dbe6', fontSize: 13 }}>
+                <option value="pk">Pakistan</option><option value="usa">USA</option>
+              </select>
+              unless the line pins an account.
+            </label>
+
+            {bulkMsg && (
+              <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: bulkMsg.startsWith('✓') ? '#dcfce7' : '#fef9c3', color: bulkMsg.startsWith('✓') ? '#166534' : '#854d0e', fontSize: 14 }}>{bulkMsg}</div>
+            )}
+
+            {bulkResults && (
+              <div style={{ overflowX: 'auto', marginBottom: 12 }}>
+                <table className="data-table" style={{ fontSize: 13 }}>
+                  <thead><tr><th>Customer</th><th>Domain</th><th>Result</th></tr></thead>
+                  <tbody>
+                    {bulkResults.results.map((r, i) => (
+                      <tr key={i}>
+                        <td>{r.email || '—'}</td>
+                        <td>{r.domain || '—'}</td>
+                        <td>
+                          {r.success ? (
+                            <span style={{ color: '#166534' }}>
+                              ✓ {bulkResults.dryRun ? 'Found' : 'Attached'} on {(r.account || '').toUpperCase()}
+                              {r.forced ? ' (force-linked, not verified)' : ` · ${r.subscriptions ?? 0} subscription${r.subscriptions === 1 ? '' : 's'}`}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#b42318' }}>✗ {r.error || 'Failed.'}</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button onClick={() => runBulk(true)} disabled={bulkBusy} className="btn btn-secondary">
+                {bulkBusy ? 'Working…' : 'Verify all'}
+              </button>
+              <button onClick={() => runBulk(false)} disabled={bulkBusy || !bulkResults || !bulkResults.dryRun || bulkResults.attached === 0} className="btn btn-primary">
+                {bulkBusy ? 'Working…' : `Attach all${bulkResults?.dryRun ? ` (${bulkResults.attached})` : ''}`}
+              </button>
+              <button onClick={() => setBulkOpen(false)} disabled={bulkBusy} className="btn btn-secondary">Close</button>
+            </div>
+            <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 10, marginBottom: 0 }}>Verify runs the Google lookup without saving anything. Attach links each verified domain to its customer and syncs billing. Limit: 200 lines per run.</p>
           </div>
         </div>
       )}

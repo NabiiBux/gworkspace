@@ -1989,6 +1989,33 @@ app.get('/api/admin/lookup-domain', authenticateCustomer, requireAdmin, async (r
   }
 });
 
+// Detect which reseller account ('pk' or 'usa') hosts a domain's Workspace customer.
+// Shared by the single and bulk attach endpoints. Returns { account, subCount, errors };
+// account is null when the domain isn't a customer on any of the tried accounts.
+async function detectDomainAccount(dom, forceAccount) {
+  const tryAccounts = forceAccount ? [forceAccount] : ['pk', 'usa'];
+  let account = null, subCount = 0;
+  const errors = [];
+  for (const acct of tryAccounts) {
+    let auth;
+    try { auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
+    catch (e) { errors.push(`${acct.toUpperCase()}: not connected (${e.message})`); continue; }
+    const reseller = google.reseller({ version: 'v1', auth });
+    try {
+      // subscriptions.list is the most reliable existence check.
+      const resp = await reseller.subscriptions.list({ customerId: dom });
+      const subs = resp.data.subscriptions || [];
+      if (subs.length > 0) { account = acct; subCount = subs.length; break; }
+      // No subs but customer may exist:
+      try { await reseller.customers.get({ customerId: dom }); account = acct; subCount = 0; break; } catch (_) { }
+    } catch (e) {
+      const msg = e?.errors?.[0]?.message || e?.message || '';
+      if (!/not found|does not exist|404/i.test(msg)) errors.push(`${acct.toUpperCase()}: ${msg}`);
+    }
+  }
+  return { account, subCount, errors };
+}
+
 // Admin: attach (link) a domain to an existing customer. Account auto-detected from Google.
 app.post('/api/admin/customers/:id/attach-domain', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
@@ -1999,26 +2026,7 @@ app.post('/api/admin/customers/:id/attach-domain', authenticateCustomer, require
     if (!cust) return res.status(404).json({ error: 'Customer not found.' });
 
     // Auto-detect which account the domain's Workspace customer lives on (or use forced account).
-    const tryAccounts = forceAccount ? [forceAccount] : ['pk', 'usa'];
-    let account = null, subCount = 0;
-    const errors = [];
-    for (const acct of tryAccounts) {
-      let auth;
-      try { auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
-      catch (e) { errors.push(`${acct.toUpperCase()}: not connected (${e.message})`); continue; }
-      const reseller = google.reseller({ version: 'v1', auth });
-      try {
-        // subscriptions.list is the most reliable existence check.
-        const resp = await reseller.subscriptions.list({ customerId: dom });
-        const subs = resp.data.subscriptions || [];
-        if (subs.length > 0) { account = acct; subCount = subs.length; break; }
-        // No subs but customer may exist:
-        try { await reseller.customers.get({ customerId: dom }); account = acct; subCount = 0; break; } catch (_) { }
-      } catch (e) {
-        const msg = e?.errors?.[0]?.message || e?.message || '';
-        if (!/not found|does not exist|404/i.test(msg)) errors.push(`${acct.toUpperCase()}: ${msg}`);
-      }
-    }
+    const { account, subCount, errors } = await detectDomainAccount(dom, forceAccount);
     if (!account) {
       return res.status(400).json({
         error: 'Could not find ' + dom + ' as a Workspace customer on ' + (forceAccount ? forceAccount.toUpperCase() + ' account' : 'either account') + '.',
@@ -2049,6 +2057,79 @@ app.post('/api/admin/customers/:id/force-link-domain', authenticateCustomer, req
     cust.account = acct;
     await cust.save();
     res.json({ success: true, domain: dom, account: acct, message: `Force-linked ${dom} to ${cust.businessEmail} on the ${acct.toUpperCase()} account. (Not verified against Google.)` });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: bulk attach (link) Workspace domains to many customers in one request.
+// Body: { rows: [{ customerId? , email?, domain, account? }], dryRun?, force?, forceAccount? }
+//  - dryRun: verify every row against Google but save nothing (used by the UI preview).
+//  - force: rows not found on Google are force-linked anyway (to row.account or forceAccount, default 'pk').
+// Responds with a per-row results array so the UI can show exactly what happened to each line.
+app.post('/api/admin/customers/bulk-attach-domains', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
+    const dryRun = !!req.body.dryRun;
+    const forceFallback = !!req.body.force;
+    const forceFallbackAcct = req.body.forceAccount === 'usa' ? 'usa' : 'pk';
+    if (rows.length === 0) return res.status(400).json({ error: 'Provide at least one row with a customer email (or id) and a domain.' });
+    if (rows.length > 200) return res.status(400).json({ error: 'Too many rows — limit is 200 per request.' });
+
+    const results = [];
+    const touchedAccounts = new Set();
+    const detectCache = new Map(); // 'domain|forcedAcct' -> detection result, avoids duplicate Google calls
+
+    for (const row of rows) {
+      const dom = (row.domain || '').toLowerCase().trim();
+      const result = { email: row.email || null, customerId: row.customerId || null, domain: dom, success: false };
+      results.push(result);
+
+      if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) { result.error = 'Enter a valid domain like example.com'; continue; }
+
+      // Resolve the customer by id, or by email (exact, case-insensitive).
+      let cust = null;
+      try {
+        if (row.customerId) cust = await Customer.findById(row.customerId);
+        else if (row.email) {
+          const esc = String(row.email).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          cust = await Customer.findOne({ businessEmail: new RegExp(`^${esc}$`, 'i') });
+        }
+      } catch (_) { }
+      if (!cust) { result.error = 'Customer not found.'; continue; }
+      result.email = cust.businessEmail;
+      result.customerId = String(cust._id);
+
+      const rowAcct = row.account === 'usa' || row.account === 'pk' ? row.account : null;
+      let det = detectCache.get(`${dom}|${rowAcct || ''}`);
+      if (!det) { det = await detectDomainAccount(dom, rowAcct); detectCache.set(`${dom}|${rowAcct || ''}`, det); }
+
+      let account = det.account, forced = false;
+      if (!account && forceFallback) { account = rowAcct || forceFallbackAcct; forced = true; }
+      if (!account) {
+        result.error = `Not found as a Workspace customer on ${rowAcct ? rowAcct.toUpperCase() + ' account' : 'either account'}.`;
+        if (det.errors.length) result.diagnostics = det.errors;
+        continue;
+      }
+
+      result.account = account;
+      result.subscriptions = forced ? 0 : det.subCount;
+      result.forced = forced;
+      if (!dryRun) {
+        cust.domain = dom;
+        cust.account = account;
+        await cust.save();
+        if (!forced) touchedAccounts.add(account);
+      }
+      result.success = true;
+    }
+
+    if (!dryRun) {
+      for (const acct of touchedAccounts) { try { await syncSubscriptionsForBilling(acct); } catch (_) { } }
+    }
+
+    const attached = results.filter(r => r.success).length;
+    res.json({ success: true, dryRun, total: results.length, attached, failed: results.length - attached, results });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
