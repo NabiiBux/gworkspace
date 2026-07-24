@@ -1,22 +1,39 @@
 #!/usr/bin/env bash
-# Redeploy the backend from GitHub main. Run on the VPS:  bash backend/deploy/update.sh
+# Deploy/redeploy from GitHub main on the VPS:  bash backend/deploy/update.sh [--first-run]
+# Pulls main, installs deps, rebuilds the React frontend (served by the backend),
+# syntax-checks, and (re)starts the API under PM2.
 set -euo pipefail
 cd "$(dirname "$0")/../.."          # repo root
+FIRST_RUN="${1:-}"
 
-echo "==> Pulling latest main…"
-git fetch origin main
-git checkout main
-git pull --ff-only origin main
+if [ "$FIRST_RUN" != "--first-run" ]; then
+  echo "==> Pulling latest main…"
+  git fetch origin main
+  git checkout main
+  git pull --ff-only origin main
+fi
 
-echo "==> Installing backend dependencies…"
-cd backend
-npm install --omit=dev
+echo "==> Installing dependencies…"
+npm install --prefix backend --omit=dev
+npm install --prefix frontend
 
-echo "==> Syntax check…"
-node --check backend-server.js
+echo "==> Building frontend (env from backend/.env)…"
+# Export backend/.env so the build script picks up GOOGLE_OAUTH_CLIENT_ID etc.
+set -a; [ -f backend/.env ] && source backend/.env; set +a
+REACT_APP_GOOGLE_SIGNIN_CLIENT_ID="${GOOGLE_OAUTH_CLIENT_ID:-}" \
+REACT_APP_GOOGLE_MAPS_API_KEY="${GOOGLE_MAPS_API_KEY:-${GOOGLE_VOICE_API_KEY:-}}" \
+  npm run build --prefix frontend
 
-echo "==> Restarting API via PM2…"
-pm2 restart gworkspace-api --update-env
+echo "==> Backend syntax check…"
+node --check backend/backend-server.js
+
+echo "==> (Re)starting API via PM2…"
+mkdir -p backend/logs
+if pm2 describe gworkspace-api >/dev/null 2>&1; then
+  pm2 restart gworkspace-api --update-env
+else
+  pm2 start backend/ecosystem.config.js
+fi
 pm2 save
 
 echo "==> Done. Recent logs:"
