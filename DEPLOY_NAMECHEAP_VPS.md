@@ -1,21 +1,19 @@
-# Deploy the backend on a Namecheap VPS (Railway replacement)
+# Deploy portal.gnbmentor.com on a Namecheap VPS (Railway replacement)
 
-This runs `backend/backend-server.js` on your VPS with **PM2** (keeps it alive, restarts on reboot)
-behind **Nginx** with free **Let's Encrypt SSL**. MongoDB stays on Atlas; the frontend stays where it is —
-only the API moves.
+Your backend serves BOTH the API and the React frontend from one process — `portal.gnbmentor.com`
+today points at Railway which does both. The VPS simply takes over that same domain:
+one server, one domain, frontend + API together, with **PM2** (keeps it alive, restarts on reboot)
+behind **Nginx** with free **Let's Encrypt SSL**. MongoDB stays on Atlas.
 
-**You need:** VPS root SSH access, Ubuntu 20.04/22.04 (a clean OS image is best — if your VPS has cPanel,
-see the note at the bottom), and an API subdomain, e.g. `api.gnbmentor.com`.
+Because the domain stays `portal.gnbmentor.com`, your **Stripe webhook URL and Google OAuth redirect
+URIs do NOT change.** Only two external things change (step 7).
+
+**You need:** VPS root SSH access and Ubuntu 20.04/22.04 (a clean OS image is best — if your VPS has
+cPanel, see the note at the bottom).
 
 ---
 
-## 1. Point a subdomain at the VPS
-
-In Namecheap DNS for your domain, add an **A record**:
-
-- Host: `api` → Value: `<YOUR_VPS_IP>` (TTL automatic)
-
-## 2. Install Node.js 20, git, nginx, PM2 (SSH into the VPS as root)
+## 1. Install Node.js 20, git, nginx, PM2 (SSH into the VPS as root)
 
 ```bash
 apt update && apt upgrade -y
@@ -25,103 +23,131 @@ npm install -g pm2
 node -v   # should print v20.x
 ```
 
-## 3. Clone the repo and install dependencies
+If your VPS has **1 GB RAM or less**, add swap first (the React build needs it):
+
+```bash
+fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+```
+
+## 2. Clone the repo and install dependencies
 
 ```bash
 cd /opt
 git clone https://github.com/NabiiBux/gworkspace.git
-cd gworkspace/backend
-npm install --omit=dev
+cd gworkspace
+npm install --prefix backend --omit=dev
+npm install --prefix frontend
 ```
 
 (For a private repo, create a GitHub fine-grained personal access token with read access and clone with
 `git clone https://<TOKEN>@github.com/NabiiBux/gworkspace.git`.)
 
-## 4. Create the .env
+## 3. Create the backend .env
 
 ```bash
+cd /opt/gworkspace/backend
 cp .env.vps.example .env
 nano .env
 ```
 
-Fill in every value — copy them from **Railway → your service → Variables**. Three values CHANGE for the VPS:
+Fill in every value — copy them from **Railway → your service → Variables**. Because the domain is
+unchanged, almost everything is copied as-is (including `GOOGLE_OAUTH_REDIRECT_URI`, `PORTAL_URL`,
+`STRIPE_WEBHOOK_SECRET`). The ONE value that must change:
 
 | Variable | New value |
 |---|---|
-| `NAMECHEAP_CLIENT_IP` | your VPS public IP (and whitelist that IP in Namecheap → Profile → Tools → API Access) |
-| `GOOGLE_OAUTH_REDIRECT_URI` / `_USA` | swap the Railway domain for `https://api.gnbmentor.com/...` (same path), and add the new URI in Google Cloud Console → Credentials |
-| `STRIPE_WEBHOOK_SECRET` | new signing secret from step 7 |
+| `NAMECHEAP_CLIENT_IP` | your VPS public IP — and whitelist that IP in Namecheap → Profile → Tools → API Access |
 
-Paste the two `GOOGLE_SERVICE_ACCOUNT_JSON` values as **one single line** each, exactly as they are in Railway.
+Paste the two `GOOGLE_SERVICE_ACCOUNT_JSON` values as **one single line** each, exactly as in Railway.
 
-## 5. Start with PM2
+## 4. Build the frontend, start with PM2
 
 ```bash
-cd /opt/gworkspace/backend
-mkdir -p logs
-pm2 start ecosystem.config.js
-pm2 startup            # prints a command — run it (registers PM2 on boot)
+cd /opt/gworkspace
+bash backend/deploy/update.sh --first-run
+```
+
+That builds the React frontend (served by the backend automatically) and starts the API under PM2.
+Then make PM2 survive reboots:
+
+```bash
+pm2 startup     # prints a command — run it
 pm2 save
 curl http://127.0.0.1:5000/api/health   # should return OK JSON
 ```
 
-Logs (your `[lookup]`, `[auto-renew]`, `[bulk-lookup]` lines) are at:
+Logs (your `[lookup]`, `[auto-renew]`, `[bulk-lookup]` lines — this replaces Railway logs):
 
 ```bash
 pm2 logs gworkspace-api
 ```
 
-## 6. Nginx + SSL
+## 5. Nginx + SSL
 
 ```bash
-cp /opt/gworkspace/backend/deploy/nginx-api.conf /etc/nginx/sites-available/gworkspace-api
-nano /etc/nginx/sites-available/gworkspace-api    # replace api.gnbmentor.com if different
-ln -s /etc/nginx/sites-available/gworkspace-api /etc/nginx/sites-enabled/
+cp /opt/gworkspace/backend/deploy/nginx-api.conf /etc/nginx/sites-available/gworkspace
+ln -s /etc/nginx/sites-available/gworkspace /etc/nginx/sites-enabled/
+rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 
 apt install -y certbot python3-certbot-nginx
-certbot --nginx -d api.gnbmentor.com      # choose redirect HTTP→HTTPS
 ```
 
-Firewall (if enabled / to enable):
+Don't run certbot yet — it needs DNS pointing here first (next step).
+
+Firewall:
 
 ```bash
 ufw allow OpenSSH && ufw allow 'Nginx Full' && ufw enable
 ```
 
-Test from your own computer: `https://api.gnbmentor.com/api/health` should return OK.
+## 6. Switch DNS: portal.gnbmentor.com → the VPS
 
-## 7. Re-point the outside world at the VPS
+In Namecheap DNS for `gnbmentor.com`:
 
-1. **Stripe webhook** — Stripe Dashboard → Developers → Webhooks: edit (or add) the endpoint to
-   `https://api.gnbmentor.com/api/webhooks/stripe`, event `checkout.session.completed`.
-   Copy the **new signing secret** into `STRIPE_WEBHOOK_SECRET` in `.env`, then `pm2 restart gworkspace-api`.
-2. **MongoDB Atlas** — Network Access → add the VPS IP (replace the old allow-all/Railway entry if you want).
-3. **Google Cloud Console** — both OAuth clients (PK + USA): add the new redirect URI.
-4. **Frontend** — in Vercel (or wherever the frontend builds), set
-   `REACT_APP_API_URL=https://api.gnbmentor.com/api` and redeploy the frontend.
-5. **Nicky** — if a webhook/callback URL is configured in your Nicky account, update it to the new domain.
+- **Delete/edit** the existing `portal` record (currently a CNAME/A pointing at Railway).
+- Add an **A record**: Host `portal` → Value `<YOUR_VPS_IP>`.
 
-Once everything works, you can stop the Railway service.
+Wait a few minutes for DNS, then issue the SSL certificate:
+
+```bash
+certbot --nginx -d portal.gnbmentor.com     # choose redirect HTTP→HTTPS
+```
+
+Open `https://portal.gnbmentor.com` — you should see your portal, served by the VPS.
+(Railway keeps running unchanged during all this, so there's no downtime while DNS switches —
+both serve the same app against the same database.)
+
+## 7. The only two external updates
+
+1. **MongoDB Atlas** — Network Access → add the VPS IP.
+2. **Namecheap API** — whitelist the VPS IP (matches `NAMECHEAP_CLIENT_IP` from step 3).
+
+Stripe webhook, Google OAuth redirects, Nicky URLs: **unchanged** — same domain as before.
+
+Once you've tested login, a domain lookup, and (with a real payment) the Stripe webhook, stop the
+Railway service.
 
 ## 8. Deploying updates later
+
+After each merge to main:
 
 ```bash
 bash /opt/gworkspace/backend/deploy/update.sh
 ```
 
-That pulls `main`, installs deps, syntax-checks, and restarts PM2. (This replaces Railway's auto-deploy;
-run it after each merge to main.)
+Pulls `main`, installs deps, **rebuilds the frontend**, syntax-checks, restarts PM2.
+(This replaces Railway's auto-deploy.)
 
 ## Notes / gotchas
 
-- **Keep ONE instance** (`ecosystem.config.js` already does): the daily billing/auto-renew scheduler runs
-  inside the process — two instances would double-charge/double-suspend.
-- `backend/google_connections.json` (OAuth fallback tokens) now persists on disk — an upgrade over Railway's
-  ephemeral filesystem. It lives in `backend/` and survives restarts; don't delete it.
-- The daily billing check schedules itself in-process at midnight — no external cron needed. Optionally point
-  a free cron (cron-job.org) at `https://api.gnbmentor.com/api/cron/subscription-billing` as a backup.
-- **If your VPS has cPanel**: cPanel's Apache occupies ports 80/443. Easiest fix is reinstalling the VPS with
-  a clean Ubuntu image (Namecheap panel → Reinstall). Alternatively run Nginx on other ports or use Apache's
-  reverse proxy — but clean Ubuntu is strongly recommended.
-- RAM: the API runs comfortably in ~200–400 MB; any 1 GB+ VPS plan is fine.
+- **Keep ONE instance** (`ecosystem.config.js` already does): the daily billing/auto-renew scheduler
+  runs inside the process — two instances would double-charge/double-suspend.
+- `backend/google_connections.json` (OAuth fallback tokens) now persists on disk — an upgrade over
+  Railway's ephemeral filesystem. Don't delete it.
+- The daily billing check schedules itself in-process at midnight — no external cron needed. Optionally
+  point a free cron (cron-job.org) at `https://portal.gnbmentor.com/api/cron/subscription-billing` as backup.
+- **If your VPS has cPanel**: cPanel's Apache occupies ports 80/443. Easiest fix is reinstalling with a
+  clean Ubuntu image (Namecheap panel → Reinstall). Clean Ubuntu is strongly recommended.
+- RAM: the API runs in ~200–400 MB. The React build is the heavy part — the swapfile from step 1 covers it.
