@@ -14,7 +14,9 @@ const nodemailer = require('nodemailer');
 const cors = require('cors');
 const dotenv = require('dotenv');
 
-dotenv.config();
+// Load .env from THIS file's directory, not the process working directory — so the config is
+// found no matter where the app is launched from (PM2, systemd, a different cwd, etc.).
+dotenv.config({ path: require('path').join(__dirname, '.env') });
 
 const app = express();
 
