@@ -15,6 +15,10 @@ cPanel, see the note at the bottom).
 
 ## 1. Install Node.js 20, git, nginx, PM2 (SSH into the VPS as root)
 
+First check which OS the VPS runs: `cat /etc/os-release`.
+
+**Ubuntu / Debian:**
+
 ```bash
 apt update && apt upgrade -y
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -22,6 +26,23 @@ apt install -y nodejs git nginx
 npm install -g pm2
 node -v   # should print v20.x
 ```
+
+**CentOS / AlmaLinux / Rocky (`apt: command not found` → you're here):**
+
+```bash
+dnf update -y
+dnf install -y curl git nginx
+curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+dnf install -y nodejs
+npm install -g pm2
+node -v   # should print v20.x
+systemctl enable --now nginx
+# SELinux blocks nginx from proxying to the Node app — allow it (one-time, required):
+setsebool -P httpd_can_network_connect 1
+```
+
+On RHEL-family, later steps differ in two places: use **firewalld** instead of ufw (step 5) and install
+certbot via EPEL (step 6) — both shown inline below.
 
 If your VPS has **1 GB RAM or less**, add swap first (the React build needs it):
 
@@ -96,10 +117,17 @@ apt install -y certbot python3-certbot-nginx
 
 Don't run certbot yet — it needs DNS pointing here first (next step).
 
-Firewall:
+Firewall — **Ubuntu/Debian:**
 
 ```bash
 ufw allow OpenSSH && ufw allow 'Nginx Full' && ufw enable
+```
+
+Firewall — **CentOS/AlmaLinux/Rocky (firewalld):**
+
+```bash
+firewall-cmd --permanent --add-service=http --add-service=https --add-service=ssh
+firewall-cmd --reload
 ```
 
 ## 6. Switch DNS: portal.gnbmentor.com → the VPS
@@ -109,7 +137,15 @@ In Namecheap DNS for `gnbmentor.com`:
 - **Delete/edit** the existing `portal` record (currently a CNAME/A pointing at Railway).
 - Add an **A record**: Host `portal` → Value `<YOUR_VPS_IP>`.
 
-Wait a few minutes for DNS, then issue the SSL certificate:
+Wait a few minutes for DNS, then issue the SSL certificate.
+
+**Ubuntu/Debian** (certbot was installed in step 5). **CentOS/AlmaLinux/Rocky** — install it first:
+
+```bash
+dnf install -y epel-release && dnf install -y certbot python3-certbot-nginx
+```
+
+Then on either OS:
 
 ```bash
 certbot --nginx -d portal.gnbmentor.com     # choose redirect HTTP→HTTPS
