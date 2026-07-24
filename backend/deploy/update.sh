@@ -18,10 +18,11 @@ npm install --prefix backend --omit=dev
 npm install --prefix frontend
 
 echo "==> Building frontend (env from backend/.env)…"
-# Export backend/.env so the build script picks up GOOGLE_OAUTH_CLIENT_ID etc.
-set -a; [ -f backend/.env ] && source backend/.env; set +a
-REACT_APP_GOOGLE_SIGNIN_CLIENT_ID="${GOOGLE_OAUTH_CLIENT_ID:-}" \
-REACT_APP_GOOGLE_MAPS_API_KEY="${GOOGLE_MAPS_API_KEY:-${GOOGLE_VOICE_API_KEY:-}}" \
+# Read single values from backend/.env WITHOUT sourcing it — values like the Google
+# service-account JSON contain spaces and would break (and even execute) under `source`.
+envval() { [ -f backend/.env ] && grep -E "^$1=" backend/.env | head -1 | cut -d= -f2- | tr -d '"' || true; }
+REACT_APP_GOOGLE_SIGNIN_CLIENT_ID="$(envval GOOGLE_OAUTH_CLIENT_ID)" \
+REACT_APP_GOOGLE_MAPS_API_KEY="$(envval GOOGLE_MAPS_API_KEY)" \
   npm run build --prefix frontend
 
 echo "==> Backend syntax check…"
