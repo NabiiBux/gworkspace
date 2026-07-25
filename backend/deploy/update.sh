@@ -21,9 +21,15 @@ echo "==> Building frontend (env from backend/.env)…"
 # Read single values from backend/.env WITHOUT sourcing it — values like the Google
 # service-account JSON contain spaces and would break (and even execute) under `source`.
 envval() { [ -f backend/.env ] && grep -E "^$1=" backend/.env | head -1 | cut -d= -f2- | tr -d '"' || true; }
-REACT_APP_GOOGLE_SIGNIN_CLIENT_ID="$(envval GOOGLE_OAUTH_CLIENT_ID)" \
-REACT_APP_GOOGLE_MAPS_API_KEY="$(envval GOOGLE_MAPS_API_KEY)" \
+# Prefer an explicit REACT_APP_* value in .env (paste the exact Vercel var names), else fall
+# back to the backend variable names. REACT_APP_API_URL is intentionally left unset so the app
+# defaults to window.location.origin + '/api' (i.e. https://portal.gnbmentor.com/api).
+SIGNIN="$(envval REACT_APP_GOOGLE_SIGNIN_CLIENT_ID)"; [ -z "$SIGNIN" ] && SIGNIN="$(envval GOOGLE_OAUTH_CLIENT_ID)"
+MAPS="$(envval REACT_APP_GOOGLE_MAPS_API_KEY)"; [ -z "$MAPS" ] && MAPS="$(envval GOOGLE_MAPS_API_KEY)"
+REACT_APP_GOOGLE_SIGNIN_CLIENT_ID="$SIGNIN" \
+REACT_APP_GOOGLE_MAPS_API_KEY="$MAPS" \
   npm run build --prefix frontend
+echo "    (signin client id ${SIGNIN:+set}${SIGNIN:-MISSING}; maps key ${MAPS:+set}${MAPS:-MISSING})"
 
 echo "==> Backend syntax check…"
 node --check backend/backend-server.js
