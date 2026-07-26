@@ -150,23 +150,21 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
   return <div ref={containerRef} style={{ width: '100%', minHeight: 44 }} />;
 };
 
-// Look up city/state for a 5-digit US ZIP code via the Geocoding API.
-// Places Autocomplete's predictions engine is unreliable for bare numeric
-// ZIP-only queries (it's tuned for named places/full addresses), so a plain
-// ZIP typed into the address box often returns no suggestions at all even
-// though it's a valid code. A direct geocode is a much more reliable way to
-// resolve city/state from a ZIP.
+// Look up city/state for a 5-digit US ZIP code (USA-restricted) via our own
+// backend, which uses the server-side GOOGLE_MAPS_API_KEY secret. Places
+// Autocomplete's predictions engine is unreliable for bare numeric ZIP-only
+// queries (it's tuned for named places/full addresses), so a plain ZIP typed
+// into the address box often returns no suggestions at all even though it's a
+// valid code. A direct geocode is a much more reliable way to resolve
+// city/state from a ZIP. We proxy through the backend so the Maps key stays
+// server-side and no browser HTTP-referrer restriction is needed.
 async function geocodeUSZip(zip) {
-  if (!MAPS_KEY || !/^\d{5}$/.test(zip)) return null;
+  if (!/^\d{5}$/.test(zip)) return null;
   try {
-    const res = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
-      params: { address: zip, components: 'country:US', key: MAPS_KEY },
-    });
-    if (res.data.status !== 'OK' || !res.data.results || !res.data.results.length) return null;
-    const comps = res.data.results[0].address_components || [];
-    const get = (type) => comps.find((c) => (c.types || []).includes(type));
-    const city = get('locality')?.long_name || get('sublocality')?.long_name || get('postal_town')?.long_name || '';
-    const state = get('administrative_area_level_1')?.short_name || '';
+    const res = await axios.get(`${API_URL}/geo/zip/${zip}`);
+    const city = res.data?.city || '';
+    const state = res.data?.state || '';
+    if (!city && !state) return null;
     return { city, state };
   } catch (err) {
     console.error('ZIP geocode error:', err);
