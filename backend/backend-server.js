@@ -10594,6 +10594,38 @@ app.get('/api/admin/google/dashboard', authenticateCustomer, async (req, res) =>
 });
 
 // HEALTH CHECK
+// Resolve city/state for a 5-digit US ZIP, USA-restricted, using the server-side
+// GOOGLE_MAPS_API_KEY secret. Doing this on the backend keeps the key off the
+// client and avoids HTTP-referrer restriction issues on the browser key.
+app.get('/api/geo/zip/:zip', async (req, res) => {
+  const zip = String(req.params.zip || '').trim();
+  if (!/^\d{5}$/.test(zip)) {
+    return res.status(400).json({ error: 'Invalid ZIP' });
+  }
+  const key = process.env.GOOGLE_MAPS_API_KEY || process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
+  if (!key) {
+    console.error('[geo] GOOGLE_MAPS_API_KEY not set');
+    return res.status(500).json({ error: 'Geocoding not configured' });
+  }
+  try {
+    const gr = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
+      params: { address: zip, components: 'country:US', key },
+      timeout: 10000,
+    });
+    if (gr.data.status !== 'OK' || !gr.data.results || !gr.data.results.length) {
+      return res.json({ city: '', state: '' });
+    }
+    const comps = gr.data.results[0].address_components || [];
+    const get = (type) => comps.find((c) => (c.types || []).includes(type));
+    const city = get('locality')?.long_name || get('sublocality')?.long_name || get('postal_town')?.long_name || '';
+    const state = get('administrative_area_level_1')?.short_name || '';
+    return res.json({ city, state });
+  } catch (err) {
+    console.error('[geo] ZIP lookup error:', err.response?.data || err.message);
+    return res.status(502).json({ error: 'Geocoding failed' });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'Server is running' });
 });
