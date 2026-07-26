@@ -10613,6 +10613,11 @@ app.get('/api/geo/zip/:zip', async (req, res) => {
       timeout: 10000,
     });
     if (gr.data.status !== 'OK' || !gr.data.results || !gr.data.results.length) {
+      // Surface why Google said no (REQUEST_DENIED/ZERO_RESULTS/etc.) and which
+      // key was used (last 6 chars only) so a stale/mismatched key is obvious.
+      console.error(
+        `[geo] zip=${zip} google status=${gr.data.status} msg=${gr.data.error_message || '(none)'} keyEnds=...${String(key).slice(-6)}`
+      );
       return res.json({ city: '', state: '' });
     }
     const comps = gr.data.results[0].address_components || [];
