@@ -313,6 +313,7 @@ const CustomerAuthFlow = () => {
   const [googleOnly, setGoogleOnly] = useState(false); // account exists but has no password (Google signup)
   const [googleClientId, setGoogleClientId] = useState(GOOGLE_SIGNIN_CLIENT_ID);
   const [msConfigured, setMsConfigured] = useState(false);
+  const [fbConfigured, setFbConfigured] = useState(false);
   const googleBtnRef = useRef(null);
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((email || '').trim());
@@ -327,11 +328,14 @@ const CustomerAuthFlow = () => {
     return () => { active = false; };
   }, [googleClientId]);
 
-  // Is Microsoft sign-in configured on the backend?
+  // Which redirect SSO providers are configured on the backend?
   useEffect(() => {
     let active = true;
     axios.get(`${API_URL}/auth/microsoft/config`)
       .then((res) => { if (active) setMsConfigured(!!res.data.configured); })
+      .catch(() => {});
+    axios.get(`${API_URL}/auth/facebook/config`)
+      .then((res) => { if (active) setFbConfigured(!!res.data.configured); })
       .catch(() => {});
     return () => { active = false; };
   }, []);
@@ -437,6 +441,10 @@ const CustomerAuthFlow = () => {
     if (!msConfigured) { notConfigured('Microsoft'); return; }
     window.location.href = `${API_URL}/auth/microsoft/start`;
   };
+  const startFacebook = () => {
+    if (!fbConfigured) { notConfigured('Facebook'); return; }
+    window.location.href = `${API_URL}/auth/facebook/start`;
+  };
 
   const SocialButtons = ({ label }) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -449,7 +457,7 @@ const CustomerAuthFlow = () => {
       <button type="button" className="btn-social" onClick={startMicrosoft}>
         <span style={{ fontSize: 16, lineHeight: 1 }}>▦</span> {label} with Microsoft
       </button>
-      <button type="button" className="btn-social" onClick={() => notConfigured('Facebook')}>
+      <button type="button" className="btn-social" onClick={startFacebook}>
         <span style={{ color: '#1877F2', fontSize: 18 }}>ⓕ</span> {label} with Facebook
       </button>
     </div>

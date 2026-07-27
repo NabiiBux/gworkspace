@@ -1554,6 +1554,102 @@ app.get('/api/auth/microsoft/callback', async (req, res) => {
   }
 });
 
+// ==================== FACEBOOK SIGN-IN (OAuth 2.0 auth-code) ====================
+// Same server-side pattern as Microsoft: /start -> Facebook consent, /callback
+// exchanges the code for an access token, reads the profile (email + name),
+// upserts the customer, and hands our JWT back via the URL hash.
+const FB_API_VER = process.env.FACEBOOK_API_VERSION || 'v19.0';
+const fbRedirectUri = () => process.env.FACEBOOK_REDIRECT_URI || `${PORTAL_URL}/api/auth/facebook/callback`;
+const fbConfigured = () => !!(process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET);
+
+app.get('/api/auth/facebook/config', (req, res) => {
+  res.json({ configured: fbConfigured() });
+});
+
+app.get('/api/auth/facebook/start', (req, res) => {
+  if (!fbConfigured()) {
+    return res.redirect(`${FRONTEND_URL}/login#sso_error=${encodeURIComponent('Facebook sign-in is not configured yet.')}`);
+  }
+  const state = jwt.sign({ k: 'fb', n: Math.random().toString(36).slice(2) }, process.env.JWT_SECRET, { expiresIn: '10m' });
+  const params = new URLSearchParams({
+    client_id: process.env.FACEBOOK_APP_ID,
+    redirect_uri: fbRedirectUri(),
+    state,
+    response_type: 'code',
+    scope: 'email,public_profile',
+  });
+  res.redirect(`https://www.facebook.com/${FB_API_VER}/dialog/oauth?${params.toString()}`);
+});
+
+app.get('/api/auth/facebook/callback', async (req, res) => {
+  const fail = (msg) => res.redirect(`${FRONTEND_URL}/login#sso_error=${encodeURIComponent(msg)}`);
+  try {
+    const { code, state, error, error_description, error_message } = req.query;
+    if (error) return fail(error_description || error_message || String(error));
+    if (!code || !state) return fail('Facebook sign-in was cancelled.');
+    try { jwt.verify(String(state), process.env.JWT_SECRET); } catch (_) { return fail('Your Facebook sign-in expired. Please try again.'); }
+
+    // Exchange the code for an access token.
+    const tokenResp = await axios.get(`https://graph.facebook.com/${FB_API_VER}/oauth/access_token`, {
+      params: {
+        client_id: process.env.FACEBOOK_APP_ID,
+        client_secret: process.env.FACEBOOK_APP_SECRET,
+        redirect_uri: fbRedirectUri(),
+        code: String(code),
+      },
+      timeout: 15000,
+    });
+    const accessToken = tokenResp.data?.access_token;
+    if (!accessToken) return fail('Facebook did not return an access token.');
+
+    // Read the profile. email may be absent if the user has no email or denied it.
+    const me = await axios.get(`https://graph.facebook.com/${FB_API_VER}/me`, {
+      params: { fields: 'id,name,first_name,last_name,email', access_token: accessToken },
+      timeout: 15000,
+    });
+    const email = String(me.data?.email || '').toLowerCase().trim();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return fail('Facebook did not share an email address. Please sign up with email or Google instead.');
+    }
+    const firstName = me.data?.first_name || (me.data?.name || '').split(' ')[0] || '';
+    const lastName = me.data?.last_name || (me.data?.name || '').split(' ').slice(1).join(' ') || '';
+
+    let customer = await Customer.findOne({ businessEmail: email });
+    let isNewUser = false;
+    if (!customer) {
+      isNewUser = true;
+      customer = await Customer.create({
+        businessEmail: email,
+        username: email.split('@')[0],
+        firstName, lastName,
+        companyName: me.data?.name || '',
+        role: 'customer',
+        authProvider: 'facebook',
+        emailVerified: true,
+        password: await bcrypt.hash('fb-' + Math.random().toString(36).slice(2) + Date.now(), 10),
+        registrationIp: getClientIp(req),
+        lastLoginIp: getClientIp(req),
+      });
+      const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase();
+      if (adminEmail && email === adminEmail) { customer.role = 'admin'; await customer.save(); }
+    } else {
+      customer.emailVerified = true;
+      customer.lastLoginIp = getClientIp(req);
+      customer.lastLogin = new Date();
+      await customer.save();
+    }
+    if (isNewUser) {
+      try { await sendWelcomeEmail(customer.businessEmail, customer.firstName || customer.username); } catch (_) { }
+    }
+
+    const token = generateToken(customer._id, customer.businessEmail, customer.role || 'customer');
+    res.redirect(`${FRONTEND_URL}/#sso_token=${encodeURIComponent(token)}`);
+  } catch (e) {
+    console.error('[facebook] callback error:', e.response?.data || e.message);
+    return fail('Facebook sign-in failed. Please try again or use email.');
+  }
+});
+
 // One-time admin promotion by secret (diagnoses + fixes admin role).
 // Visit: /api/admin/fix-admin?secret=YOUR_JWT_SECRET&email=admin@gnbmentor.com
 app.get('/api/admin/fix-admin', async (req, res) => {
