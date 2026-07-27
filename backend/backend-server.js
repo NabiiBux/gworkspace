@@ -10631,6 +10631,14 @@ app.get('/api/geo/zip/:zip', async (req, res) => {
   }
 });
 
+// Serve the Google Maps browser key at runtime so the frontend address
+// autocomplete works without a build-time REACT_APP_GOOGLE_MAPS_API_KEY.
+// Maps JS keys are meant to be public (restrict by HTTP referrer / API in
+// Google Cloud Console); this just avoids baking it into the React build.
+app.get('/api/config/maps-key', (req, res) => {
+  res.json({ key: process.env.GOOGLE_MAPS_API_KEY || process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '' });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'Server is running' });
 });
