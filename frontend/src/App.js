@@ -120,24 +120,35 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
   useEffect(() => {
     if (!mapsReady || !containerRef.current) return;
     let cancelled = false;
+    let tries = 0;
 
-    (async () => {
+    // The Places library loads asynchronously (loading=async), so the "maps ready"
+    // signal can fire BEFORE PlaceAutocompleteElement is attached. Instead of giving
+    // up (which left the field blank until a lucky refresh), resolve the class via
+    // importLibrary and poll until it exists, then mount.
+    const resolvePlacesClass = async () => {
+      let cls = window.google?.maps?.places?.PlaceAutocompleteElement;
+      if (!cls && window.google?.maps?.importLibrary) {
+        try {
+          const lib = await window.google.maps.importLibrary('places');
+          cls = lib?.PlaceAutocompleteElement || window.google?.maps?.places?.PlaceAutocompleteElement;
+        } catch (_) { /* fall through to poll */ }
+      }
+      return cls;
+    };
+
+    const mount = async () => {
+      if (cancelled || !containerRef.current) return;
+      const PlaceAutocompleteElement = await resolvePlacesClass();
+      if (!PlaceAutocompleteElement) {
+        if (tries++ < 40) { setTimeout(mount, 150); return; } // wait up to ~6s
+        console.error('PlaceAutocompleteElement not available on google.maps.places');
+        return;
+      }
+      if (cancelled || !containerRef.current) return;
       try {
-        // The script tag was loaded with `libraries=places`, which puts
-        // PlaceAutocompleteElement directly on google.maps.places — no need for
-        // (and no support for) the dynamic importLibrary() bootstrap here.
-        const PlaceAutocompleteElement = window.google.maps.places?.PlaceAutocompleteElement;
-        if (!PlaceAutocompleteElement) {
-          console.error('PlaceAutocompleteElement not available on google.maps.places');
-          return;
-        }
-        if (cancelled || !containerRef.current) return;
-
         const options = {};
-        if (countries) {
-          // Can accept string or array
-          options.componentRestrictions = { country: countries };
-        }
+        if (countries) options.componentRestrictions = { country: countries }; // string or array
 
         const el = new PlaceAutocompleteElement(options);
         el.style.width = '100%';
@@ -166,7 +177,8 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
       } catch (err) {
         console.error('Autocomplete init error:', err);
       }
-    })();
+    };
+    mount();
 
     return () => { cancelled = true; };
   }, [mapsReady, JSON.stringify(countries)]);
@@ -9767,19 +9779,32 @@ function WorkspaceOrderFlow() {
     if (step !== 2 || !mapsReady || !streetInputRef.current) return;
     if (autocompleteRef.current) return; // already mounted
     let cancelled = false;
+    let tries = 0;
 
-    (async () => {
+    // Places loads asynchronously, so PlaceAutocompleteElement may not exist the
+    // instant maps reports "ready". Resolve it via importLibrary and poll instead
+    // of bailing (which left the address box blank until a lucky refresh).
+    const resolvePlacesClass = async () => {
+      let cls = window.google?.maps?.places?.PlaceAutocompleteElement;
+      if (!cls && window.google?.maps?.importLibrary) {
+        try {
+          const lib = await window.google.maps.importLibrary('places');
+          cls = lib?.PlaceAutocompleteElement || window.google?.maps?.places?.PlaceAutocompleteElement;
+        } catch (_) { /* fall through to poll */ }
+      }
+      return cls;
+    };
+
+    const mount = async () => {
+      if (cancelled || !streetInputRef.current || autocompleteRef.current) return;
+      const PlaceAutocompleteElement = await resolvePlacesClass();
+      if (!PlaceAutocompleteElement) {
+        if (tries++ < 40) { setTimeout(mount, 150); return; } // wait up to ~6s
+        console.error('PlaceAutocompleteElement not available on google.maps.places');
+        return;
+      }
+      if (cancelled || !streetInputRef.current) return;
       try {
-        // The script tag was loaded with `libraries=places`, which puts
-        // PlaceAutocompleteElement directly on google.maps.places — no need for
-        // (and no support for) the dynamic importLibrary() bootstrap here.
-        const PlaceAutocompleteElement = window.google.maps.places?.PlaceAutocompleteElement;
-        if (!PlaceAutocompleteElement) {
-          console.error('PlaceAutocompleteElement not available on google.maps.places');
-          return;
-        }
-        if (cancelled) return;
-
         const el = new PlaceAutocompleteElement({
           componentRestrictions: { country: ALLOWED_COUNTRIES },
         });
@@ -9823,7 +9848,8 @@ function WorkspaceOrderFlow() {
       } catch (err) {
         console.error('Autocomplete init error:', err);
       }
-    })();
+    };
+    mount();
 
     return () => {
       cancelled = true;
