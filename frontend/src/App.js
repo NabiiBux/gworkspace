@@ -10699,6 +10699,26 @@ const AdminOrderWorkspace = () => {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
+  // ZIP -> city/state autofill (via our backend geocode). Google's address
+  // autocomplete box doesn't reliably resolve a bare 5-digit ZIP, so a direct
+  // lookup fills City/State when the admin types a full ZIP.
+  const [zipMsg, setZipMsg] = useState('');
+  const zipDoneRef = useRef('');
+  useEffect(() => {
+    const zip = (form.zip || '').trim();
+    if (!/^\d{5}$/.test(zip)) { setZipMsg(''); return; }
+    if (zipDoneRef.current === zip) return;
+    const t = setTimeout(async () => {
+      setZipMsg('Looking up city/state…');
+      const r = await geocodeUSZip(zip);
+      zipDoneRef.current = zip;
+      if (!r || (!r.city && !r.state)) { setZipMsg("Couldn't find that ZIP — enter city/state manually."); return; }
+      setForm(f => ({ ...f, city: r.city || f.city, state: r.state || f.state }));
+      setZipMsg('');
+    }, 500);
+    return () => clearTimeout(t);
+  }, [form.zip]);
+
   // Bulk create
   const [bulkText, setBulkText] = useState('');
   const [bulkPlan, setBulkPlan] = useState('');
@@ -10870,7 +10890,9 @@ const AdminOrderWorkspace = () => {
           <div><label style={lab}>Street address 2 (optional)</label><input style={inp} value={form.streetAddress2} onChange={e => set('streetAddress2', e.target.value)} /></div>
           <div><label style={lab}>City</label><input style={inp} value={form.city} onChange={e => set('city', e.target.value)} /></div>
           <div><label style={lab}>State</label><input style={inp} value={form.state} onChange={e => set('state', e.target.value)} /></div>
-          <div><label style={lab}>ZIP</label><input style={inp} value={form.zip} onChange={e => set('zip', e.target.value)} /></div>
+          <div><label style={lab}>ZIP</label><input style={inp} value={form.zip} onChange={e => set('zip', e.target.value)} placeholder="Type a ZIP to autofill city/state" />
+            {zipMsg && <div style={{ fontSize: 12, marginTop: 4, color: zipMsg.startsWith('Couldn') ? '#b42318' : '#6b7280' }}>{zipMsg}</div>}
+          </div>
         </div>
         <button onClick={submit} disabled={busy} className="btn btn-primary" style={{ marginTop: 16 }}>{busy ? 'Provisioning…' : 'Submit & create Workspace'}</button>
       </div>
