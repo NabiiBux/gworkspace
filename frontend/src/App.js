@@ -9720,16 +9720,25 @@ function WorkspaceOrderFlow() {
         const dr = await axios.get(`${API_URL}/workspace-orders/draft`);
         if (dr.data.draft && dr.data.draft.draftData) {
           const d = dr.data.draft.draftData;
-          if (d.form) setForm((prev) => ({ ...prev, ...d.form }));
-          if (d.selectedPlanId) setSelectedPlanId(d.selectedPlanId);
-          if (d.seats) setSeats(d.seats);
-          if (d.planType) setPlanType(d.planType);
-          if (d.step) setStep(d.step);
-          // Only surface the "we restored your draft" note once per browser —
-          // it's helpful the first time but annoying on every login.
-          if (!localStorage.getItem('wofDraftRestoreShown')) {
-            setDraftLoaded(true);
-            try { localStorage.setItem('wofDraftRestoreShown', '1'); } catch (_) {}
+          // A draft saved at the completion step (4) is a FINISHED order, not a
+          // resumable one. Restoring it left step=4 with no orderDone -> a blank
+          // page that blocked new orders. Discard it and start fresh instead.
+          if (Number(d.step) >= 4) {
+            axios.delete(`${API_URL}/workspace-orders/draft`).catch(() => {});
+          } else {
+            if (d.form) setForm((prev) => ({ ...prev, ...d.form }));
+            if (d.selectedPlanId) setSelectedPlanId(d.selectedPlanId);
+            if (d.seats) setSeats(d.seats);
+            if (d.planType) setPlanType(d.planType);
+            // Clamp to a real editable step (1–3) so we never land on the blank
+            // completion screen.
+            if (d.step) setStep(Math.min(Math.max(Number(d.step) || 1, 1), 3));
+            // Only surface the "we restored your draft" note once per browser —
+            // it's helpful the first time but annoying on every login.
+            if (!localStorage.getItem('wofDraftRestoreShown')) {
+              setDraftLoaded(true);
+              try { localStorage.setItem('wofDraftRestoreShown', '1'); } catch (_) {}
+            }
           }
         }
       } catch (_) { }
@@ -9739,8 +9748,9 @@ function WorkspaceOrderFlow() {
   // Autosave the in-progress order as a draft (debounced) so it survives reload/disconnect.
   const draftLoadedRef = useRef(false);
   useEffect(() => {
-    // Don't autosave until plans are loaded and we're past the first render.
-    if (!plans) return;
+    // Don't autosave until plans are loaded. Never persist the completion step
+    // (>=4) — a finished order must not become a "resumable" draft.
+    if (!plans || step >= 4) return;
     const t = setTimeout(() => {
       axios.post(`${API_URL}/workspace-orders/draft`, {
         draftData: { form, selectedPlanId, seats, step, planType },
@@ -9927,6 +9937,9 @@ function WorkspaceOrderFlow() {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       setOrderDone(res.data); setStep(4);
+      // Order is placed — clear the saved draft so the next "New subscription"
+      // starts fresh (and never restores this finished order as a blank page).
+      axios.delete(`${API_URL}/workspace-orders/draft`).catch(() => {});
       // Fetch the domain verification TXT record for this order
       try {
         const vres = await axios.get(`${API_URL}/workspace-orders/${res.data.id}/verification`, {
@@ -10016,7 +10029,16 @@ function WorkspaceOrderFlow() {
         </div>
       )}
       <header className="wof-head">
-        <h2>Set up Google Workspace</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+          <h2 style={{ margin: 0 }}>Set up Google Workspace</h2>
+          <button type="button" onClick={async () => {
+            if (!window.confirm('Start a new order? This clears the saved draft.')) return;
+            try { await axios.delete(`${API_URL}/workspace-orders/draft`); } catch (_) {}
+            window.location.reload();
+          }} style={{ background: 'transparent', border: '1px solid #d1d5db', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13, color: '#374151' }}>
+            ↻ Start a new order
+          </button>
+        </div>
         <p>Choose a plan, tell us about your organization, and place your order.</p>
         <ol className="wof-steps">
           <li className={step >= 1 ? 'on' : ''}>Plan</li>
