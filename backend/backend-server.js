@@ -8,6 +8,8 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const { authenticator } = require('otplib');
+const qrcode = require('qrcode');
 const axios = require('axios');
 const { XMLParser } = require('fast-xml-parser');
 const { google } = require('googleapis');
@@ -121,6 +123,10 @@ const CustomerSchema = new mongoose.Schema({
   emailVerified: { type: Boolean, default: false },
   emailVerifyToken: String,
   emailVerifyExpires: Date,
+  // Two-step verification (TOTP authenticator app).
+  twoFactorEnabled: { type: Boolean, default: false },
+  twoFactorSecret: String,          // active secret once enabled
+  twoFactorPendingSecret: String,   // secret during setup, before first code verified
   createdAt: { type: Date, default: Date.now },
   lastLogin: Date,
 });
@@ -1280,6 +1286,15 @@ app.post('/api/auth/login', async (req, res) => {
     const isValid = await bcrypt.compare(password, customer.password);
     if (!isValid) return res.status(401).json({ error: 'Invalid password' });
 
+    // Two-step verification: if enabled, require a valid authenticator code
+    // before issuing a token. The frontend re-submits with `otp`.
+    if (customer.twoFactorEnabled) {
+      const otp = String(req.body.otp || '').replace(/\s/g, '');
+      if (!otp) return res.status(200).json({ twoFactorRequired: true });
+      const ok = authenticator.verify({ token: otp, secret: customer.twoFactorSecret });
+      if (!ok) return res.status(401).json({ error: 'Invalid authentication code.', twoFactorRequired: true });
+    }
+
     // Safeguard: the configured admin email is always admin (prevents lockout)
     const adminEmail = (process.env.ADMIN_EMAIL || 'admin@gnbmentor.com').trim().toLowerCase();
     const myEmail = (customer.businessEmail || '').trim().toLowerCase();
@@ -1822,6 +1837,72 @@ app.post('/api/customer/change-password', authenticateCustomer, async (req, res)
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ==================== TWO-STEP VERIFICATION (TOTP authenticator) ====================
+app.get('/api/customer/2fa/status', authenticateCustomer, async (req, res) => {
+  try {
+    const me = await Customer.findById(req.customerId).select('twoFactorEnabled');
+    res.json({ enabled: !!me?.twoFactorEnabled });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Begin setup: generate a secret + QR. Not enabled until a code is verified.
+app.post('/api/customer/2fa/setup', authenticateCustomer, async (req, res) => {
+  try {
+    const me = await Customer.findById(req.customerId);
+    if (!me) return res.status(404).json({ error: 'Not found' });
+    if (me.twoFactorEnabled) return res.status(400).json({ error: 'Two-step verification is already enabled.' });
+
+    const secret = authenticator.generateSecret();
+    me.twoFactorPendingSecret = secret;
+    await me.save();
+
+    const issuer = process.env.BRAND_NAME || 'GNB MENTOR';
+    const otpauth = authenticator.keyuri(me.businessEmail, issuer, secret);
+    const qrDataUrl = await qrcode.toDataURL(otpauth);
+    res.json({ qrDataUrl, secret, otpauth });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Confirm setup: verify the first 6-digit code, then turn 2FA on.
+app.post('/api/customer/2fa/enable', authenticateCustomer, async (req, res) => {
+  try {
+    const { token } = req.body;
+    const me = await Customer.findById(req.customerId);
+    if (!me) return res.status(404).json({ error: 'Not found' });
+    if (me.twoFactorEnabled) return res.status(400).json({ error: 'Already enabled.' });
+    if (!me.twoFactorPendingSecret) return res.status(400).json({ error: 'Start setup first.' });
+    const ok = authenticator.verify({ token: String(token || '').replace(/\s/g, ''), secret: me.twoFactorPendingSecret });
+    if (!ok) return res.status(400).json({ error: 'That code is incorrect. Check your authenticator app and try again.' });
+
+    me.twoFactorSecret = me.twoFactorPendingSecret;
+    me.twoFactorPendingSecret = undefined;
+    me.twoFactorEnabled = true;
+    await me.save();
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Disable 2FA (requires a current code or the account password).
+app.post('/api/customer/2fa/disable', authenticateCustomer, async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    const me = await Customer.findById(req.customerId);
+    if (!me) return res.status(404).json({ error: 'Not found' });
+    if (!me.twoFactorEnabled) return res.json({ success: true });
+
+    let ok = false;
+    if (token) ok = authenticator.verify({ token: String(token).replace(/\s/g, ''), secret: me.twoFactorSecret });
+    if (!ok && password) ok = await bcrypt.compare(password, me.password);
+    if (!ok) return res.status(400).json({ error: 'Enter a valid current code (or your password) to disable.' });
+
+    me.twoFactorEnabled = false;
+    me.twoFactorSecret = undefined;
+    me.twoFactorPendingSecret = undefined;
+    await me.save();
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Customer's OWN subscriptions (isolated to their domain only)

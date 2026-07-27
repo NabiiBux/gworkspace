@@ -335,9 +335,10 @@ const AuthSocialButtons = ({ label, googleBtnRef, showGoogleFallback, onGoogleFa
 const CustomerAuthFlow = () => {
   const { login } = useAuth();
   const brand = useBranding();
-  const [step, setStep] = useState('email'); // 'email' | 'login' | 'signup'
+  const [step, setStep] = useState('email'); // 'email' | 'login' | 'signup' | '2fa'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [otp, setOtp] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -444,16 +445,19 @@ const CustomerAuthFlow = () => {
     finally { setLoading(false); }
   };
 
-  const doLogin = async (e) => {
-    e?.preventDefault?.();
-    setError(''); setInfo('');
-    setLoading(true);
+  const submitLogin = async (otpVal) => {
+    setError(''); setInfo(''); setLoading(true);
     try {
-      const r = await axios.post(`${API_URL}/auth/login`, { businessEmail: email.trim(), password });
+      const body = { businessEmail: email.trim(), password };
+      if (otpVal) body.otp = otpVal;
+      const r = await axios.post(`${API_URL}/auth/login`, body);
+      if (r.data.twoFactorRequired) { setStep('2fa'); setLoading(false); return; }
       login(r.data.customer.businessEmail, r.data.token, r.data.customer);
     } catch (e2) { setError(e2?.response?.data?.error || 'Login failed.'); }
     finally { setLoading(false); }
   };
+  const doLogin = (e) => { e?.preventDefault?.(); submitLogin(); };
+  const doLoginOtp = (e) => { e?.preventDefault?.(); submitLogin(otp); };
 
   const doSignup = async (e) => {
     e?.preventDefault?.();
@@ -553,6 +557,19 @@ const CustomerAuthFlow = () => {
             )}
             <div className="divider">or</div>
             <AuthSocialButtons {...socialProps('Continue')} />
+          </>
+        )}
+
+        {step === '2fa' && (
+          <>
+            <button className="linkbtn" onClick={() => { setStep('login'); setOtp(''); setError(''); }} style={{ marginBottom: 12 }}>← Back</button>
+            <h1 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 6px', color: '#111827' }}>Two-step verification</h1>
+            <p style={{ textAlign: 'center', color: '#6b7280', margin: '0 0 18px', fontSize: 14 }}>Enter the 6-digit code from your authenticator app.</p>
+            {error && <div className="errbox">{error}</div>}
+            <form onSubmit={doLoginOtp} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <input className="field" style={{ textAlign: 'center', letterSpacing: 6, fontSize: 20 }} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="123456" inputMode="numeric" autoFocus />
+              <button type="submit" className="btn-primary" disabled={loading || otp.length < 6}>{loading ? 'Verifying…' : 'Verify & log in'}</button>
+            </form>
           </>
         )}
 
@@ -686,16 +703,22 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
     aupAccepted: false,
   });
 
+  const [needOtp, setNeedOtp] = useState(false);
+  const [otp, setOtp] = useState('');
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
     try {
-      const response = await axios.post(`${API_URL}/auth/login`, loginForm);
+      const body = { ...loginForm };
+      if (needOtp && otp) body.otp = otp;
+      const response = await axios.post(`${API_URL}/auth/login`, body);
+      if (response.data.twoFactorRequired) { setNeedOtp(true); setLoading(false); return; }
       const { token, customer } = response.data;
       login(customer.businessEmail, token, customer);
     } catch (err) {
+      if (err.response?.data?.twoFactorRequired) setNeedOtp(true);
       setError(err.response?.data?.error || 'Login failed');
     } finally {
       setLoading(false);
@@ -837,8 +860,17 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
               </div>
             </div>
 
+            {needOtp && (
+              <div className="form-group">
+                <label>Authenticator code</label>
+                <input type="text" inputMode="numeric" placeholder="6-digit code" value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} autoFocus
+                  style={{ textAlign: 'center', letterSpacing: 4 }} />
+              </div>
+            )}
+
             <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? 'Logging in...' : 'Login'}
+              {loading ? 'Logging in...' : (needOtp ? 'Verify & log in' : 'Login')}
             </button>
           </form>
         )}
@@ -7390,6 +7422,96 @@ const CustomerSupport = () => {
 };
 
 // Customer: account settings (username/email, password)
+// Two-step verification card: scan a QR in an authenticator app, enter the code
+// to enable; enter a current code (or password) to disable.
+const TwoFactorCard = ({ cardStyle, inputStyle }) => {
+  const [enabled, setEnabled] = useState(false);
+  const [phase, setPhase] = useState('idle'); // 'idle' | 'setup' | 'disabling'
+  const [qr, setQr] = useState('');
+  const [secret, setSecret] = useState('');
+  const [code, setCode] = useState('');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    axios.get(`${API_URL}/customer/2fa/status`).then(r => setEnabled(!!r.data.enabled)).catch(() => {});
+  }, []);
+
+  const startSetup = async () => {
+    setMsg(''); setBusy(true);
+    try {
+      const r = await axios.post(`${API_URL}/customer/2fa/setup`);
+      setQr(r.data.qrDataUrl); setSecret(r.data.secret); setCode(''); setPhase('setup');
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not start setup.'); }
+    finally { setBusy(false); }
+  };
+  const confirmEnable = async () => {
+    setMsg(''); setBusy(true);
+    try {
+      await axios.post(`${API_URL}/customer/2fa/enable`, { token: code });
+      setEnabled(true); setPhase('idle'); setQr(''); setSecret(''); setCode('');
+      setMsg('✓ Two-step verification is on.');
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not enable.'); }
+    finally { setBusy(false); }
+  };
+  const disable = async () => {
+    setMsg(''); setBusy(true);
+    try {
+      await axios.post(`${API_URL}/customer/2fa/disable`, { token: code });
+      setEnabled(false); setPhase('idle'); setCode('');
+      setMsg('Two-step verification turned off.');
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not disable.'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div style={cardStyle}>
+      <h3 style={{ marginTop: 0 }}>Two-step verification</h3>
+      {enabled && phase !== 'disabling' && (
+        <div>
+          <span style={{ background: '#dcfce7', color: '#166534', padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600 }}>✓ Enabled</span>
+          <p style={{ color: '#6b7280', fontSize: 14 }}>You'll be asked for a code from your authenticator app when you log in.</p>
+          <button className="btn btn-secondary" onClick={() => { setPhase('disabling'); setCode(''); setMsg(''); }}>Turn off</button>
+        </div>
+      )}
+
+      {enabled && phase === 'disabling' && (
+        <div>
+          <p style={{ color: '#374151', fontSize: 14 }}>Enter a current 6-digit code from your app to turn off two-step verification.</p>
+          <input style={{ ...inputStyle, maxWidth: 200, letterSpacing: 3 }} value={code} onChange={e => setCode(e.target.value)} placeholder="123456" inputMode="numeric" />
+          <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+            <button className="btn btn-primary" onClick={disable} disabled={busy}>{busy ? '…' : 'Turn off'}</button>
+            <button className="btn btn-secondary" onClick={() => { setPhase('idle'); setCode(''); setMsg(''); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {!enabled && phase === 'idle' && (
+        <div>
+          <p style={{ color: '#6b7280', margin: '0 0 12px' }}>Add an extra layer of security with an authenticator app (Google Authenticator, Authy, 1Password, etc.).</p>
+          <button className="btn btn-primary" onClick={startSetup} disabled={busy}>{busy ? 'Starting…' : 'Enable two-step verification'}</button>
+        </div>
+      )}
+
+      {!enabled && phase === 'setup' && (
+        <div>
+          <p style={{ color: '#374151', fontSize: 14, margin: '0 0 10px' }}>1. Scan this QR code in your authenticator app:</p>
+          {qr && <img src={qr} alt="2FA QR code" style={{ width: 180, height: 180, border: '1px solid #e5e7eb', borderRadius: 8 }} />}
+          <p style={{ color: '#6b7280', fontSize: 13, margin: '8px 0' }}>Can't scan? Enter this key manually:<br /><code style={{ background: '#f3f4f6', padding: '2px 6px', borderRadius: 4, wordBreak: 'break-all' }}>{secret}</code></p>
+          <p style={{ color: '#374151', fontSize: 14, margin: '12px 0 6px' }}>2. Enter the 6-digit code it shows:</p>
+          <input style={{ ...inputStyle, maxWidth: 200, letterSpacing: 3 }} value={code} onChange={e => setCode(e.target.value)} placeholder="123456" inputMode="numeric" />
+          <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+            <button className="btn btn-primary" onClick={confirmEnable} disabled={busy || code.length < 6}>{busy ? '…' : 'Verify & enable'}</button>
+            <button className="btn btn-secondary" onClick={() => { setPhase('idle'); setQr(''); setSecret(''); setCode(''); setMsg(''); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {msg && <div style={{ marginTop: 10, fontSize: 14, color: msg.startsWith('✓') || msg.startsWith('Two-step verification turned') ? '#166534' : '#b42318' }}>{msg}</div>}
+    </div>
+  );
+};
+
 const CustomerSettings = () => {
   const { user } = useAuth();
   const inputStyle = { width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', fontSize: 14, boxSizing: 'border-box' };
@@ -7579,11 +7701,8 @@ const CustomerSettings = () => {
         {cardMsg && <div style={{ marginTop: 10, fontSize: 14, color: cardMsg.startsWith('Card removed') ? '#166534' : '#b42318' }}>{cardMsg}</div>}
       </div>
 
-      {/* Two-step verification (coming soon) */}
-      <div style={{ ...cardStyle, opacity: 0.85 }}>
-        <h3 style={{ marginTop: 0 }}>Two-step verification</h3>
-        <p style={{ color: '#6b7280', margin: 0 }}>Add an extra layer of security with an authenticator app. <em>Coming soon.</em></p>
-      </div>
+      {/* Two-step verification */}
+      <TwoFactorCard cardStyle={cardStyle} inputStyle={inputStyle} />
     </div>
   );
 };
