@@ -26,6 +26,9 @@ envval() { [ -f backend/.env ] && grep -E "^$1=" backend/.env | head -1 | cut -d
 # defaults to window.location.origin + '/api' (i.e. https://portal.gnbmentor.com/api).
 SIGNIN="$(envval REACT_APP_GOOGLE_SIGNIN_CLIENT_ID)"; [ -z "$SIGNIN" ] && SIGNIN="$(envval GOOGLE_OAUTH_CLIENT_ID)"
 MAPS="$(envval REACT_APP_GOOGLE_MAPS_API_KEY)"; [ -z "$MAPS" ] && MAPS="$(envval GOOGLE_MAPS_API_KEY)"
+# CI=false so ESLint warnings (unused vars, hook deps) stay warnings and never
+# fail the build (a failed build leaves no index.html -> the ENOENT 404s).
+CI=false \
 REACT_APP_GOOGLE_SIGNIN_CLIENT_ID="$SIGNIN" \
 REACT_APP_GOOGLE_MAPS_API_KEY="$MAPS" \
   npm run build --prefix frontend
