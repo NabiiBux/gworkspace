@@ -91,7 +91,8 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT, in
   const debounceRef = useRef(null);
   const boxRef = useRef(null);
 
-  const regionCodes = countries ? (Array.isArray(countries) ? countries : [countries]).map((c) => String(c).toLowerCase()) : undefined;
+  // CLDR region codes are upper-case (e.g. "US").
+  const regionCodes = countries ? (Array.isArray(countries) ? countries : [countries]).map((c) => String(c).toUpperCase()) : undefined;
 
   // Resolve the browser Maps key (build-time var, else fetched from the backend).
   useEffect(() => {
@@ -144,16 +145,23 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT, in
   const runSearch = async (text) => {
     const lib = libRef.current;
     if (!lib?.AutocompleteSuggestion?.fetchAutocompleteSuggestions || text.length < 3) { setSuggestions([]); return; }
-    try {
-      const req = { input: text, sessionToken: ensureToken() };
-      if (regionCodes) req.includedRegionCodes = regionCodes;
+    const fetchWith = async (req) => {
       const { suggestions: sugs } = await lib.AutocompleteSuggestion.fetchAutocompleteSuggestions(req);
       setSuggestions((sugs || []).filter((s) => s.placePrediction));
       setOpen(true);
+    };
+    // Only include sessionToken / region when valid — the proven-working request
+    // shape is just { input }, so anything extra must not break it.
+    const base = { input: text };
+    const tok = ensureToken();
+    if (tok) base.sessionToken = tok;
+    try {
+      await fetchWith(regionCodes && regionCodes.length ? { ...base, includedRegionCodes: regionCodes } : base);
     } catch (e) {
-      // 429s etc. surface here — log, don't crash the form.
-      console.error('Autocomplete fetch error:', e?.message || e);
-      setSuggestions([]);
+      console.error('Autocomplete fetch error (retrying without region):', e?.message || e);
+      // Region code shape can make the whole request fail — retry the bare form.
+      try { await fetchWith(base); }
+      catch (e2) { console.error('Autocomplete fetch error:', e2?.message || e2); setSuggestions([]); }
     }
   };
 
