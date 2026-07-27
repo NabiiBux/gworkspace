@@ -7,6 +7,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const axios = require('axios');
 const { XMLParser } = require('fast-xml-parser');
 const { google } = require('googleapis');
@@ -1695,6 +1696,19 @@ app.get('/api/auth/me', authenticateCustomer, async (req, res) => {
       domain: me.domain,
       role: me.role || 'customer',
       resellerCode: me.resellerCode,
+      // Extended profile (account section)
+      firstName: me.firstName || '',
+      lastName: me.lastName || '',
+      phone: me.phone || '',
+      phoneCountryCode: me.phoneCountryCode || '',
+      country: me.country || '',
+      address: me.address || '',
+      city: me.city || '',
+      state: me.state || '',
+      postalCode: me.postalCode || '',
+      emailVerified: !!me.emailVerified,
+      authProvider: me.authProvider || 'email',
+      balance: me.balance || 0,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1705,20 +1719,89 @@ app.get('/api/auth/me', authenticateCustomer, async (req, res) => {
 // Update own profile (username / email)
 app.patch('/api/customer/profile', authenticateCustomer, async (req, res) => {
   try {
-    const { username, businessEmail } = req.body;
+    const {
+      username, businessEmail, firstName, lastName, companyName,
+      phone, phoneCountryCode, country, address, city, state, postalCode,
+    } = req.body;
     const me = await Customer.findById(req.customerId);
     if (!me) return res.status(404).json({ error: 'Not found' });
 
     if (businessEmail && businessEmail.toLowerCase() !== me.businessEmail) {
+      if (!isValidEmail(businessEmail)) return res.status(400).json({ error: 'Please enter a valid email address.' });
       const taken = await Customer.findOne({ businessEmail: businessEmail.toLowerCase() });
       if (taken) return res.status(400).json({ error: 'That email is already in use.' });
       me.businessEmail = businessEmail.toLowerCase();
+      me.emailVerified = false; // new address must be re-verified
     }
-    if (username) me.username = username;
+    // Only overwrite fields that were actually sent (undefined = leave as-is).
+    if (username !== undefined) me.username = username;
+    if (firstName !== undefined) me.firstName = firstName;
+    if (lastName !== undefined) me.lastName = lastName;
+    if (companyName !== undefined) me.companyName = companyName;
+    if (phone !== undefined) me.phone = phone;
+    if (phoneCountryCode !== undefined) me.phoneCountryCode = phoneCountryCode;
+    if (country !== undefined) me.country = country;
+    if (address !== undefined) me.address = address;
+    if (city !== undefined) me.city = city;
+    if (state !== undefined) me.state = state;
+    if (postalCode !== undefined) me.postalCode = postalCode;
     await me.save();
-    res.json({ success: true, username: me.username, businessEmail: me.businessEmail });
+    res.json({
+      success: true,
+      username: me.username, businessEmail: me.businessEmail,
+      firstName: me.firstName, lastName: me.lastName, companyName: me.companyName,
+      phone: me.phone, country: me.country, address: me.address,
+      city: me.city, state: me.state, postalCode: me.postalCode,
+      emailVerified: !!me.emailVerified,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// Send an email-confirmation link to the customer's current email.
+app.post('/api/customer/send-verification', authenticateCustomer, async (req, res) => {
+  try {
+    const me = await Customer.findById(req.customerId);
+    if (!me) return res.status(404).json({ error: 'Not found' });
+    if (me.emailVerified) return res.json({ success: true, alreadyVerified: true });
+
+    const token = crypto.randomBytes(32).toString('hex');
+    me.emailVerifyToken = token;
+    me.emailVerifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
+    await me.save();
+
+    const link = `${trimSlash(PORTAL_URL)}/api/auth/verify-email?token=${token}`;
+    const html = emailShell('Confirm your email', `
+      <p>Hi ${me.firstName || me.username || 'there'},</p>
+      <p>Please confirm this email address for your ${BRAND_NAME} account.</p>
+      <p style="margin:24px 0"><a href="${link}" style="background:#0F766E;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Confirm email</a></p>
+      <p style="color:#6b7280;font-size:13px">Or paste this link into your browser:<br>${link}</p>
+      <p style="color:#6b7280;font-size:13px">This link expires in 24 hours. If you didn't request this, you can ignore it.</p>
+    `);
+    const ok = await sendEmail(me.businessEmail, `Confirm your email — ${BRAND_NAME}`, html);
+    if (!ok) return res.status(500).json({ error: 'Could not send the confirmation email. Please try again later.' });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Public: confirm the email from the link. Redirects back to the portal.
+app.get('/api/auth/verify-email', async (req, res) => {
+  const back = (flag) => res.redirect(`${trimSlash(PORTAL_URL)}/?emailVerify=${flag}#settings`);
+  try {
+    const token = String(req.query.token || '');
+    if (!token) return back('invalid');
+    const me = await Customer.findOne({ emailVerifyToken: token });
+    if (!me || !me.emailVerifyExpires || me.emailVerifyExpires < new Date()) return back('expired');
+    me.emailVerified = true;
+    me.emailVerifyToken = undefined;
+    me.emailVerifyExpires = undefined;
+    await me.save();
+    return back('success');
+  } catch (e) {
+    return back('error');
   }
 });
 

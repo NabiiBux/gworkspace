@@ -7380,47 +7380,197 @@ const CustomerSupport = () => {
 // Customer: account settings (username/email, password)
 const CustomerSettings = () => {
   const { user } = useAuth();
-  const [profile, setProfile] = useState({ username: user?.username || '', businessEmail: user?.businessEmail || '' });
+  const inputStyle = { width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', fontSize: 14, boxSizing: 'border-box' };
+  const cardStyle = { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 22, marginBottom: 20, maxWidth: 620 };
+
+  const [profile, setProfile] = useState({
+    firstName: '', lastName: '', companyName: '', username: '', businessEmail: '',
+    phone: '', country: '', address: '', city: '', state: '', postalCode: '',
+  });
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [origEmail, setOrigEmail] = useState('');
   const [pMsg, setPMsg] = useState('');
+  const [savingP, setSavingP] = useState(false);
+
   const [pwd, setPwd] = useState({ currentPassword: '', newPassword: '' });
   const [pwdMsg, setPwdMsg] = useState('');
 
+  const [verifyMsg, setVerifyMsg] = useState('');
+  const [sendingVerify, setSendingVerify] = useState(false);
+
+  const [card, setCard] = useState({ hasCard: false, brand: null, last4: null });
+  const [cardMsg, setCardMsg] = useState('');
+  const [cardBusy, setCardBusy] = useState(false);
+
+  // Load the full profile + card status on mount.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await axios.get(`${API_URL}/auth/me`);
+        const d = r.data || {};
+        setProfile({
+          firstName: d.firstName || '', lastName: d.lastName || '', companyName: d.companyName || '',
+          username: d.username || '', businessEmail: d.businessEmail || '', phone: d.phone || '',
+          country: d.country || '', address: d.address || '', city: d.city || '', state: d.state || '',
+          postalCode: d.postalCode || '',
+        });
+        setEmailVerified(!!d.emailVerified);
+        setOrigEmail(d.businessEmail || '');
+      } catch (_) {}
+      try {
+        const c = await axios.get(`${API_URL}/customer/billing/card`);
+        setCard(c.data || { hasCard: false });
+      } catch (_) {}
+    })();
+  }, []);
+
+  // Show a banner if we just came back from an email-confirmation link.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const v = p.get('emailVerify');
+    if (!v) return;
+    if (v === 'success') { setVerifyMsg('✓ Your email has been confirmed.'); setEmailVerified(true); }
+    else if (v === 'expired') setVerifyMsg('That confirmation link has expired. Please send a new one.');
+    else setVerifyMsg('We could not confirm the email. Please try again.');
+    window.history.replaceState({}, '', window.location.pathname);
+  }, []);
+
+  const set = (k) => (e) => setProfile({ ...profile, [k]: e.target.value });
+
   const saveProfile = async () => {
-    setPMsg('');
-    try { await axios.patch(`${API_URL}/customer/profile`, profile); setPMsg('✓ Saved.'); }
-    catch (e) { setPMsg(e?.response?.data?.error || 'Could not save.'); }
+    setPMsg(''); setSavingP(true);
+    try {
+      const r = await axios.patch(`${API_URL}/customer/profile`, profile);
+      if (r.data.emailVerified !== undefined) setEmailVerified(!!r.data.emailVerified);
+      if (profile.businessEmail && profile.businessEmail.toLowerCase() !== origEmail.toLowerCase()) {
+        setOrigEmail(profile.businessEmail);
+      }
+      setPMsg('✓ Saved.');
+    } catch (e) { setPMsg(e?.response?.data?.error || 'Could not save.'); }
+    finally { setSavingP(false); }
   };
+
   const changePwd = async () => {
     setPwdMsg('');
-    try { const r = await axios.post(`${API_URL}/customer/change-password`, pwd); setPwdMsg('✓ ' + (r.data.message || 'Password changed.')); setPwd({ currentPassword: '', newPassword: '' }); }
-    catch (e) { setPwdMsg(e?.response?.data?.error || 'Could not change password.'); }
+    try {
+      const r = await axios.post(`${API_URL}/customer/change-password`, pwd);
+      setPwdMsg('✓ ' + (r.data.message || 'Password changed.'));
+      setPwd({ currentPassword: '', newPassword: '' });
+    } catch (e) { setPwdMsg(e?.response?.data?.error || 'Could not change password.'); }
   };
+
+  const sendVerification = async () => {
+    setVerifyMsg(''); setSendingVerify(true);
+    try {
+      const r = await axios.post(`${API_URL}/customer/send-verification`);
+      if (r.data.alreadyVerified) { setEmailVerified(true); setVerifyMsg('✓ Already verified.'); }
+      else setVerifyMsg('✓ Confirmation email sent — check your inbox.');
+    } catch (e) { setVerifyMsg(e?.response?.data?.error || 'Could not send the confirmation email.'); }
+    finally { setSendingVerify(false); }
+  };
+
+  const addCard = async () => {
+    setCardMsg(''); setCardBusy(true);
+    try {
+      const r = await axios.post(`${API_URL}/customer/billing/setup-card`);
+      if (r.data.checkoutUrl) { window.location.href = r.data.checkoutUrl; return; }
+      setCardMsg('Could not start card setup.');
+    } catch (e) { setCardMsg(e?.response?.data?.error || 'Could not start card setup.'); }
+    finally { setCardBusy(false); }
+  };
+
+  const removeCard = async () => {
+    if (!window.confirm('Remove your saved card? Auto-renewal will be turned off.')) return;
+    setCardMsg(''); setCardBusy(true);
+    try {
+      await axios.post(`${API_URL}/customer/billing/remove-card`);
+      setCard({ hasCard: false, brand: null, last4: null });
+      setCardMsg('Card removed.');
+    } catch (e) { setCardMsg(e?.response?.data?.error || 'Could not remove card.'); }
+    finally { setCardBusy(false); }
+  };
+
+  const Label = ({ children }) => <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', margin: '0 0 4px' }}>{children}</label>;
 
   return (
     <div className="section">
       <h2>⚙ Account Settings</h2>
-      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20, marginBottom: 20, maxWidth: 480 }}>
-        <h3 style={{ marginTop: 0 }}>Profile</h3>
-        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Username</label>
-        <input value={profile.username} onChange={e => setProfile({ ...profile, username: e.target.value })}
-          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
-        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Email</label>
-        <input value={profile.businessEmail} onChange={e => setProfile({ ...profile, businessEmail: e.target.value })}
-          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
-        <button className="btn btn-primary" onClick={saveProfile}>Save profile</button>
-        {pMsg && <span style={{ marginLeft: 10, fontSize: 14, color: pMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{pMsg}</span>}
+
+      {/* Account info */}
+      <div style={cardStyle}>
+        <h3 style={{ marginTop: 0 }}>Account info</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div><Label>First name</Label><input style={inputStyle} value={profile.firstName} onChange={set('firstName')} /></div>
+          <div><Label>Last name</Label><input style={inputStyle} value={profile.lastName} onChange={set('lastName')} /></div>
+        </div>
+        <div style={{ marginTop: 12 }}><Label>Company name</Label><input style={inputStyle} value={profile.companyName} onChange={set('companyName')} /></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+          <div><Label>Phone</Label><input style={inputStyle} value={profile.phone} onChange={set('phone')} /></div>
+          <div><Label>Country</Label><input style={inputStyle} value={profile.country} onChange={set('country')} placeholder="United States" /></div>
+        </div>
+        <div style={{ marginTop: 12 }}><Label>Address</Label><input style={inputStyle} value={profile.address} onChange={set('address')} /></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 12 }}>
+          <div><Label>City</Label><input style={inputStyle} value={profile.city} onChange={set('city')} /></div>
+          <div><Label>State</Label><input style={inputStyle} value={profile.state} onChange={set('state')} /></div>
+          <div><Label>ZIP</Label><input style={inputStyle} value={profile.postalCode} onChange={set('postalCode')} /></div>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <button className="btn btn-primary" onClick={saveProfile} disabled={savingP}>{savingP ? 'Saving…' : 'Save changes'}</button>
+          {pMsg && <span style={{ marginLeft: 10, fontSize: 14, color: pMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{pMsg}</span>}
+        </div>
       </div>
 
-      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20, maxWidth: 480 }}>
-        <h3 style={{ marginTop: 0 }}>Change password</h3>
-        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Current password</label>
-        <input type="password" value={pwd.currentPassword} onChange={e => setPwd({ ...pwd, currentPassword: e.target.value })}
-          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
-        <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>New password</label>
-        <input type="password" value={pwd.newPassword} onChange={e => setPwd({ ...pwd, newPassword: e.target.value })}
-          style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', marginBottom: 12 }} />
-        <button className="btn btn-primary" onClick={changePwd}>Change password</button>
-        {pwdMsg && <span style={{ marginLeft: 10, fontSize: 14, color: pwdMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{pwdMsg}</span>}
+      {/* Login & security */}
+      <div style={cardStyle}>
+        <h3 style={{ marginTop: 0 }}>Login &amp; security</h3>
+        <Label>Email</Label>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input style={{ ...inputStyle, flex: 1, minWidth: 220 }} value={profile.businessEmail} onChange={set('businessEmail')} />
+          {emailVerified
+            ? <span style={{ background: '#dcfce7', color: '#166534', padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600 }}>✓ Verified</span>
+            : <span style={{ background: '#fef3c7', color: '#92600a', padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600 }}>Unverified</span>}
+        </div>
+        {!emailVerified && (
+          <div style={{ marginTop: 10 }}>
+            <button className="btn btn-secondary" onClick={sendVerification} disabled={sendingVerify}>{sendingVerify ? 'Sending…' : 'Send confirmation email'}</button>
+          </div>
+        )}
+        <div style={{ fontSize: 13, color: '#6b7280', marginTop: 8 }}>Changing your email above (via “Save changes”) will require re-confirming it.</div>
+        {verifyMsg && <div style={{ marginTop: 10, fontSize: 14, color: verifyMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{verifyMsg}</div>}
+
+        <div style={{ borderTop: '1px solid #eef1f4', margin: '18px 0' }} />
+        <h4 style={{ margin: '0 0 12px' }}>Change password</h4>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div><Label>Current password</Label><input type="password" style={inputStyle} value={pwd.currentPassword} onChange={e => setPwd({ ...pwd, currentPassword: e.target.value })} /></div>
+          <div><Label>New password</Label><input type="password" style={inputStyle} value={pwd.newPassword} onChange={e => setPwd({ ...pwd, newPassword: e.target.value })} /></div>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <button className="btn btn-primary" onClick={changePwd}>Change password</button>
+          {pwdMsg && <span style={{ marginLeft: 10, fontSize: 14, color: pwdMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{pwdMsg}</span>}
+        </div>
+      </div>
+
+      {/* Payment methods */}
+      <div style={cardStyle}>
+        <h3 style={{ marginTop: 0 }}>Payment methods</h3>
+        {card.hasCard ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 16px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 15 }}>💳 <strong style={{ textTransform: 'capitalize' }}>{card.brand || 'Card'}</strong> ending in •••• {card.last4}</span>
+            <button className="btn btn-secondary" onClick={removeCard} disabled={cardBusy}>Remove</button>
+          </div>
+        ) : (
+          <div>
+            <p style={{ color: '#6b7280', marginTop: 0 }}>No card saved. Add one to enable automatic renewals.</p>
+            <button className="btn btn-primary" onClick={addCard} disabled={cardBusy}>{cardBusy ? 'Starting…' : '+ Add card'}</button>
+          </div>
+        )}
+        {cardMsg && <div style={{ marginTop: 10, fontSize: 14, color: cardMsg.startsWith('Card removed') ? '#166534' : '#b42318' }}>{cardMsg}</div>}
+      </div>
+
+      {/* Two-step verification (coming soon) */}
+      <div style={{ ...cardStyle, opacity: 0.85 }}>
+        <h3 style={{ marginTop: 0 }}>Two-step verification</h3>
+        <p style={{ color: '#6b7280', margin: 0 }}>Add an extra layer of security with an authenticator app. <em>Coming soon.</em></p>
       </div>
     </div>
   );
