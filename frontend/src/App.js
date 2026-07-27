@@ -82,7 +82,8 @@ const getCountryCode = (name) => {
 // Renders an input; on selection, calls onPick({ street, city, state, zip }).
 const ALLOWED_COUNTRIES_DEFAULT = ['us'];
 const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) => {
-  const containerRef = useRef(null);
+  const inputRef = useRef(null);
+  const acRef = useRef(null);
   const [mapsReady, setMapsReady] = useState(false);
   const [mapsKey, setMapsKey] = useState(MAPS_KEY);
 
@@ -94,7 +95,7 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
     return () => { alive = false; };
   }, [mapsKey]);
 
-  // Load the Google Maps JavaScript API (with Places) once — same as the customer form.
+  // Load the Google Maps JavaScript API (with the Places library) once.
   useEffect(() => {
     if (!mapsKey) return;
     let poll;
@@ -103,111 +104,51 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
     const existing = document.getElementById('gmaps-places-script');
     if (existing) {
       existing.addEventListener('load', ready);
-      // The script may already be mid-load (added by another form) and we missed 'load' — poll.
       poll = setInterval(() => { if (window.google && window.google.maps && window.google.maps.places) { clearInterval(poll); ready(); } }, 250);
       return () => { existing.removeEventListener('load', ready); if (poll) clearInterval(poll); };
     }
     const script = document.createElement('script');
     script.id = 'gmaps-places-script';
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places&loading=async&v=weekly`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places&v=weekly`;
     script.async = true;
     script.defer = true;
     script.onload = ready;
     document.body.appendChild(script);
   }, [mapsKey]);
 
-  // Mount the PlaceAutocompleteElement when maps is ready — identical to the customer form.
+  // Attach the CLASSIC Places Autocomplete to the input — works with the legacy
+  // "Places API" + "Maps JavaScript API" (no Places API New, no separate geocode).
   useEffect(() => {
-    if (!mapsReady || !containerRef.current) return;
-    let cancelled = false;
-    let tries = 0;
-
-    // The Places library loads asynchronously (loading=async), so the "maps ready"
-    // signal can fire BEFORE PlaceAutocompleteElement is attached. Instead of giving
-    // up (which left the field blank until a lucky refresh), resolve the class via
-    // importLibrary and poll until it exists, then mount.
-    const resolvePlacesClass = async () => {
-      let cls = window.google?.maps?.places?.PlaceAutocompleteElement;
-      if (!cls && window.google?.maps?.importLibrary) {
-        try {
-          const lib = await window.google.maps.importLibrary('places');
-          cls = lib?.PlaceAutocompleteElement || window.google?.maps?.places?.PlaceAutocompleteElement;
-        } catch (_) { /* fall through to poll */ }
-      }
-      return cls;
-    };
-
-    const mount = async () => {
-      if (cancelled || !containerRef.current) return;
-      const PlaceAutocompleteElement = await resolvePlacesClass();
-      if (!PlaceAutocompleteElement) {
-        if (tries++ < 40) { setTimeout(mount, 150); return; } // wait up to ~6s
-        console.error('PlaceAutocompleteElement not available on google.maps.places');
-        return;
-      }
-      if (cancelled || !containerRef.current) return;
-      try {
-        const options = {};
-        if (countries) options.componentRestrictions = { country: countries }; // string or array
-
-        const el = new PlaceAutocompleteElement(options);
-        el.style.width = '100%';
-
-        const container = containerRef.current;
-        container.innerHTML = '';
-        container.appendChild(el);
-
-        el.addEventListener('gmp-select', async (event) => {
-          try {
-            const place = event.placePrediction.toPlace();
-            await place.fetchFields({ fields: ['addressComponents', 'formattedAddress'] });
-            const comps = place.addressComponents || [];
-            const get = (type) => comps.find((c) => (c.types || []).includes(type));
-            const streetNumber = get('street_number')?.longText || '';
-            const route = get('route')?.longText || '';
-            const city = get('locality')?.longText || get('sublocality')?.longText || get('postal_town')?.longText || '';
-            const stateShort = get('administrative_area_level_1')?.shortText || '';
-            const zip = get('postal_code')?.longText || '';
-            const street = `${streetNumber} ${route}`.trim();
-            onPick({ street, city, state: stateShort, zip });
-          } catch (err) {
-            console.error('Place select error:', err);
-          }
-        });
-      } catch (err) {
-        console.error('Autocomplete init error:', err);
-      }
-    };
-    mount();
-
-    return () => { cancelled = true; };
-  }, [mapsReady, JSON.stringify(countries)]);
+    if (!mapsReady || !inputRef.current || acRef.current) return;
+    if (!window.google?.maps?.places?.Autocomplete) return;
+    try {
+      const ac = new window.google.maps.places.Autocomplete(inputRef.current, {
+        types: ['address'],
+        fields: ['address_components', 'formatted_address'],
+        ...(countries ? { componentRestrictions: { country: countries } } : {}),
+      });
+      acRef.current = ac;
+      ac.addListener('place_changed', () => {
+        const place = ac.getPlace();
+        const comps = place.address_components || [];
+        const get = (type) => comps.find((c) => (c.types || []).includes(type));
+        const streetNumber = get('street_number')?.long_name || '';
+        const route = get('route')?.long_name || '';
+        const city = get('locality')?.long_name || get('sublocality')?.long_name || get('postal_town')?.long_name || '';
+        const state = get('administrative_area_level_1')?.short_name || '';
+        const zip = get('postal_code')?.long_name || '';
+        const street = `${streetNumber} ${route}`.trim();
+        onPick({ street, city, state, zip });
+      });
+    } catch (err) {
+      console.error('Autocomplete init error:', err);
+    }
+  }, [mapsReady]);
 
   if (!mapsKey) return null;
-  return <div ref={containerRef} style={{ width: '100%', minHeight: 44 }} />;
+  return <input ref={inputRef} placeholder="Start typing your address…"
+    style={{ width: '100%', height: 44, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', fontSize: 14, boxSizing: 'border-box' }} />;
 };
-
-// Look up city/state for a 5-digit US ZIP code (USA-restricted) via our own
-// backend, which uses the server-side GOOGLE_MAPS_API_KEY secret. Places
-// Autocomplete's predictions engine is unreliable for bare numeric ZIP-only
-// queries (it's tuned for named places/full addresses), so a plain ZIP typed
-// into the address box often returns no suggestions at all even though it's a
-// valid code. A direct geocode is a much more reliable way to resolve
-// city/state from a ZIP. We proxy through the backend so the Maps key stays
-// server-side and no browser HTTP-referrer restriction is needed.
-async function geocodeUSZip(zip) {
-  if (!/^\d{5}$/.test(zip)) return null;
-  try {
-    const res = await axios.get(`${API_URL}/geo/zip/${zip}`);
-    const city = res.data?.city || '';
-    const state = res.data?.state || '';
-    if (!city && !state) return null;
-    return { city, state };
-  } catch (err) {
-    console.error('ZIP geocode error:', err);
-    return null;
-  }
-}
 
 // Auth Context
 const AuthContext = createContext();
@@ -9246,32 +9187,6 @@ function WorkspaceOrderFlow() {
   const [mapsKey, setMapsKey] = useState(MAPS_KEY);
   const streetInputRef = useRef(null);
   const autocompleteRef = useRef(null);
-  const [zipLookup, setZipLookup] = useState({ state: 'idle', message: '' }); // idle|looking|done|error
-  const zipLookedUpRef = useRef(''); // last zip we already resolved, to avoid duplicate lookups
-
-  // When the user types a full 5-digit ZIP, auto-fill city/state (only if blank)
-  // via a direct geocode — see geocodeUSZip for why we don't rely on Autocomplete here.
-  useEffect(() => {
-    const zip = (form.zip || '').trim();
-    if (!/^\d{5}$/.test(zip)) { setZipLookup({ state: 'idle', message: '' }); return; }
-    if (zipLookedUpRef.current === zip) return;
-    const t = setTimeout(async () => {
-      setZipLookup({ state: 'looking', message: 'Looking up city/state…' });
-      const result = await geocodeUSZip(zip);
-      zipLookedUpRef.current = zip;
-      if (!result || (!result.city && !result.state)) {
-        setZipLookup({ state: 'error', message: "Couldn't find that ZIP — enter city/state manually." });
-        return;
-      }
-      setForm((f) => ({
-        ...f,
-        city: f.city || result.city || f.city,
-        state: f.state || result.state || f.state,
-      }));
-      setZipLookup({ state: 'done', message: '' });
-    }, 500);
-    return () => clearTimeout(t);
-  }, [form.zip]);
 
   useEffect(() => {
     (async () => {
@@ -9360,94 +9275,40 @@ function WorkspaceOrderFlow() {
     }
     const script = document.createElement('script');
     script.id = 'gmaps-places-script';
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places&loading=async&v=weekly`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places&v=weekly`;
     script.async = true;
     script.defer = true;
     script.onload = () => setMapsReady(true);
     document.body.appendChild(script);
   }, [mapsKey]);
 
-  // Mount the NEW PlaceAutocompleteElement when on step 2 and maps is ready
+  // Attach the CLASSIC Places Autocomplete to the street input on step 2 (legacy
+  // Places API + Maps JavaScript API — no Places API New, no separate geocode).
   useEffect(() => {
-    if (step !== 2 || !mapsReady || !streetInputRef.current) return;
-    if (autocompleteRef.current) return; // already mounted
-    let cancelled = false;
-    let tries = 0;
-
-    // Places loads asynchronously, so PlaceAutocompleteElement may not exist the
-    // instant maps reports "ready". Resolve it via importLibrary and poll instead
-    // of bailing (which left the address box blank until a lucky refresh).
-    const resolvePlacesClass = async () => {
-      let cls = window.google?.maps?.places?.PlaceAutocompleteElement;
-      if (!cls && window.google?.maps?.importLibrary) {
-        try {
-          const lib = await window.google.maps.importLibrary('places');
-          cls = lib?.PlaceAutocompleteElement || window.google?.maps?.places?.PlaceAutocompleteElement;
-        } catch (_) { /* fall through to poll */ }
-      }
-      return cls;
-    };
-
-    const mount = async () => {
-      if (cancelled || !streetInputRef.current || autocompleteRef.current) return;
-      const PlaceAutocompleteElement = await resolvePlacesClass();
-      if (!PlaceAutocompleteElement) {
-        if (tries++ < 40) { setTimeout(mount, 150); return; } // wait up to ~6s
-        console.error('PlaceAutocompleteElement not available on google.maps.places');
-        return;
-      }
-      if (cancelled || !streetInputRef.current) return;
-      try {
-        const el = new PlaceAutocompleteElement({
-          componentRestrictions: { country: ALLOWED_COUNTRIES },
-        });
-        el.style.width = '100%';
-        autocompleteRef.current = el;
-
-        // Mount it into our container
-        const container = streetInputRef.current;
-        container.innerHTML = '';
-        container.appendChild(el);
-
-        el.addEventListener('gmp-select', async (event) => {
-          try {
-            const place = event.placePrediction.toPlace();
-            await place.fetchFields({
-              fields: ['addressComponents', 'formattedAddress'],
-            });
-            const comps = place.addressComponents || [];
-            const get = (type) =>
-              comps.find((c) => (c.types || []).includes(type));
-            const streetNumber = get('street_number')?.longText || '';
-            const route = get('route')?.longText || '';
-            const city =
-              get('locality')?.longText ||
-              get('sublocality')?.longText ||
-              get('postal_town')?.longText || '';
-            const stateShort = get('administrative_area_level_1')?.shortText || '';
-            const zip = get('postal_code')?.longText || '';
-            const street = `${streetNumber} ${route}`.trim();
-            setForm((f) => ({
-              ...f,
-              streetAddress: street || f.streetAddress,
-              city,
-              state: stateShort,
-              zip,
-            }));
-          } catch (err) {
-            console.error('Place select error:', err);
-          }
-        });
-      } catch (err) {
-        console.error('Autocomplete init error:', err);
-      }
-    };
-    mount();
-
-    return () => {
-      cancelled = true;
-      autocompleteRef.current = null;
-    };
+    if (step !== 2 || !mapsReady || !streetInputRef.current || autocompleteRef.current) return;
+    if (!window.google?.maps?.places?.Autocomplete) return;
+    try {
+      const ac = new window.google.maps.places.Autocomplete(streetInputRef.current, {
+        types: ['address'],
+        fields: ['address_components', 'formatted_address'],
+        componentRestrictions: { country: ALLOWED_COUNTRIES },
+      });
+      autocompleteRef.current = ac;
+      ac.addListener('place_changed', () => {
+        const place = ac.getPlace();
+        const comps = place.address_components || [];
+        const get = (type) => comps.find((c) => (c.types || []).includes(type));
+        const streetNumber = get('street_number')?.long_name || '';
+        const route = get('route')?.long_name || '';
+        const city = get('locality')?.long_name || get('sublocality')?.long_name || get('postal_town')?.long_name || '';
+        const stateShort = get('administrative_area_level_1')?.short_name || '';
+        const zip = get('postal_code')?.long_name || '';
+        const street = `${streetNumber} ${route}`.trim();
+        setForm((f) => ({ ...f, streetAddress: street || f.streetAddress, city, state: stateShort, zip }));
+      });
+    } catch (err) {
+      console.error('Autocomplete init error:', err);
+    }
   }, [step, mapsReady]);
 
   // Debounced domain availability check
@@ -9725,15 +9586,9 @@ function WorkspaceOrderFlow() {
           <div className="wof-field"><label>Country *</label><input value="United States" disabled /></div>
           <div className="wof-field">
             <label>Street address *</label>
-            <div ref={streetInputRef} className="wof-autocomplete-mount">
-              {(!mapsKey || !mapsReady) && (
-                <input value={form.streetAddress} onChange={set('streetAddress')} placeholder="Enter your street address" />
-              )}
-            </div>
-            <small>{mapsKey ? 'Start typing and pick your address from the list.' : 'Address suggestions unavailable — enter manually.'}</small>
-            {form.streetAddress && (
-              <div className="wof-picked">Selected: {form.streetAddress}</div>
-            )}
+            <input ref={streetInputRef} className="wof-street-input" value={form.streetAddress}
+              onChange={set('streetAddress')} placeholder="Start typing your address…" />
+            <small>{mapsKey ? 'Start typing and pick your address from the list.' : 'Enter your address manually.'}</small>
           </div>
           <div className="wof-field"><label>Street address line 2</label>
             <input value={form.streetAddress2} onChange={set('streetAddress2')} placeholder="Suite 400 (optional)" /></div>
@@ -9751,9 +9606,6 @@ function WorkspaceOrderFlow() {
             <input value={form.zip}
               onChange={(e) => setForm({ ...form, zip: e.target.value.replace(/\D/g, '').slice(0, 5) })}
               placeholder="ZIP" inputMode="numeric" />
-            {zipLookup.message && (
-              <small style={zipLookup.state === 'error' ? { color: '#b91c1c' } : undefined}>{zipLookup.message}</small>
-            )}
           </div>
           <h3 className="wof-subhead">Contact information</h3>
           <p className="wof-muted">Used to create the initial administrator account.</p>
@@ -10305,26 +10157,6 @@ const AdminOrderWorkspace = () => {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
-  // ZIP -> city/state autofill (via our backend geocode). Google's address
-  // autocomplete box doesn't reliably resolve a bare 5-digit ZIP, so a direct
-  // lookup fills City/State when the admin types a full ZIP.
-  const [zipMsg, setZipMsg] = useState('');
-  const zipDoneRef = useRef('');
-  useEffect(() => {
-    const zip = (form.zip || '').trim();
-    if (!/^\d{5}$/.test(zip)) { setZipMsg(''); return; }
-    if (zipDoneRef.current === zip) return;
-    const t = setTimeout(async () => {
-      setZipMsg('Looking up city/state…');
-      const r = await geocodeUSZip(zip);
-      zipDoneRef.current = zip;
-      if (!r || (!r.city && !r.state)) { setZipMsg("Couldn't find that ZIP — enter city/state manually."); return; }
-      setForm(f => ({ ...f, city: r.city || f.city, state: r.state || f.state }));
-      setZipMsg('');
-    }, 500);
-    return () => clearTimeout(t);
-  }, [form.zip]);
-
   // Bulk create
   const [bulkText, setBulkText] = useState('');
   const [bulkPlan, setBulkPlan] = useState('');
@@ -10496,9 +10328,7 @@ const AdminOrderWorkspace = () => {
           <div><label style={lab}>Street address 2 (optional)</label><input style={inp} value={form.streetAddress2} onChange={e => set('streetAddress2', e.target.value)} /></div>
           <div><label style={lab}>City</label><input style={inp} value={form.city} onChange={e => set('city', e.target.value)} /></div>
           <div><label style={lab}>State</label><input style={inp} value={form.state} onChange={e => set('state', e.target.value)} /></div>
-          <div><label style={lab}>ZIP</label><input style={inp} value={form.zip} onChange={e => set('zip', e.target.value)} placeholder="Type a ZIP to autofill city/state" />
-            {zipMsg && <div style={{ fontSize: 12, marginTop: 4, color: zipMsg.startsWith('Couldn') ? '#b42318' : '#6b7280' }}>{zipMsg}</div>}
-          </div>
+          <div><label style={lab}>ZIP</label><input style={inp} value={form.zip} onChange={e => set('zip', e.target.value)} /></div>
         </div>
         <button onClick={submit} disabled={busy} className="btn btn-primary" style={{ marginTop: 16 }}>{busy ? 'Provisioning…' : 'Submit & create Workspace'}</button>
       </div>
