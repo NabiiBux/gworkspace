@@ -295,6 +295,26 @@ const AuthProvider = ({ children }) => {
 const useAuth = () => useContext(AuthContext);
 
 // ==================== LOGIN PAGE ====================
+// Social sign-in buttons. Defined at module scope (NOT inside CustomerAuthFlow)
+// so its identity is stable across re-renders — otherwise React remounts it on
+// every keystroke and wipes the imperatively-rendered Google (GIS) button.
+const AuthSocialButtons = ({ label, googleBtnRef, showGoogleFallback, onGoogleFallback, onMicrosoft, onFacebook }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div ref={googleBtnRef} style={{ display: 'flex', justifyContent: 'center', minHeight: 44 }} />
+    {showGoogleFallback && (
+      <button type="button" className="btn-social" onClick={onGoogleFallback}>
+        <span style={{ fontWeight: 700, color: '#4285F4' }}>G</span> {label} with Google
+      </button>
+    )}
+    <button type="button" className="btn-social" onClick={onMicrosoft}>
+      <span style={{ fontSize: 16, lineHeight: 1 }}>▦</span> {label} with Microsoft
+    </button>
+    <button type="button" className="btn-social" onClick={onFacebook}>
+      <span style={{ color: '#1877F2', fontSize: 18 }}>ⓕ</span> {label} with Facebook
+    </button>
+  </div>
+);
+
 // ==================== EMAIL-FIRST CUSTOMER AUTH (Wix-style) ====================
 // Screen 1: enter email + social. On "Continue with Email" we ask the backend
 // whether the account exists, then branch: existing -> password login screen;
@@ -446,22 +466,14 @@ const CustomerAuthFlow = () => {
     window.location.href = `${API_URL}/auth/facebook/start`;
   };
 
-  const SocialButtons = ({ label }) => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div ref={googleBtnRef} style={{ display: 'flex', justifyContent: 'center', minHeight: 44 }} />
-      {!googleClientId && (
-        <button type="button" className="btn-social" onClick={() => notConfigured('Google')}>
-          <span style={{ fontWeight: 700, color: '#4285F4' }}>G</span> {label} with Google
-        </button>
-      )}
-      <button type="button" className="btn-social" onClick={startMicrosoft}>
-        <span style={{ fontSize: 16, lineHeight: 1 }}>▦</span> {label} with Microsoft
-      </button>
-      <button type="button" className="btn-social" onClick={startFacebook}>
-        <span style={{ color: '#1877F2', fontSize: 18 }}>ⓕ</span> {label} with Facebook
-      </button>
-    </div>
-  );
+  const socialProps = (label) => ({
+    label,
+    googleBtnRef,
+    showGoogleFallback: !googleClientId,
+    onGoogleFallback: () => notConfigured('Google'),
+    onMicrosoft: startMicrosoft,
+    onFacebook: startFacebook,
+  });
 
   return (
     <div className="auth-container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: 'linear-gradient(135deg,#0F766E 0%,#0b5750 45%,#0a3f3a 100%)' }}>
@@ -495,7 +507,7 @@ const CustomerAuthFlow = () => {
             </p>
             {error && <div className="errbox">{error}</div>}
             {info && <div className="infobox">{info}</div>}
-            <SocialButtons label="Continue" />
+            <AuthSocialButtons {...socialProps('Continue')} />
             <div className="divider">or</div>
             <form onSubmit={continueWithEmail} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <input className="field" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
@@ -528,7 +540,7 @@ const CustomerAuthFlow = () => {
               </form>
             )}
             <div className="divider">or</div>
-            <SocialButtons label="Continue" />
+            <AuthSocialButtons {...socialProps('Continue')} />
           </>
         )}
 
@@ -551,7 +563,7 @@ const CustomerAuthFlow = () => {
               <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Creating account…' : 'Sign Up'}</button>
             </form>
             <div className="divider">or sign up with</div>
-            <SocialButtons label="Sign up" />
+            <AuthSocialButtons {...socialProps('Sign up')} />
           </>
         )}
 
