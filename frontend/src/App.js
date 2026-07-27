@@ -281,6 +281,242 @@ const AuthProvider = ({ children }) => {
 const useAuth = () => useContext(AuthContext);
 
 // ==================== LOGIN PAGE ====================
+// ==================== EMAIL-FIRST CUSTOMER AUTH (Wix-style) ====================
+// Screen 1: enter email + social. On "Continue with Email" we ask the backend
+// whether the account exists, then branch: existing -> password login screen;
+// new -> "choose a password" signup screen. Google works today; Facebook/Apple
+// buttons show but need OAuth credentials configured before they function.
+const CustomerAuthFlow = () => {
+  const { login } = useAuth();
+  const brand = useBranding();
+  const [step, setStep] = useState('email'); // 'email' | 'login' | 'signup'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [googleOnly, setGoogleOnly] = useState(false); // account exists but has no password (Google signup)
+  const [googleClientId, setGoogleClientId] = useState(GOOGLE_SIGNIN_CLIENT_ID);
+  const googleBtnRef = useRef(null);
+
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((email || '').trim());
+
+  // Fetch Google client id from backend if not baked in at build time.
+  useEffect(() => {
+    if (googleClientId) return;
+    let active = true;
+    axios.get(`${API_URL}/auth/google-client-id`)
+      .then((res) => { if (active && res.data.clientId) setGoogleClientId(res.data.clientId); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [googleClientId]);
+
+  // Render the Google Identity Services button into the current step's container.
+  useEffect(() => {
+    if (!googleClientId) return;
+    let cancelled = false;
+    let tries = 0;
+    const handleCredential = async (response) => {
+      setError(''); setInfo(''); setLoading(true);
+      try {
+        const r = await axios.post(`${API_URL}/auth/google`, { credential: response.credential });
+        login(r.data.customer.businessEmail, r.data.token, r.data.customer);
+      } catch (e) { setError(e?.response?.data?.error || 'Google sign-in failed.'); }
+      finally { setLoading(false); }
+    };
+    const render = () => {
+      if (cancelled) return;
+      if (!window.google?.accounts?.id || !googleBtnRef.current) {
+        if (tries++ < 30) setTimeout(render, 100);
+        return;
+      }
+      try {
+        window.google.accounts.id.initialize({ client_id: googleClientId, callback: handleCredential });
+        googleBtnRef.current.innerHTML = '';
+        const w = Math.min(376, googleBtnRef.current.offsetWidth || 360);
+        window.google.accounts.id.renderButton(googleBtnRef.current, { theme: 'outline', size: 'large', width: w, text: step === 'signup' ? 'signup_with' : 'continue_with' });
+      } catch (e) { console.error('Google button render error:', e); }
+    };
+    if (window.google?.accounts?.id) { render(); return () => { cancelled = true; }; }
+    const existing = document.getElementById('google-gsi-script');
+    if (existing) {
+      existing.addEventListener('load', render);
+      render();
+      return () => { cancelled = true; existing.removeEventListener('load', render); };
+    }
+    const s = document.createElement('script');
+    s.id = 'google-gsi-script';
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true; s.defer = true;
+    s.onload = render;
+    document.body.appendChild(s);
+    return () => { cancelled = true; };
+  }, [googleClientId, step]);
+
+  const continueWithEmail = async (e) => {
+    e?.preventDefault?.();
+    setError(''); setInfo(''); setGoogleOnly(false);
+    if (!emailValid) { setError('Please enter a valid email address.'); return; }
+    setLoading(true);
+    try {
+      const r = await axios.post(`${API_URL}/auth/check-email`, { businessEmail: email.trim() });
+      if (r.data.exists) {
+        setStep('login');
+        if (!r.data.hasPassword) {
+          setGoogleOnly(true);
+          setInfo('This account was created with Google. Please continue with Google below.');
+        }
+      } else {
+        setStep('signup');
+      }
+    } catch (e2) { setError(e2?.response?.data?.error || 'Something went wrong. Please try again.'); }
+    finally { setLoading(false); }
+  };
+
+  const doLogin = async (e) => {
+    e?.preventDefault?.();
+    setError(''); setInfo('');
+    setLoading(true);
+    try {
+      const r = await axios.post(`${API_URL}/auth/login`, { businessEmail: email.trim(), password });
+      login(r.data.customer.businessEmail, r.data.token, r.data.customer);
+    } catch (e2) { setError(e2?.response?.data?.error || 'Login failed.'); }
+    finally { setLoading(false); }
+  };
+
+  const doSignup = async (e) => {
+    e?.preventDefault?.();
+    setError(''); setInfo('');
+    if (!password || password.length < 6) { setError('Please choose a password of at least 6 characters.'); return; }
+    setLoading(true);
+    try {
+      const r = await axios.post(`${API_URL}/auth/signup-quick`, { businessEmail: email.trim(), password });
+      login(r.data.customer.businessEmail, r.data.token, r.data.customer);
+    } catch (e2) { setError(e2?.response?.data?.error || 'Sign up failed.'); }
+    finally { setLoading(false); }
+  };
+
+  const goBackToEmail = () => { setStep('email'); setPassword(''); setError(''); setInfo(''); setGoogleOnly(false); };
+  const notConfigured = (provider) => { setError(''); setInfo(`${provider} sign-in isn't set up yet — please use email or Google for now.`); };
+
+  const SocialButtons = ({ label }) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div ref={googleBtnRef} style={{ display: 'flex', justifyContent: 'center', minHeight: 44 }} />
+      {!googleClientId && (
+        <button type="button" className="btn-social" onClick={() => notConfigured('Google')}>
+          <span style={{ fontWeight: 700, color: '#4285F4' }}>G</span> {label} with Google
+        </button>
+      )}
+      <button type="button" className="btn-social" onClick={() => notConfigured('Facebook')}>
+        <span style={{ color: '#1877F2', fontSize: 18 }}>ⓕ</span> {label} with Facebook
+      </button>
+      <button type="button" className="btn-social" onClick={() => notConfigured('Apple')}>
+        <span style={{ fontSize: 16 }}></span> {label} with Apple
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="auth-container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: 'linear-gradient(135deg,#0F766E 0%,#0b5750 45%,#0a3f3a 100%)' }}>
+      <style>{`
+        .cauth, .cauth * { box-sizing: border-box; }
+        .cauth .field { width: 100%; height: 46px; border-radius: 8px; border: 1px solid #d8dbe6; padding: 0 12px; font-size: 15px; }
+        .cauth .field:focus { outline: none; border-color: #0F766E; }
+        .cauth .btn-primary { width: 100%; height: 48px; border-radius: 8px; font-weight: 700; cursor: pointer; border: none; background: #3b5cff; color: #fff; font-size: 15px; }
+        .cauth .btn-primary:disabled { opacity: 0.6; cursor: default; }
+        .cauth .btn-social { width: 100%; height: 46px; border-radius: 8px; font-weight: 600; cursor: pointer; border: 1px solid #d8dbe6; background: #fff; color: #111827; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15px; }
+        .cauth .btn-social:hover { background: #f8fafc; }
+        .cauth .divider { display: flex; align-items: center; gap: 10px; color: #9ca3af; font-size: 13px; margin: 16px 0; }
+        .cauth .divider::before, .cauth .divider::after { content: ''; flex: 1; height: 1px; background: #e5e7eb; }
+        .cauth .linkbtn { background: transparent; border: none; color: #3b5cff; font-weight: 600; cursor: pointer; padding: 0; font-size: 14px; }
+        .cauth .emailchip { display: flex; align-items: center; justify-content: space-between; border: 1px solid #d8dbe6; border-radius: 8px; padding: 8px 12px; font-size: 14px; color: #374151; }
+        .cauth .errbox { background: #fde8e8; color: #b42318; padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 12px; }
+        .cauth .infobox { background: #eef2ff; color: #3730a3; padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 12px; }
+      `}</style>
+      <div className="cauth" style={{ background: '#fff', borderRadius: 16, padding: '28px 28px 22px', width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
+        <div style={{ textAlign: 'center', marginBottom: 18 }}>
+          {brand.logoDataUrl
+            ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 46, maxWidth: 180, marginBottom: 6 }} />
+            : <div style={{ width: 48, height: 48, borderRadius: 12, background: '#0F766E', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 22, marginBottom: 8 }}>{(brand.brandName || 'G')[0]}</div>}
+        </div>
+
+        {step === 'email' && (
+          <>
+            <h1 style={{ fontSize: 26, textAlign: 'center', margin: '0 0 4px', color: '#111827' }}>Sign up</h1>
+            <p style={{ textAlign: 'center', color: '#6b7280', margin: '0 0 20px', fontSize: 14 }}>
+              Already have an account? Just enter your email to log in.
+            </p>
+            {error && <div className="errbox">{error}</div>}
+            {info && <div className="infobox">{info}</div>}
+            <SocialButtons label="Continue" />
+            <div className="divider">or</div>
+            <form onSubmit={continueWithEmail} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <input className="field" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
+              <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Please wait…' : 'Continue with Email'}</button>
+            </form>
+          </>
+        )}
+
+        {step === 'login' && (
+          <>
+            <button className="linkbtn" onClick={goBackToEmail} style={{ marginBottom: 12 }}>← Back</button>
+            <h1 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 6px', color: '#111827' }}>You already have an account</h1>
+            <p style={{ textAlign: 'center', color: '#6b7280', margin: '0 0 18px', fontSize: 14 }}>
+              There's already an account with this email. {googleOnly ? 'Continue with Google to log in.' : 'Enter your password to log in.'}
+            </p>
+            {error && <div className="errbox">{error}</div>}
+            {info && <div className="infobox">{info}</div>}
+            <div className="emailchip" style={{ marginBottom: 12 }}>
+              <span>{email}</span>
+              <button className="linkbtn" onClick={goBackToEmail} title="Use a different email">✕</button>
+            </div>
+            {!googleOnly && (
+              <form onSubmit={doLogin} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ position: 'relative' }}>
+                  <input className="field" type={showPw ? 'text' : 'password'} placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ paddingRight: 60 }} autoFocus />
+                  <button type="button" onClick={() => setShowPw((v) => !v)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#0F766E', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{showPw ? 'Hide' : 'Show'}</button>
+                </div>
+                <button type="button" className="linkbtn" onClick={() => setInfo('To reset your password, please contact support and we\'ll help you back in.')} style={{ alignSelf: 'flex-start' }}>Forgot Password?</button>
+                <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Logging in…' : 'Continue with Email'}</button>
+              </form>
+            )}
+            <div className="divider">or</div>
+            <SocialButtons label="Continue" />
+          </>
+        )}
+
+        {step === 'signup' && (
+          <>
+            <button className="linkbtn" onClick={goBackToEmail} style={{ marginBottom: 12 }}>← Back</button>
+            <h1 style={{ fontSize: 26, textAlign: 'center', margin: '0 0 6px', color: '#111827' }}>Sign up</h1>
+            <p style={{ textAlign: 'center', color: '#6b7280', margin: '0 0 18px', fontSize: 14 }}>Create your account to get started.</p>
+            {error && <div className="errbox">{error}</div>}
+            {info && <div className="infobox">{info}</div>}
+            <div className="emailchip" style={{ marginBottom: 12 }}>
+              <span>{email}</span>
+              <button className="linkbtn" onClick={goBackToEmail} title="Use a different email">✕</button>
+            </div>
+            <form onSubmit={doSignup} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ position: 'relative' }}>
+                <input className="field" type={showPw ? 'text' : 'password'} placeholder="Choose a password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ paddingRight: 60 }} autoFocus />
+                <button type="button" onClick={() => setShowPw((v) => !v)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#0F766E', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{showPw ? 'Hide' : 'Show'}</button>
+              </div>
+              <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Creating account…' : 'Sign Up'}</button>
+            </form>
+            <div className="divider">or sign up with</div>
+            <SocialButtons label="Sign up" />
+          </>
+        )}
+
+        <p style={{ textAlign: 'center', color: '#9ca3af', fontSize: 12, margin: '18px 0 0' }}>
+          By continuing, you agree to our <a href="/voice-aup" target="_blank" rel="noreferrer" style={{ color: '#6b7280' }}>Terms</a> and Privacy Policy.
+        </p>
+      </div>
+    </div>
+  );
+};
+
 const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
   const { login } = useAuth();
   const brand = useBranding();
@@ -9142,7 +9378,10 @@ function App() {
     // Logged-out: show the public landing page on the main URL,
     // and the login form on /login, /register, or /admin.
     if (isAuthPath) {
-      return <LoginPage adminMode={isAdminPath} startTab={path.startsWith('/register') ? 'register' : 'login'} />;
+      // Admins keep the classic login page; customers get the Wix-style
+      // email-first flow (enter email -> log in or sign up).
+      if (isAdminPath) return <LoginPage adminMode={true} />;
+      return <CustomerAuthFlow />;
     }
     return <LandingPage />;
   }
