@@ -1306,6 +1306,78 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// Email-first flow: does an account exist for this email? Drives the Wix-style
+// screen that shows a password field (login) if the account exists, or a
+// "choose a password" field (sign up) if it doesn't.
+app.post('/api/auth/check-email', async (req, res) => {
+  try {
+    const emailLc = (req.body?.businessEmail || req.body?.email || '').trim().toLowerCase();
+    if (!isValidEmail(emailLc)) {
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
+    }
+    let customer = await Customer.findOne({ businessEmail: emailLc });
+    if (!customer) {
+      customer = await Customer.findOne({ businessEmail: new RegExp('^' + emailLc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
+    }
+    res.json({
+      exists: !!customer,
+      // hasPassword false => account exists but was created via Google only; tell
+      // the user to continue with Google (they have no password to type).
+      hasPassword: !!(customer && customer.password),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Minimal signup: email + password only. Company, domain, AUP, and address are
+// collected later (account section / first order). Mirrors the register response.
+app.post('/api/auth/signup-quick', async (req, res) => {
+  try {
+    const emailLc = (req.body?.businessEmail || req.body?.email || '').trim().toLowerCase();
+    const password = req.body?.password || '';
+    if (!isValidEmail(emailLc)) {
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
+    }
+    if (!password || password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+    }
+    const existing = await Customer.findOne({ businessEmail: emailLc });
+    if (existing) return res.status(400).json({ error: 'An account with this email already exists. Please log in.' });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const ip = getClientIp(req);
+    const customer = await Customer.create({
+      username: emailLc.split('@')[0],
+      businessEmail: emailLc,
+      password: hashedPassword,
+      resellerCode: `RSL-${Date.now()}`,
+      role: 'customer',
+      registrationIp: ip,
+      lastLoginIp: ip,
+    });
+
+    const token = generateToken(customer._id, customer.businessEmail, customer.role);
+    try { await sendWelcomeEmail(customer.businessEmail, customer.firstName || customer.username); } catch (_) { }
+
+    res.status(201).json({
+      success: true,
+      token,
+      customer: {
+        id: customer._id,
+        companyName: customer.companyName,
+        username: customer.username,
+        businessEmail: customer.businessEmail,
+        domain: customer.domain,
+        role: customer.role,
+        resellerCode: customer.resellerCode,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Endpoint to expose Google Client ID to frontend dynamically
 app.get('/api/auth/google-client-id', (req, res) => {
   const clientId = process.env.GOOGLE_SIGNIN_CLIENT_ID || process.env.GOOGLE_OAUTH_CLIENT_ID || '';
