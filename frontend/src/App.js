@@ -13,6 +13,22 @@ const API_URL = process.env.REACT_APP_API_URL || (window.location.origin + '/api
 const MAPS_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '';
 const GOOGLE_SIGNIN_CLIENT_ID = process.env.REACT_APP_GOOGLE_SIGNIN_CLIENT_ID || '';
 
+// Effective Google Maps browser key. Prefer the build-time REACT_APP var; if it
+// was not baked in (e.g. VPS build with only a backend GOOGLE_MAPS_API_KEY),
+// fetch it from the backend at runtime. Memoized so all address forms share one
+// request and one loaded Maps script.
+let _mapsKeyPromise = null;
+function getMapsKey() {
+  if (MAPS_KEY) return Promise.resolve(MAPS_KEY);
+  if (!_mapsKeyPromise) {
+    _mapsKeyPromise = axios
+      .get(`${API_URL}/config/maps-key`)
+      .then((r) => r.data?.key || '')
+      .catch(() => '');
+  }
+  return _mapsKeyPromise;
+}
+
 // ====== EDIT THIS: allowed countries for the address autocomplete ======
 // Use lowercase 2-letter country codes. Examples:
 //   ['us']            -> United States only
@@ -68,10 +84,19 @@ const ALLOWED_COUNTRIES_DEFAULT = ['us'];
 const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) => {
   const containerRef = useRef(null);
   const [mapsReady, setMapsReady] = useState(false);
+  const [mapsKey, setMapsKey] = useState(MAPS_KEY);
+
+  // Resolve the browser Maps key (build-time var, else fetched from the backend).
+  useEffect(() => {
+    if (mapsKey) return;
+    let alive = true;
+    getMapsKey().then((k) => { if (alive) setMapsKey(k); });
+    return () => { alive = false; };
+  }, [mapsKey]);
 
   // Load the Google Maps JavaScript API (with Places) once — same as the customer form.
   useEffect(() => {
-    if (!MAPS_KEY) return;
+    if (!mapsKey) return;
     let poll;
     const ready = () => setMapsReady(true);
     if (window.google && window.google.maps && window.google.maps.places) { ready(); return; }
@@ -84,12 +109,12 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
     }
     const script = document.createElement('script');
     script.id = 'gmaps-places-script';
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&loading=async&v=weekly`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places&loading=async&v=weekly`;
     script.async = true;
     script.defer = true;
     script.onload = ready;
     document.body.appendChild(script);
-  }, []);
+  }, [mapsKey]);
 
   // Mount the PlaceAutocompleteElement when maps is ready — identical to the customer form.
   useEffect(() => {
@@ -146,7 +171,7 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
     return () => { cancelled = true; };
   }, [mapsReady, JSON.stringify(countries)]);
 
-  if (!MAPS_KEY) return null;
+  if (!mapsKey) return null;
   return <div ref={containerRef} style={{ width: '100%', minHeight: 44 }} />;
 };
 
@@ -9181,6 +9206,7 @@ function WorkspaceOrderFlow() {
   const [domainStatus, setDomainStatus] = useState({ state: 'idle', message: '' }); // idle|checking|available|taken|invalid
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [mapsReady, setMapsReady] = useState(false);
+  const [mapsKey, setMapsKey] = useState(MAPS_KEY);
   const streetInputRef = useRef(null);
   const autocompleteRef = useRef(null);
   const [zipLookup, setZipLookup] = useState({ state: 'idle', message: '' }); // idle|looking|done|error
@@ -9260,9 +9286,17 @@ function WorkspaceOrderFlow() {
     return () => clearTimeout(t);
   }, [form, selectedPlanId, seats, step, plans]);
 
+  // Resolve the browser Maps key (build-time var, else fetched from the backend).
+  useEffect(() => {
+    if (mapsKey) return;
+    let alive = true;
+    getMapsKey().then((k) => { if (alive) setMapsKey(k); });
+    return () => { alive = false; };
+  }, [mapsKey]);
+
   // Load the Google Maps JavaScript API (with Places) once
   useEffect(() => {
-    if (!MAPS_KEY) return;
+    if (!mapsKey) return;
     if (window.google && window.google.maps && window.google.maps.places) {
       setMapsReady(true);
       return;
@@ -9274,12 +9308,12 @@ function WorkspaceOrderFlow() {
     }
     const script = document.createElement('script');
     script.id = 'gmaps-places-script';
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&loading=async&v=weekly`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places&loading=async&v=weekly`;
     script.async = true;
     script.defer = true;
     script.onload = () => setMapsReady(true);
     document.body.appendChild(script);
-  }, []);
+  }, [mapsKey]);
 
   // Mount the NEW PlaceAutocompleteElement when on step 2 and maps is ready
   useEffect(() => {
@@ -9613,11 +9647,11 @@ function WorkspaceOrderFlow() {
           <div className="wof-field">
             <label>Street address *</label>
             <div ref={streetInputRef} className="wof-autocomplete-mount">
-              {(!MAPS_KEY || !mapsReady) && (
+              {(!mapsKey || !mapsReady) && (
                 <input value={form.streetAddress} onChange={set('streetAddress')} placeholder="Enter your street address" />
               )}
             </div>
-            <small>{MAPS_KEY ? 'Start typing and pick your address from the list.' : 'Address suggestions unavailable — enter manually.'}</small>
+            <small>{mapsKey ? 'Start typing and pick your address from the list.' : 'Address suggestions unavailable — enter manually.'}</small>
             {form.streetAddress && (
               <div className="wof-picked">Selected: {form.streetAddress}</div>
             )}
