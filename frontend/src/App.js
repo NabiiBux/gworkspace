@@ -9725,7 +9725,12 @@ function WorkspaceOrderFlow() {
           if (d.seats) setSeats(d.seats);
           if (d.planType) setPlanType(d.planType);
           if (d.step) setStep(d.step);
-          setDraftLoaded(true);
+          // Only surface the "we restored your draft" note once per browser —
+          // it's helpful the first time but annoying on every login.
+          if (!localStorage.getItem('wofDraftRestoreShown')) {
+            setDraftLoaded(true);
+            try { localStorage.setItem('wofDraftRestoreShown', '1'); } catch (_) {}
+          }
         }
       } catch (_) { }
     })();
@@ -10005,8 +10010,9 @@ function WorkspaceOrderFlow() {
     <div className="wof-wrap">
       <style>{wofStyles}</style>
       {draftLoaded && (
-        <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#065f46', borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontSize: 14 }}>
-          ✓ We restored your previous order details so you can continue where you left off.
+        <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#065f46', borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontSize: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <span>✓ We restored your previous order details so you can continue where you left off.</span>
+          <button onClick={() => setDraftLoaded(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 18, color: 'inherit', lineHeight: 1 }} title="Dismiss">×</button>
         </div>
       )}
       <header className="wof-head">
