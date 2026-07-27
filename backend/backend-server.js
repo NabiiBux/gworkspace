@@ -1453,8 +1453,11 @@ app.post('/api/auth/google', async (req, res) => {
 // redirects back to /callback with a code, we exchange it (with the secret) for
 // an id_token, read the verified email, upsert the customer, and hand our JWT
 // back to the SPA via the URL hash. No client secret ever reaches the browser.
+// Strip any trailing slash(es) so building URLs never produces "host//path"
+// (a trailing slash in PORTAL_URL/FRONTEND_URL would break OAuth redirect matching).
+const trimSlash = (u) => String(u || '').replace(/\/+$/, '');
 const MS_TENANT = process.env.MICROSOFT_TENANT || 'common';
-const msRedirectUri = () => process.env.MICROSOFT_REDIRECT_URI || `${PORTAL_URL}/api/auth/microsoft/callback`;
+const msRedirectUri = () => process.env.MICROSOFT_REDIRECT_URI || `${trimSlash(PORTAL_URL)}/api/auth/microsoft/callback`;
 const msConfigured = () => !!(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET);
 
 // Frontend asks whether to show a working Microsoft button.
@@ -1465,7 +1468,7 @@ app.get('/api/auth/microsoft/config', (req, res) => {
 // Kick off the login: redirect the browser to Microsoft's consent screen.
 app.get('/api/auth/microsoft/start', (req, res) => {
   if (!msConfigured()) {
-    return res.redirect(`${FRONTEND_URL}/login#sso_error=${encodeURIComponent('Microsoft sign-in is not configured yet.')}`);
+    return res.redirect(`${trimSlash(FRONTEND_URL)}/login#sso_error=${encodeURIComponent('Microsoft sign-in is not configured yet.')}`);
   }
   // Signed, short-lived state for CSRF protection (verified on callback).
   const state = jwt.sign({ k: 'ms', n: Math.random().toString(36).slice(2) }, process.env.JWT_SECRET, { expiresIn: '10m' });
@@ -1482,7 +1485,7 @@ app.get('/api/auth/microsoft/start', (req, res) => {
 
 // Microsoft redirects here with ?code=&state=. Exchange, upsert, hand back JWT.
 app.get('/api/auth/microsoft/callback', async (req, res) => {
-  const fail = (msg) => res.redirect(`${FRONTEND_URL}/login#sso_error=${encodeURIComponent(msg)}`);
+  const fail = (msg) => res.redirect(`${trimSlash(FRONTEND_URL)}/login#sso_error=${encodeURIComponent(msg)}`);
   try {
     const { code, state, error, error_description } = req.query;
     if (error) return fail(error_description || String(error));
@@ -1547,7 +1550,7 @@ app.get('/api/auth/microsoft/callback', async (req, res) => {
 
     const token = generateToken(customer._id, customer.businessEmail, customer.role || 'customer');
     // Hand the JWT to the SPA via the URL hash; AuthProvider picks it up on load.
-    res.redirect(`${FRONTEND_URL}/#sso_token=${encodeURIComponent(token)}`);
+    res.redirect(`${trimSlash(FRONTEND_URL)}/#sso_token=${encodeURIComponent(token)}`);
   } catch (e) {
     console.error('[microsoft] callback error:', e.response?.data || e.message);
     return fail('Microsoft sign-in failed. Please try again or use email.');
@@ -1559,7 +1562,7 @@ app.get('/api/auth/microsoft/callback', async (req, res) => {
 // exchanges the code for an access token, reads the profile (email + name),
 // upserts the customer, and hands our JWT back via the URL hash.
 const FB_API_VER = process.env.FACEBOOK_API_VERSION || 'v19.0';
-const fbRedirectUri = () => process.env.FACEBOOK_REDIRECT_URI || `${PORTAL_URL}/api/auth/facebook/callback`;
+const fbRedirectUri = () => process.env.FACEBOOK_REDIRECT_URI || `${trimSlash(PORTAL_URL)}/api/auth/facebook/callback`;
 const fbConfigured = () => !!(process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET);
 
 app.get('/api/auth/facebook/config', (req, res) => {
@@ -1568,7 +1571,7 @@ app.get('/api/auth/facebook/config', (req, res) => {
 
 app.get('/api/auth/facebook/start', (req, res) => {
   if (!fbConfigured()) {
-    return res.redirect(`${FRONTEND_URL}/login#sso_error=${encodeURIComponent('Facebook sign-in is not configured yet.')}`);
+    return res.redirect(`${trimSlash(FRONTEND_URL)}/login#sso_error=${encodeURIComponent('Facebook sign-in is not configured yet.')}`);
   }
   const state = jwt.sign({ k: 'fb', n: Math.random().toString(36).slice(2) }, process.env.JWT_SECRET, { expiresIn: '10m' });
   const params = new URLSearchParams({
@@ -1582,7 +1585,7 @@ app.get('/api/auth/facebook/start', (req, res) => {
 });
 
 app.get('/api/auth/facebook/callback', async (req, res) => {
-  const fail = (msg) => res.redirect(`${FRONTEND_URL}/login#sso_error=${encodeURIComponent(msg)}`);
+  const fail = (msg) => res.redirect(`${trimSlash(FRONTEND_URL)}/login#sso_error=${encodeURIComponent(msg)}`);
   try {
     const { code, state, error, error_description, error_message } = req.query;
     if (error) return fail(error_description || error_message || String(error));
@@ -1643,7 +1646,7 @@ app.get('/api/auth/facebook/callback', async (req, res) => {
     }
 
     const token = generateToken(customer._id, customer.businessEmail, customer.role || 'customer');
-    res.redirect(`${FRONTEND_URL}/#sso_token=${encodeURIComponent(token)}`);
+    res.redirect(`${trimSlash(FRONTEND_URL)}/#sso_token=${encodeURIComponent(token)}`);
   } catch (e) {
     console.error('[facebook] callback error:', e.response?.data || e.message);
     return fail('Facebook sign-in failed. Please try again or use email.');
