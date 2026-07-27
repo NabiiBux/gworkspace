@@ -114,6 +114,12 @@ const CustomerSchema = new mongoose.Schema({
   cardBrand: String,
   cardLast4: String,
   cardAddedAt: Date,
+  // Which method created/owns the login: 'email' | 'google' | 'microsoft' | 'facebook'.
+  authProvider: { type: String, default: 'email' },
+  // Email confirmation (Stage 2). Social logins arrive already verified.
+  emailVerified: { type: Boolean, default: false },
+  emailVerifyToken: String,
+  emailVerifyExpires: Date,
   createdAt: { type: Date, default: Date.now },
   lastLogin: Date,
 });
@@ -1439,6 +1445,112 @@ app.post('/api/auth/google', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== MICROSOFT / OUTLOOK SIGN-IN (OAuth 2.0 auth-code) ====================
+// Server-side authorization-code flow: /start redirects to Microsoft, Microsoft
+// redirects back to /callback with a code, we exchange it (with the secret) for
+// an id_token, read the verified email, upsert the customer, and hand our JWT
+// back to the SPA via the URL hash. No client secret ever reaches the browser.
+const MS_TENANT = process.env.MICROSOFT_TENANT || 'common';
+const msRedirectUri = () => process.env.MICROSOFT_REDIRECT_URI || `${PORTAL_URL}/api/auth/microsoft/callback`;
+const msConfigured = () => !!(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET);
+
+// Frontend asks whether to show a working Microsoft button.
+app.get('/api/auth/microsoft/config', (req, res) => {
+  res.json({ configured: msConfigured() });
+});
+
+// Kick off the login: redirect the browser to Microsoft's consent screen.
+app.get('/api/auth/microsoft/start', (req, res) => {
+  if (!msConfigured()) {
+    return res.redirect(`${FRONTEND_URL}/login#sso_error=${encodeURIComponent('Microsoft sign-in is not configured yet.')}`);
+  }
+  // Signed, short-lived state for CSRF protection (verified on callback).
+  const state = jwt.sign({ k: 'ms', n: Math.random().toString(36).slice(2) }, process.env.JWT_SECRET, { expiresIn: '10m' });
+  const params = new URLSearchParams({
+    client_id: process.env.MICROSOFT_CLIENT_ID,
+    response_type: 'code',
+    redirect_uri: msRedirectUri(),
+    response_mode: 'query',
+    scope: 'openid email profile',
+    state,
+  });
+  res.redirect(`https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/authorize?${params.toString()}`);
+});
+
+// Microsoft redirects here with ?code=&state=. Exchange, upsert, hand back JWT.
+app.get('/api/auth/microsoft/callback', async (req, res) => {
+  const fail = (msg) => res.redirect(`${FRONTEND_URL}/login#sso_error=${encodeURIComponent(msg)}`);
+  try {
+    const { code, state, error, error_description } = req.query;
+    if (error) return fail(error_description || String(error));
+    if (!code || !state) return fail('Microsoft sign-in was cancelled.');
+    try { jwt.verify(String(state), process.env.JWT_SECRET); } catch (_) { return fail('Your Microsoft sign-in expired. Please try again.'); }
+
+    // Exchange the code for tokens (server-to-server, uses the client secret).
+    const body = new URLSearchParams({
+      client_id: process.env.MICROSOFT_CLIENT_ID,
+      client_secret: process.env.MICROSOFT_CLIENT_SECRET,
+      grant_type: 'authorization_code',
+      code: String(code),
+      redirect_uri: msRedirectUri(),
+      scope: 'openid email profile',
+    });
+    const tokenResp = await axios.post(
+      `https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`,
+      body.toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 }
+    );
+    const idToken = tokenResp.data?.id_token;
+    if (!idToken) return fail('Microsoft did not return an identity token.');
+
+    // The id_token came directly from Microsoft over TLS using our secret, so we
+    // can trust its claims; decode the payload to read the verified email.
+    const claims = jwt.decode(idToken) || {};
+    const email = String(claims.email || claims.preferred_username || '').toLowerCase().trim();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return fail('Your Microsoft account did not share a usable email address.');
+    }
+    const fullName = claims.name || '';
+    const [firstName, ...rest] = fullName.split(' ');
+
+    let customer = await Customer.findOne({ businessEmail: email });
+    let isNewUser = false;
+    if (!customer) {
+      isNewUser = true;
+      customer = await Customer.create({
+        businessEmail: email,
+        username: email.split('@')[0],
+        firstName: firstName || '',
+        lastName: rest.join(' ') || '',
+        companyName: fullName || '',
+        role: 'customer',
+        authProvider: 'microsoft',
+        emailVerified: true,
+        password: await bcrypt.hash('ms-' + Math.random().toString(36).slice(2) + Date.now(), 10),
+        registrationIp: getClientIp(req),
+        lastLoginIp: getClientIp(req),
+      });
+      const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase();
+      if (adminEmail && email === adminEmail) { customer.role = 'admin'; await customer.save(); }
+    } else {
+      customer.emailVerified = true;
+      customer.lastLoginIp = getClientIp(req);
+      customer.lastLogin = new Date();
+      await customer.save();
+    }
+    if (isNewUser) {
+      try { await sendWelcomeEmail(customer.businessEmail, customer.firstName || customer.username); } catch (_) { }
+    }
+
+    const token = generateToken(customer._id, customer.businessEmail, customer.role || 'customer');
+    // Hand the JWT to the SPA via the URL hash; AuthProvider picks it up on load.
+    res.redirect(`${FRONTEND_URL}/#sso_token=${encodeURIComponent(token)}`);
+  } catch (e) {
+    console.error('[microsoft] callback error:', e.response?.data || e.message);
+    return fail('Microsoft sign-in failed. Please try again or use email.');
   }
 });
 

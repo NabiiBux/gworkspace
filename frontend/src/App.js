@@ -237,6 +237,20 @@ const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
 
+  // Pick up a JWT handed back by a redirect SSO provider (Microsoft) via the
+  // URL hash: .../#sso_token=<jwt>. Store it and clean the URL so /auth/me runs.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const h = window.location.hash || '';
+    const m = h.match(/[#&]sso_token=([^&]+)/);
+    if (m) {
+      const t = decodeURIComponent(m[1]);
+      localStorage.setItem('token', t);
+      window.history.replaceState({}, '', window.location.pathname + window.location.search);
+      setToken(t);
+    }
+  }, []);
+
   useEffect(() => {
     const loadMe = async () => {
       if (token) {
@@ -298,6 +312,7 @@ const CustomerAuthFlow = () => {
   const [info, setInfo] = useState('');
   const [googleOnly, setGoogleOnly] = useState(false); // account exists but has no password (Google signup)
   const [googleClientId, setGoogleClientId] = useState(GOOGLE_SIGNIN_CLIENT_ID);
+  const [msConfigured, setMsConfigured] = useState(false);
   const googleBtnRef = useRef(null);
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((email || '').trim());
@@ -311,6 +326,25 @@ const CustomerAuthFlow = () => {
       .catch(() => {});
     return () => { active = false; };
   }, [googleClientId]);
+
+  // Is Microsoft sign-in configured on the backend?
+  useEffect(() => {
+    let active = true;
+    axios.get(`${API_URL}/auth/microsoft/config`)
+      .then((res) => { if (active) setMsConfigured(!!res.data.configured); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  // Surface an error handed back by a redirect provider (.../login#sso_error=...).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const m = (window.location.hash || '').match(/[#&]sso_error=([^&]+)/);
+    if (m) {
+      setError(decodeURIComponent(m[1]));
+      window.history.replaceState({}, '', window.location.pathname + window.location.search);
+    }
+  }, []);
 
   // Render the Google Identity Services button into the current step's container.
   useEffect(() => {
@@ -399,6 +433,10 @@ const CustomerAuthFlow = () => {
 
   const goBackToEmail = () => { setStep('email'); setPassword(''); setError(''); setInfo(''); setGoogleOnly(false); };
   const notConfigured = (provider) => { setError(''); setInfo(`${provider} sign-in isn't set up yet — please use email or Google for now.`); };
+  const startMicrosoft = () => {
+    if (!msConfigured) { notConfigured('Microsoft'); return; }
+    window.location.href = `${API_URL}/auth/microsoft/start`;
+  };
 
   const SocialButtons = ({ label }) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -408,11 +446,11 @@ const CustomerAuthFlow = () => {
           <span style={{ fontWeight: 700, color: '#4285F4' }}>G</span> {label} with Google
         </button>
       )}
+      <button type="button" className="btn-social" onClick={startMicrosoft}>
+        <span style={{ fontSize: 16, lineHeight: 1 }}>▦</span> {label} with Microsoft
+      </button>
       <button type="button" className="btn-social" onClick={() => notConfigured('Facebook')}>
         <span style={{ color: '#1877F2', fontSize: 18 }}>ⓕ</span> {label} with Facebook
-      </button>
-      <button type="button" className="btn-social" onClick={() => notConfigured('Apple')}>
-        <span style={{ fontSize: 16 }}></span> {label} with Apple
       </button>
     </div>
   );
