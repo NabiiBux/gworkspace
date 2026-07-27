@@ -81,10 +81,17 @@ const getCountryCode = (name) => {
 // Reusable Google Maps Places address autocomplete.
 // Renders an input; on selection, calls onPick({ street, city, state, zip }).
 const ALLOWED_COUNTRIES_DEFAULT = ['us'];
-const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) => {
-  const containerRef = useRef(null);
-  const [mapsReady, setMapsReady] = useState(false);
+const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT, initialValue = '' }) => {
   const [mapsKey, setMapsKey] = useState(MAPS_KEY);
+  const [query, setQuery] = useState(initialValue);
+  const [suggestions, setSuggestions] = useState([]);
+  const [open, setOpen] = useState(false);
+  const libRef = useRef(null);
+  const tokenRef = useRef(null);
+  const debounceRef = useRef(null);
+  const boxRef = useRef(null);
+
+  const regionCodes = countries ? (Array.isArray(countries) ? countries : [countries]).map((c) => String(c).toLowerCase()) : undefined;
 
   // Resolve the browser Maps key (build-time var, else fetched from the backend).
   useEffect(() => {
@@ -94,87 +101,114 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT }) 
     return () => { alive = false; };
   }, [mapsKey]);
 
-  // Load the Google Maps JavaScript API (with the Places library) once.
+  // Load the Places library (New) once via importLibrary.
   useEffect(() => {
-    if (!mapsKey) return;
-    let poll;
-    const ready = () => setMapsReady(true);
-    if (window.google && window.google.maps && window.google.maps.places) { ready(); return; }
-    const existing = document.getElementById('gmaps-places-script');
-    if (existing) {
-      existing.addEventListener('load', ready);
-      poll = setInterval(() => { if (window.google && window.google.maps && window.google.maps.places) { clearInterval(poll); ready(); } }, 250);
-      return () => { existing.removeEventListener('load', ready); if (poll) clearInterval(poll); };
-    }
-    const script = document.createElement('script');
-    script.id = 'gmaps-places-script';
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places&loading=async&v=weekly`;
-    script.async = true;
-    script.defer = true;
-    script.onload = ready;
-    document.body.appendChild(script);
+    if (!mapsKey || libRef.current) return;
+    let alive = true;
+    const ensureScript = () => new Promise((resolve) => {
+      if (window.google?.maps?.importLibrary) return resolve();
+      const existing = document.getElementById('gmaps-places-script');
+      if (existing) { existing.addEventListener('load', () => resolve()); return; }
+      const s = document.createElement('script');
+      s.id = 'gmaps-places-script';
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places&loading=async&v=weekly`;
+      s.async = true; s.defer = true;
+      s.onload = () => resolve();
+      document.body.appendChild(s);
+    });
+    (async () => {
+      await ensureScript();
+      try {
+        const lib = await window.google.maps.importLibrary('places');
+        if (alive) libRef.current = lib;
+      } catch (e) { console.error('Places library load error:', e); }
+    })();
+    return () => { alive = false; };
   }, [mapsKey]);
 
-  // Mount the PlaceAutocompleteElement (Places API New). The Places library loads
-  // asynchronously, so resolve the class via importLibrary and poll until ready.
+  // Close the dropdown on outside click.
   useEffect(() => {
-    if (!mapsReady || !containerRef.current) return;
-    let cancelled = false;
-    let tries = 0;
-    const resolvePlacesClass = async () => {
-      let cls = window.google?.maps?.places?.PlaceAutocompleteElement;
-      if (!cls && window.google?.maps?.importLibrary) {
-        try {
-          const lib = await window.google.maps.importLibrary('places');
-          cls = lib?.PlaceAutocompleteElement || window.google?.maps?.places?.PlaceAutocompleteElement;
-        } catch (_) { /* fall through to poll */ }
-      }
-      return cls;
-    };
-    const mount = async () => {
-      if (cancelled || !containerRef.current) return;
-      const PlaceAutocompleteElement = await resolvePlacesClass();
-      if (!PlaceAutocompleteElement) {
-        if (tries++ < 40) { setTimeout(mount, 150); return; }
-        console.error('PlaceAutocompleteElement not available on google.maps.places');
-        return;
-      }
-      if (cancelled || !containerRef.current) return;
-      try {
-        const options = {};
-        if (countries) options.componentRestrictions = { country: countries };
-        const el = new PlaceAutocompleteElement(options);
-        el.style.width = '100%';
-        const container = containerRef.current;
-        container.innerHTML = '';
-        container.appendChild(el);
-        el.addEventListener('gmp-select', async (event) => {
-          try {
-            const place = event.placePrediction.toPlace();
-            await place.fetchFields({ fields: ['addressComponents', 'formattedAddress'] });
-            const comps = place.addressComponents || [];
-            const get = (type) => comps.find((c) => (c.types || []).includes(type));
-            const streetNumber = get('street_number')?.longText || '';
-            const route = get('route')?.longText || '';
-            const city = get('locality')?.longText || get('sublocality')?.longText || get('postal_town')?.longText || '';
-            const stateShort = get('administrative_area_level_1')?.shortText || '';
-            const zip = get('postal_code')?.longText || '';
-            const street = `${streetNumber} ${route}`.trim();
-            onPick({ street, city, state: stateShort, zip });
-          } catch (err) {
-            console.error('Place select error:', err);
-          }
-        });
-      } catch (err) {
-        console.error('Autocomplete init error:', err);
-      }
-    };
-    mount();
-    return () => { cancelled = true; };
-  }, [mapsReady, JSON.stringify(countries)]);
+    const onDoc = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  // One session token per lookup (typing + selection) — Google bills it as a
+  // single session and it keeps requests grouped.
+  const ensureToken = () => {
+    const lib = libRef.current;
+    if (!tokenRef.current && lib?.AutocompleteSessionToken) tokenRef.current = new lib.AutocompleteSessionToken();
+    return tokenRef.current;
+  };
+
+  const runSearch = async (text) => {
+    const lib = libRef.current;
+    if (!lib?.AutocompleteSuggestion?.fetchAutocompleteSuggestions || text.length < 3) { setSuggestions([]); return; }
+    try {
+      const req = { input: text, sessionToken: ensureToken() };
+      if (regionCodes) req.includedRegionCodes = regionCodes;
+      const { suggestions: sugs } = await lib.AutocompleteSuggestion.fetchAutocompleteSuggestions(req);
+      setSuggestions((sugs || []).filter((s) => s.placePrediction));
+      setOpen(true);
+    } catch (e) {
+      // 429s etc. surface here — log, don't crash the form.
+      console.error('Autocomplete fetch error:', e?.message || e);
+      setSuggestions([]);
+    }
+  };
+
+  // Debounced: only call Google after the user pauses (350ms) and has typed >=3 chars.
+  const onInput = (v) => {
+    setQuery(v);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => runSearch(v.trim()), 350);
+  };
+
+  const choose = async (sug) => {
+    try {
+      const place = sug.placePrediction.toPlace();
+      await place.fetchFields({ fields: ['addressComponents', 'formattedAddress'] });
+      const comps = place.addressComponents || [];
+      const get = (type) => comps.find((c) => (c.types || []).includes(type));
+      const streetNumber = get('street_number')?.longText || '';
+      const route = get('route')?.longText || '';
+      const city = get('locality')?.longText || get('sublocality')?.longText || get('postal_town')?.longText || '';
+      const state = get('administrative_area_level_1')?.shortText || '';
+      const zip = get('postal_code')?.longText || '';
+      const street = `${streetNumber} ${route}`.trim();
+      onPick({ street, city, state, zip });
+      setQuery(street || place.formattedAddress || '');
+    } catch (e) {
+      console.error('Place select error:', e);
+    } finally {
+      setSuggestions([]); setOpen(false);
+      tokenRef.current = null; // end the billing session; next search starts a new one
+    }
+  };
 
   if (!mapsKey) return null;
-  return <div ref={containerRef} style={{ width: '100%', minHeight: 44 }} />;
+  return (
+    <div ref={boxRef} style={{ position: 'relative', width: '100%' }}>
+      <input value={query} onChange={(e) => onInput(e.target.value)}
+        onFocus={() => suggestions.length && setOpen(true)}
+        placeholder="Start typing your address…" autoComplete="off"
+        style={{ width: '100%', height: 44, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', fontSize: 14, boxSizing: 'border-box' }} />
+      {open && suggestions.length > 0 && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: '#fff', border: '1px solid #d8dbe6', borderRadius: 8, zIndex: 60, maxHeight: 260, overflowY: 'auto', boxShadow: '0 8px 22px rgba(0,0,0,0.14)' }}>
+          {suggestions.map((s, i) => {
+            const pp = s.placePrediction;
+            const label = pp?.text?.text || pp?.text || '';
+            return (
+              <div key={pp?.placeId || i} onMouseDown={(e) => { e.preventDefault(); choose(s); }}
+                style={{ padding: '10px 12px', cursor: 'pointer', fontSize: 14, borderBottom: i < suggestions.length - 1 ? '1px solid #f1f2f7' : 'none' }}>
+                {label}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 };
 
 // Auth Context
@@ -9210,10 +9244,6 @@ function WorkspaceOrderFlow() {
   const [loginInfo, setLoginInfo] = useState(null);
   const [domainStatus, setDomainStatus] = useState({ state: 'idle', message: '' }); // idle|checking|available|taken|invalid
   const [draftLoaded, setDraftLoaded] = useState(false);
-  const [mapsReady, setMapsReady] = useState(false);
-  const [mapsKey, setMapsKey] = useState(MAPS_KEY);
-  const streetInputRef = useRef(null);
-  const autocompleteRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -9279,91 +9309,6 @@ function WorkspaceOrderFlow() {
     }, 1200);
     return () => clearTimeout(t);
   }, [form, selectedPlanId, seats, step, plans]);
-
-  // Resolve the browser Maps key (build-time var, else fetched from the backend).
-  useEffect(() => {
-    if (mapsKey) return;
-    let alive = true;
-    getMapsKey().then((k) => { if (alive) setMapsKey(k); });
-    return () => { alive = false; };
-  }, [mapsKey]);
-
-  // Load the Google Maps JavaScript API (with Places) once
-  useEffect(() => {
-    if (!mapsKey) return;
-    if (window.google && window.google.maps && window.google.maps.places) {
-      setMapsReady(true);
-      return;
-    }
-    const existing = document.getElementById('gmaps-places-script');
-    if (existing) {
-      existing.addEventListener('load', () => setMapsReady(true));
-      return;
-    }
-    const script = document.createElement('script');
-    script.id = 'gmaps-places-script';
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places&loading=async&v=weekly`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => setMapsReady(true);
-    document.body.appendChild(script);
-  }, [mapsKey]);
-
-  // Mount the PlaceAutocompleteElement (Places API New) on step 2 when maps is ready.
-  useEffect(() => {
-    if (step !== 2 || !mapsReady || !streetInputRef.current || autocompleteRef.current) return;
-    let cancelled = false;
-    let tries = 0;
-    const resolvePlacesClass = async () => {
-      let cls = window.google?.maps?.places?.PlaceAutocompleteElement;
-      if (!cls && window.google?.maps?.importLibrary) {
-        try {
-          const lib = await window.google.maps.importLibrary('places');
-          cls = lib?.PlaceAutocompleteElement || window.google?.maps?.places?.PlaceAutocompleteElement;
-        } catch (_) { /* fall through to poll */ }
-      }
-      return cls;
-    };
-    const mount = async () => {
-      if (cancelled || !streetInputRef.current || autocompleteRef.current) return;
-      const PlaceAutocompleteElement = await resolvePlacesClass();
-      if (!PlaceAutocompleteElement) {
-        if (tries++ < 40) { setTimeout(mount, 150); return; }
-        console.error('PlaceAutocompleteElement not available on google.maps.places');
-        return;
-      }
-      if (cancelled || !streetInputRef.current) return;
-      try {
-        const el = new PlaceAutocompleteElement({ componentRestrictions: { country: ALLOWED_COUNTRIES } });
-        el.style.width = '100%';
-        autocompleteRef.current = el;
-        const container = streetInputRef.current;
-        container.innerHTML = '';
-        container.appendChild(el);
-        el.addEventListener('gmp-select', async (event) => {
-          try {
-            const place = event.placePrediction.toPlace();
-            await place.fetchFields({ fields: ['addressComponents', 'formattedAddress'] });
-            const comps = place.addressComponents || [];
-            const get = (type) => comps.find((c) => (c.types || []).includes(type));
-            const streetNumber = get('street_number')?.longText || '';
-            const route = get('route')?.longText || '';
-            const city = get('locality')?.longText || get('sublocality')?.longText || get('postal_town')?.longText || '';
-            const stateShort = get('administrative_area_level_1')?.shortText || '';
-            const zip = get('postal_code')?.longText || '';
-            const street = `${streetNumber} ${route}`.trim();
-            setForm((f) => ({ ...f, streetAddress: street || f.streetAddress, city, state: stateShort, zip }));
-          } catch (err) {
-            console.error('Place select error:', err);
-          }
-        });
-      } catch (err) {
-        console.error('Autocomplete init error:', err);
-      }
-    };
-    mount();
-    return () => { cancelled = true; autocompleteRef.current = null; };
-  }, [step, mapsReady]);
 
   // Debounced domain availability check
   useEffect(() => {
@@ -9640,15 +9585,15 @@ function WorkspaceOrderFlow() {
           <div className="wof-field"><label>Country *</label><input value="United States" disabled /></div>
           <div className="wof-field">
             <label>Street address *</label>
-            <div ref={streetInputRef} className="wof-autocomplete-mount">
-              {(!mapsKey || !mapsReady) && (
-                <input value={form.streetAddress} onChange={set('streetAddress')} placeholder="Enter your street address" />
-              )}
-            </div>
-            <small>{mapsKey ? 'Start typing and pick your address from the list.' : 'Enter your address manually.'}</small>
-            {form.streetAddress && (
-              <div className="wof-picked">Selected: {form.streetAddress}</div>
-            )}
+            <AddressAutocomplete countries={['us']} initialValue={form.streetAddress}
+              onPick={({ street, city, state, zip }) => setForm((f) => ({
+                ...f,
+                streetAddress: street || f.streetAddress,
+                city: city || f.city,
+                state: state || f.state,
+                zip: zip || f.zip,
+              }))} />
+            <small>Start typing and pick your address from the list.</small>
           </div>
           <div className="wof-field"><label>Street address line 2</label>
             <input value={form.streetAddress2} onChange={set('streetAddress2')} placeholder="Suite 400 (optional)" /></div>
