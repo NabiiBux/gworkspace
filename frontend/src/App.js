@@ -328,6 +328,29 @@ const AuthProvider = ({ children }) => {
 const useAuth = () => useContext(AuthContext);
 
 // ==================== LOGIN PAGE ====================
+// Brand logos as inline SVG (crisp, no external requests).
+const GoogleLogo = () => (
+  <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.28-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+  </svg>
+);
+const MicrosoftLogo = () => (
+  <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden="true">
+    <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+    <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+    <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
+    <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+  </svg>
+);
+const FacebookLogo = () => (
+  <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="#1877F2" d="M24 12.07C24 5.4 18.63 0 12 0S0 5.4 0 12.07C0 18.1 4.39 23.1 10.13 24v-8.44H7.08v-3.49h3.05V9.41c0-3.02 1.79-4.69 4.53-4.69 1.31 0 2.68.24 2.68.24v2.97h-1.51c-1.49 0-1.95.93-1.95 1.88v2.26h3.32l-.53 3.49h-2.79V24C19.61 23.1 24 18.1 24 12.07z" />
+  </svg>
+);
+
 // Social sign-in buttons. Defined at module scope (NOT inside CustomerAuthFlow)
 // so its identity is stable across re-renders — otherwise React remounts it on
 // every keystroke and wipes the imperatively-rendered Google (GIS) button.
@@ -336,14 +359,14 @@ const AuthSocialButtons = ({ label, googleBtnRef, showGoogleFallback, onGoogleFa
     <div ref={googleBtnRef} style={{ display: 'flex', justifyContent: 'center', minHeight: 44 }} />
     {showGoogleFallback && (
       <button type="button" className="btn-social" onClick={onGoogleFallback}>
-        <span style={{ fontWeight: 700, color: '#4285F4' }}>G</span> {label} with Google
+        <GoogleLogo /> <span>{label} with Google</span>
       </button>
     )}
     <button type="button" className="btn-social" onClick={onMicrosoft}>
-      <span style={{ fontSize: 16, lineHeight: 1 }}>▦</span> {label} with Microsoft
+      <MicrosoftLogo /> <span>{label} with Microsoft</span>
     </button>
     <button type="button" className="btn-social" onClick={onFacebook}>
-      <span style={{ color: '#1877F2', fontSize: 18 }}>ⓕ</span> {label} with Facebook
+      <FacebookLogo /> <span>{label} with Facebook</span>
     </button>
   </div>
 );
