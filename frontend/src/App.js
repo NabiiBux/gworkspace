@@ -8456,6 +8456,7 @@ const LandingPage = () => {
   const [dResult, setDResult] = useState(null);
   const [dLoading, setDLoading] = useState(false);
   const [dError, setDError] = useState('');
+  const [searchMode, setSearchMode] = useState('register'); // 'register' | 'transfer'
 
   // Lead Generation state variables
   const [leadForm, setLeadForm] = useState({
@@ -8706,39 +8707,71 @@ const LandingPage = () => {
         <section className="search-strip" style={{ background: '#f9fafb', borderTop: '1px solid rgba(17, 24, 39, 0.08)', borderBottom: '1px solid rgba(17, 24, 39, 0.08)', padding: '3rem 4rem' }}>
           <div className="search-container" style={{ maxWidth: 800, margin: '0 auto', textAlign: 'center' }}>
             <label className="search-label" style={{ fontSize: '0.7rem', fontFamily: 'Geist Mono, monospace', textTransform: 'uppercase', letterSpacing: '0.1em', color: MUTEL, marginBottom: '1rem', display: 'block' }}>Step 1: Secure your identity</label>
-            <h2 style={{ fontSize: '2.2rem', margin: '0 0 1.5rem 0', fontWeight: 800, color: INKL }}>Find your perfect domain</h2>
-            <div className="search-box" style={{ display: 'flex', gap: '0.5rem', background: '#fff', padding: '0.5rem', borderRadius: 16, border: '1px solid rgba(17, 24, 39, 0.08)', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+            <h2 style={{ fontSize: '2.2rem', margin: '0 0 1.25rem 0', fontWeight: 800, color: INKL }}>Find your perfect domain</h2>
+
+            {/* Register / Transfer toggle */}
+            <div style={{ display: 'inline-flex', background: '#eef2f1', borderRadius: 999, padding: 4, marginBottom: '1.25rem' }}>
+              {[['register', 'Register'], ['transfer', 'Transfer']].map(([mode, lbl]) => (
+                <button key={mode} type="button" onClick={() => { setSearchMode(mode); setDResult(null); setDError(''); }}
+                  style={{
+                    border: 'none', cursor: 'pointer', padding: '9px 28px', borderRadius: 999, fontSize: 15, fontWeight: 700,
+                    background: searchMode === mode ? T : 'transparent',
+                    color: searchMode === mode ? '#fff' : MUTEL, transition: 'all .15s ease',
+                  }}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+
+            <div className="search-box" style={{ display: 'flex', gap: 0, background: '#fff', padding: 6, borderRadius: 14, border: '1px solid rgba(17, 24, 39, 0.12)', boxShadow: '0 6px 18px rgba(0,0,0,0.06)' }}>
               <input
                 value={dq}
                 onChange={e => setDq(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') searchDomain(); }}
-                placeholder="yourbusiness.com"
-                style={{ flex: 1, border: 'none', padding: '0 1rem', fontSize: '1rem', outline: 'none' }}
+                placeholder={searchMode === 'transfer' ? 'Enter the domain you want to transfer' : 'Register a domain name to start'}
+                style={{ flex: 1, border: 'none', padding: '0 1.1rem', fontSize: '1.05rem', outline: 'none', background: 'transparent', color: INKL }}
               />
-              <button onClick={searchDomain} disabled={dLoading} className="btn btn-primary" style={{ padding: '0 2rem', borderRadius: 12, fontWeight: 600, cursor: 'pointer', background: T, color: '#fff', border: 'none' }}>
-                {dLoading ? 'Searching...' : 'Search Domains'}
+              <button onClick={searchDomain} disabled={dLoading} style={{ padding: '0 2.2rem', height: 52, borderRadius: 10, fontWeight: 700, fontSize: 15, cursor: 'pointer', background: T, color: '#fff', border: 'none', whiteSpace: 'nowrap' }}>
+                {dLoading ? 'Searching…' : 'Search'}
               </button>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 13, color: MUTEL }}>
+              {searchMode === 'transfer'
+                ? 'Move a domain you already own to us.'
+                : 'Type a name or a full domain like yourbusiness.com.'}
             </div>
             {dError && <div style={{ color: '#ef4444', marginTop: 14, fontWeight: 600, fontSize: 14 }}>{dError}</div>}
             {dResult && dResult.results && (
               <div style={{ marginTop: 20, maxWidth: 560, margin: '20px auto 0' }}>
-                {dResult.results.map((r, i) => (
-                  <div key={i} style={{ background: r.available ? '#f0f7f5' : '#fafafa', borderRadius: 12, padding: '14px 18px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, opacity: r.available ? 1 : 0.65 }}>
+                {dResult.results.map((r, i) => {
+                  // In transfer mode a registered ("taken") domain is the good one.
+                  const good = searchMode === 'transfer' ? !r.available : r.available;
+                  return (
+                  <div key={i} style={{ background: good ? '#f0f7f5' : '#fafafa', borderRadius: 12, padding: '14px 18px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, opacity: good ? 1 : 0.65 }}>
                     <div style={{ textAlign: 'left' }}>
                       <span style={{ fontSize: 16, fontWeight: 700, color: INKL }}>{r.domain}</span>
                       {r.isPremium && <span style={{ marginLeft: 8, fontSize: 11, background: '#fde68a', color: '#92600a', padding: '2px 8px', borderRadius: 999 }}>Premium</span>}
-                      <div style={{ color: r.available ? '#166534' : '#b45309', fontWeight: 600, fontSize: 13 }}>{r.available ? '✓ Available' : '✗ Taken'}</div>
+                      <div style={{ color: good ? '#166534' : '#b45309', fontWeight: 600, fontSize: 13 }}>
+                        {searchMode === 'transfer'
+                          ? (r.available ? 'Not registered — register it instead' : '✓ Eligible to transfer')
+                          : (r.available ? '✓ Available' : '✗ Taken')}
+                      </div>
                     </div>
-                    {r.available && (
+                    {searchMode === 'transfer' ? (
+                      <button onClick={() => go('/register')} style={{ padding: '10px 18px', borderRadius: 10, fontWeight: 700, cursor: 'pointer', background: T, color: '#fff', border: 'none' }}>
+                        {r.available ? 'Register instead' : 'Transfer to us'}
+                      </button>
+                    ) : (r.available && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <strong style={{ fontSize: 18, color: T }}>{r.price != null ? `$${Number(r.price).toFixed(2)}/yr` : ''}</strong>
                         <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '10px 18px', borderRadius: 10, fontWeight: 700, cursor: 'pointer', background: T, color: '#fff', border: 'none' }}>
                           Get started
                         </button>
                       </div>
-                    )}
+                    ))}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
