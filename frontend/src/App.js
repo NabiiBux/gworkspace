@@ -99,28 +99,42 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT, in
     return () => { alive = false; };
   }, [mapsKey]);
 
-  // Load the Places library (New) once via importLibrary.
+  // Load the Places (New) library and wait until AutocompleteSuggestion actually
+  // exists. Try the direct namespace (libraries=places populates it) and
+  // importLibrary, polling for up to ~12s so a slow load can't silently no-op.
   useEffect(() => {
     if (!mapsKey || libRef.current) return;
     let alive = true;
-    const ensureScript = () => new Promise((resolve) => {
-      if (window.google?.maps?.importLibrary) return resolve();
-      const existing = document.getElementById('gmaps-places-script');
-      if (existing) { existing.addEventListener('load', () => resolve()); return; }
+    // Make sure the Maps script is on the page.
+    if (!document.getElementById('gmaps-places-script') && !window.google?.maps) {
       const s = document.createElement('script');
       s.id = 'gmaps-places-script';
       s.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places&loading=async&v=weekly`;
       s.async = true; s.defer = true;
-      s.onload = () => resolve();
       document.body.appendChild(s);
-    });
-    (async () => {
-      await ensureScript();
-      try {
-        const lib = await window.google.maps.importLibrary('places');
-        if (alive) libRef.current = lib;
-      } catch (e) { console.error('Places library load error:', e); }
-    })();
+    }
+    let tries = 0;
+    const resolve = async () => {
+      if (!alive || libRef.current) return;
+      if (window.google?.maps?.places?.AutocompleteSuggestion) {
+        libRef.current = window.google.maps.places;
+        console.log('[addr] Places (New) ready via namespace');
+        return;
+      }
+      if (window.google?.maps?.importLibrary) {
+        try {
+          const lib = await window.google.maps.importLibrary('places');
+          if (alive && lib?.AutocompleteSuggestion) {
+            libRef.current = lib;
+            console.log('[addr] Places (New) ready via importLibrary');
+            return;
+          }
+        } catch (e) { console.error('[addr] importLibrary(places) failed:', e?.message || e); }
+      }
+      if (tries++ < 60) setTimeout(resolve, 200);
+      else console.error('[addr] Places (New) AutocompleteSuggestion never became available — check that Places API (New) + Maps JavaScript API are enabled for this key.');
+    };
+    resolve();
     return () => { alive = false; };
   }, [mapsKey]);
 
@@ -140,11 +154,15 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT, in
   };
 
   const runSearch = async (text) => {
+    if (text.length < 3) { setSuggestions([]); return; }
     const lib = libRef.current;
-    if (!lib?.AutocompleteSuggestion?.fetchAutocompleteSuggestions || text.length < 3) { setSuggestions([]); return; }
+    if (!lib?.AutocompleteSuggestion?.fetchAutocompleteSuggestions) {
+      // Library not loaded yet — keep retrying so the search isn't silently dropped.
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => runSearch(text), 400);
+      return;
+    }
     // Exactly the proven-working request shape ({ input } + a session token).
-    // No region field (avoids format failures) and NO retry (retrying a 429 only
-    // adds load during a rate-limit).
     const req = { input: text };
     const tok = ensureToken();
     if (tok) req.sessionToken = tok;
@@ -153,7 +171,7 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT, in
       setSuggestions((sugs || []).filter((s) => s.placePrediction));
       setOpen(true);
     } catch (e) {
-      console.error('Autocomplete fetch error:', e?.message || e);
+      console.error('[addr] Autocomplete fetch error:', e?.message || e);
       setSuggestions([]);
     }
   };
