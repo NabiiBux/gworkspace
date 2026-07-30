@@ -4656,6 +4656,9 @@ async function runSubscriptionBillingCheck() {
   results.skippedWhitelisted = await SubBilling.countDocuments({ whitelisted: true });
 
   for (const r of records) {
+    // Per-record guard: one bad subscription (e.g. a USA record while that
+    // reseller account is disabled) must never abort billing for everyone else.
+    try {
     results.checked++;
     const nextBilling = new Date(r.nextBillingDate);
     const dueReached = now.getTime() >= nextBilling.getTime();
@@ -4774,6 +4777,12 @@ async function runSubscriptionBillingCheck() {
         results.suspendErrors = results.suspendErrors || [];
         results.suspendErrors.push({ domain: r.domain, skuId: r.skuId, error: detail });
       }
+    }
+    } catch (recErr) {
+      const detail = recErr?.errors?.[0]?.message || recErr?.response?.data?.error?.message || recErr.message;
+      console.error('BILLING RECORD FAILED (continuing):', r.domain, 'sku=' + r.skuId, '→', detail);
+      results.recordErrors = results.recordErrors || [];
+      results.recordErrors.push({ domain: r.domain, skuId: r.skuId, account: r.account, error: detail });
     }
   }
   return results;
