@@ -4774,6 +4774,20 @@ const AdminPaymentsSection = () => {
         <>
           <h3 style={{ marginTop: 0 }}>✓ Whitelist</h3>
           <p style={{ color: '#6b7280', fontSize: 14 }}>Whitelisted accounts are <strong>permanently protected</strong> from the billing cycle — they are never auto-suspended, with no time limit. Only an admin can remove an account from the whitelist.</p>
+
+          {/* Add domains to the whitelist from this tab (previously read-only). */}
+          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+            <h4 style={{ margin: '0 0 8px' }}>🛡 Add domains to the whitelist</h4>
+            <p style={{ color: '#166534', fontSize: 13, margin: '0 0 10px' }}>
+              Paste domains (one per line or comma-separated), then click Whitelist. They are removed from the billing cycle immediately — this is a database change, so it works even while a reseller account is unavailable.
+            </p>
+            <textarea value={wlDomains} onChange={e => setWlDomains(e.target.value)} placeholder={"customer1.com\ncustomer2.com"}
+              style={{ width: '100%', minHeight: 90, borderRadius: 8, border: '1px solid #bbf7d0', padding: '10px 12px', fontSize: 14, fontFamily: 'monospace', marginBottom: 10 }} />
+            <button className="btn btn-primary" onClick={async () => { await whitelistFromUnsuspend(); loadSubBilling(); }} disabled={wlBusy}>
+              {wlBusy ? 'Whitelisting…' : 'Whitelist these domains'}
+            </button>
+          </div>
+          {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
           {(() => {
             const renewed = subBilling.filter(r => r.whitelisted);
             return renewed.length === 0 ? <p>No whitelisted accounts yet. Whitelist an account to add it here.</p> : (
