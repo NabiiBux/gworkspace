@@ -4861,7 +4861,14 @@ async function runSubscriptionBillingCheck(opts = {}) {
 // queues them for suspension. Roll their cycle forward to the next future date.
 // Pure database work: needs no Google API, so it runs while an account is down.
 // GET/POST ?dryRun=1 to preview counts without changing anything.
-app.post('/api/admin/billing/repair-legacy-cycles', authenticateCustomer, requireAdmin, async (req, res) => {
+// Auth: either an admin JWT, or ?secret=<JWT_SECRET> so it can be run straight
+// from the server without needing portal credentials (same pattern as the cron
+// endpoint). Accepts GET or POST for convenience.
+const allowAdminOrSecret = async (req, res, next) => {
+  if (req.query.secret && req.query.secret === process.env.JWT_SECRET) return next();
+  return authenticateCustomer(req, res, () => requireAdmin(req, res, next));
+};
+app.all('/api/admin/billing/repair-legacy-cycles', allowAdminOrSecret, async (req, res) => {
   try {
     const dryRun = req.query.dryRun === '1' || req.body?.dryRun === true;
     const now = Date.now();
