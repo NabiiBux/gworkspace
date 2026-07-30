@@ -9727,6 +9727,76 @@ async function getResellerAuth() {
   return oauth2;
 }
 
+// Admin: one-shot readiness check for the whole customer flow. Verifies both
+// reseller accounts, payments, email, billing scheduler state and live-mode
+// settings so you can confirm everything before onboarding customers.
+app.get('/api/admin/preflight', authenticateCustomer, requireAdmin, async (req, res) => {
+  const checks = [];
+  const add = (name, ok, detail, critical = true) => checks.push({ name, ok, detail, critical });
+
+  // 1 & 2. Reseller API — actually call Google for each account.
+  for (const acct of ['pk', 'usa']) {
+    try {
+      const auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth();
+      const reseller = google.reseller({ version: 'v1', auth });
+      const r = await reseller.subscriptions.list({ maxResults: 1 });
+      const n = (r.data?.subscriptions || []).length;
+      add(`Reseller API (${acct.toUpperCase()})`, true,
+        `Connected${auth.isServiceAccount ? ' via service account' : ' via OAuth'}; subscriptions readable (${n} in first page).`);
+    } catch (e) {
+      add(`Reseller API (${acct.toUpperCase()})`, false, e.message, acct === 'pk');
+    }
+  }
+
+  // 3. Stripe — card payments + auto-renew charging.
+  try {
+    const stripe = await getStripeForMode();
+    const bal = await stripe.balance.retrieve();
+    add('Stripe', true, `Connected (livemode: ${bal.livemode}).`);
+  } catch (e) {
+    add('Stripe', false, e.message);
+  }
+  add('Stripe webhook secret', !!process.env.STRIPE_WEBHOOK_SECRET,
+    process.env.STRIPE_WEBHOOK_SECRET ? 'Set — payment confirmations will provision automatically.' : 'MISSING: paid orders will not auto-provision.');
+
+  // 4. Email — provisioning/renewal/reminder notifications.
+  const emailReady = !!(process.env.RESEND_API_KEY || (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD));
+  add('Email service', emailReady,
+    process.env.RESEND_API_KEY ? 'Resend API configured.' : (emailReady ? 'SMTP configured.' : 'MISSING: no RESEND_API_KEY and no EMAIL_USER/EMAIL_PASSWORD.'));
+
+  // 5. Crypto (optional).
+  add('Nicky (crypto)', !!(process.env.NICKY_API_TOKEN && process.env.NICKY_ASSET_ID),
+    process.env.NICKY_API_TOKEN ? (process.env.NICKY_ASSET_ID ? 'Configured.' : 'NICKY_ASSET_ID missing — crypto checkout will fail.') : 'Not configured (crypto checkout disabled).', false);
+
+  // 6. Domains — sandbox mode would mean no real registrations.
+  try {
+    const sandbox = await ncResolveSandbox();
+    add('Namecheap mode', !sandbox, sandbox ? 'SANDBOX (test) — domain purchases are NOT real. Set NAMECHEAP_SANDBOX=false to sell domains.' : 'LIVE.', false);
+  } catch (e) { add('Namecheap mode', false, e.message, false); }
+
+  // 7. Billing scheduler data — are subscriptions tracked for renewal?
+  try {
+    const total = await SubBilling.countDocuments();
+    const scheduled = await SubBilling.countDocuments({ nextBillingDate: { $ne: null }, whitelisted: { $ne: true } });
+    const suspended = await SubBilling.countDocuments({ billingStatus: 'suspended' });
+    add('Billing/renewal records', total > 0,
+      `${total} tracked, ${scheduled} scheduled for renewal, ${suspended} suspended.` + (total === 0 ? ' (Empty is normal before your first customer.)' : ''), false);
+  } catch (e) { add('Billing/renewal records', false, e.message, false); }
+
+  // 8. Maps key — address autocomplete during ordering.
+  add('Google Maps key', !!(process.env.GOOGLE_MAPS_API_KEY || process.env.REACT_APP_GOOGLE_MAPS_API_KEY),
+    (process.env.GOOGLE_MAPS_API_KEY || process.env.REACT_APP_GOOGLE_MAPS_API_KEY) ? 'Set.' : 'MISSING: address autocomplete will not work.', false);
+
+  const criticalFailures = checks.filter((c) => !c.ok && c.critical);
+  res.json({
+    ready: criticalFailures.length === 0,
+    summary: criticalFailures.length === 0
+      ? 'All critical checks passed — safe to onboard customers.'
+      : `${criticalFailures.length} critical check(s) failing: ${criticalFailures.map((c) => c.name).join(', ')}.`,
+    checks,
+  });
+});
+
 // Admin: list/search domain orders (by number or domain) with status + retry.
 app.get('/api/admin/domain-orders', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
@@ -11088,12 +11158,21 @@ async function runDailyBillingTasks() {
     console.log('🔌 Database not connected yet, skipping daily billing task.');
     return;
   }
+  // Sync existing subscriptions from Google (seeds purchase dates + monthly renewal dates),
+  // then run the per-subscription monthly-anchored check (renewal = purchase day-of-month,
+  // suspend 1 day before). Suspended subs stay suspended until an admin reactivates.
+  //
+  // Each step is isolated: a transient Google Reseller error on ONE account (e.g.
+  // "Your reseller access has been disabled temporarily") must not abort the other
+  // account's sync or — critically — the billing/renewal check itself.
+  for (const acct of ['pk', 'usa']) {
+    try {
+      await syncSubscriptionsForBilling(acct);
+    } catch (e) {
+      console.error(`Daily billing: ${acct.toUpperCase()} sync failed (continuing):`, e.message);
+    }
+  }
   try {
-    // Sync existing subscriptions from Google (seeds purchase dates + monthly renewal dates),
-    // then run the per-subscription monthly-anchored check (renewal = purchase day-of-month,
-    // suspend 1 day before). Suspended subs stay suspended until an admin reactivates.
-    await syncSubscriptionsForBilling('pk');
-    await syncSubscriptionsForBilling('usa');
     const subResults = await runSubscriptionBillingCheck();
     console.log('⏰ Monthly-anchored billing:', JSON.stringify({ checked: subResults.checked, warned: subResults.warned.length, suspended: subResults.suspended.length, skippedWhitelisted: subResults.skippedWhitelisted }));
   } catch (e) {
