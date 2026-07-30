@@ -4323,31 +4323,51 @@ function recalcNextBilling(rec, from = new Date()) {
 // Pull all subscriptions from a Google reseller account and seed/update billing records.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// The Google Reseller API is quota-limited. Bursty calls get rejected with
-// "Your reseller access has been disabled temporarily. Check back in some time."
-// (or 429/5xx) — these are TRANSIENT, not a broken account, so retry with
-// exponential backoff instead of failing the whole billing run.
-function isTransientResellerError(e) {
+// Short, retryable blips (429 / 5xx / quota) — worth a quick backoff.
+function isRateLimitedResellerError(e) {
   const msg = String(e?.message || '').toLowerCase();
   const code = e?.code || e?.response?.status;
   return (
     code === 429 || code === 500 || code === 502 || code === 503 ||
-    msg.includes('temporarily') ||
-    msg.includes('rate limit') ||
-    msg.includes('ratelimit') ||
-    msg.includes('quota') ||
-    msg.includes('backend error') ||
-    msg.includes('try again')
+    msg.includes('rate limit') || msg.includes('ratelimit') ||
+    msg.includes('quota') || msg.includes('backend error') || msg.includes('try again')
   );
 }
 
-async function resellerCallWithRetry(fn, label, maxAttempts = 4) {
-  let delay = 1500;
+// "Your reseller access has been disabled temporarily. Check back in some time."
+// Google means minutes/hours — retrying in-process is pointless and would stall
+// every later call. Trip a circuit breaker for the account instead.
+function isAccountDisabledError(e) {
+  const msg = String(e?.message || '').toLowerCase();
+  return msg.includes('disabled temporarily') || msg.includes('access has been disabled');
+}
+
+// Circuit breaker: once an account reports "disabled", skip further calls to it
+// for a cooldown so one dead account can't slow down or block the whole run.
+const RESELLER_DOWN_MS = 15 * 60 * 1000;
+const resellerDownUntil = { pk: 0, usa: 0 };
+function isResellerAccountDown(account) {
+  return Date.now() < (resellerDownUntil[account] || 0);
+}
+function markResellerAccountDown(account, why) {
+  resellerDownUntil[account] = Date.now() + RESELLER_DOWN_MS;
+  console.warn(`[reseller] ${String(account).toUpperCase()} marked DOWN for ${RESELLER_DOWN_MS / 60000}m — ${why}`);
+}
+
+async function resellerCallWithRetry(fn, label, account, maxAttempts = 3) {
+  if (account && isResellerAccountDown(account)) {
+    throw new Error(`${String(account).toUpperCase()} reseller access is temporarily disabled (skipping until cooldown expires).`);
+  }
+  let delay = 1000;
   for (let attempt = 1; ; attempt++) {
     try {
       return await fn();
     } catch (e) {
-      if (attempt >= maxAttempts || !isTransientResellerError(e)) throw e;
+      if (isAccountDisabledError(e)) {
+        if (account) markResellerAccountDown(account, e.message);
+        throw e; // do not retry — Google wants us to back off entirely
+      }
+      if (attempt >= maxAttempts || !isRateLimitedResellerError(e)) throw e;
       console.warn(`[reseller] ${label}: transient error (attempt ${attempt}/${maxAttempts}) — ${e.message}. Retrying in ${delay}ms`);
       await sleep(delay);
       delay *= 2;
@@ -4371,7 +4391,8 @@ async function syncSubscriptionsForBilling(account) {
     // which Google reports as "Your reseller access has been disabled temporarily".
     const resp = await resellerCallWithRetry(
       () => reseller.subscriptions.list({ maxResults: 100, pageToken }),
-      `subscriptions.list(${account})`
+      `subscriptions.list(${account})`,
+      account
     );
     subs = subs.concat(resp.data.subscriptions || []);
     pageToken = resp.data.nextPageToken;
@@ -4426,16 +4447,28 @@ async function syncSubscriptionsForBilling(account) {
 
 // Suspend / reactivate a subscription by domain + sku on the right account
 async function setSubscriptionState(account, domain, skuId, action, subscriptionId) {
+  // Skip immediately if this account is in its "disabled" cooldown — otherwise
+  // every record retries a call Google has already told us to back off from.
+  if (isResellerAccountDown(account)) {
+    throw new Error(`${String(account).toUpperCase()} reseller access is temporarily disabled — skipping ${action} for ${domain}.`);
+  }
   const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
   const reseller = google.reseller({ version: 'v1', auth });
   // Google Reseller API needs the customer's subscriptionId. For resold subs this is often
   // the skuId, but use the stored subscriptionId when we have it.
   const subId = subscriptionId || skuId;
   console.log(`SET SUB STATE: ${action} ${domain} subId=${subId} (sku=${skuId}, acct=${account})`);
-  if (action === 'suspend') {
-    await reseller.subscriptions.suspend({ customerId: domain, subscriptionId: subId });
-  } else {
-    await reseller.subscriptions.activate({ customerId: domain, subscriptionId: subId });
+  try {
+    if (action === 'suspend') {
+      await reseller.subscriptions.suspend({ customerId: domain, subscriptionId: subId });
+    } else {
+      await reseller.subscriptions.activate({ customerId: domain, subscriptionId: subId });
+    }
+  } catch (e) {
+    // Trip the breaker so the remaining records skip this account instantly
+    // instead of each one waiting on a call Google is already refusing.
+    if (isAccountDisabledError(e)) markResellerAccountDown(account, e.message);
+    throw e;
   }
 }
 
@@ -9802,7 +9835,8 @@ app.get('/api/admin/preflight', authenticateCustomer, requireAdmin, async (req, 
       const reseller = google.reseller({ version: 'v1', auth });
       const r = await resellerCallWithRetry(
         () => reseller.subscriptions.list({ maxResults: 1 }),
-        `preflight subscriptions.list(${acct})`
+        `preflight subscriptions.list(${acct})`,
+        acct
       );
       const n = (r.data?.subscriptions || []).length;
       add(`Reseller API (${acct.toUpperCase()})`, true,
