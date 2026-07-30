@@ -5796,11 +5796,21 @@ app.get('/api/cron/subscription-billing', async (req, res) => {
     return res.status(403).json({ error: 'Invalid secret.' });
   }
   try {
-    // Optionally re-sync to pick up new subs, then check
-    if (req.query.sync === '1') { await syncSubscriptionsForBilling('pk'); await syncSubscriptionsForBilling('usa'); }
+    // Optionally re-sync to pick up new subs, then check. Sync failures on one
+    // account must NOT abort the billing check (a disabled USA account used to
+    // block PK renewals entirely).
+    const syncErrors = {};
+    if (req.query.sync === '1') {
+      for (const acct of ['pk', 'usa']) {
+        try {
+          const r = await syncSubscriptionsForBilling(acct);
+          if (r?.error) syncErrors[acct] = r.error;
+        } catch (e) { syncErrors[acct] = e.message; }
+      }
+    }
     const results = await runSubscriptionBillingCheck();
     console.log('SUBSCRIPTION BILLING CHECK:', JSON.stringify(results));
-    res.json({ success: true, ...results });
+    res.json({ success: true, ...results, syncErrors });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
