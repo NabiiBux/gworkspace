@@ -4457,10 +4457,11 @@ async function syncSubscriptionsForBilling(account) {
 }
 
 // Suspend / reactivate a subscription by domain + sku on the right account
-async function setSubscriptionState(account, domain, skuId, action, subscriptionId) {
+async function setSubscriptionState(account, domain, skuId, action, subscriptionId, opts = {}) {
   // Skip immediately if this account is in its "disabled" cooldown — otherwise
   // every record retries a call Google has already told us to back off from.
-  if (isResellerAccountDown(account)) {
+  // opts.force bypasses it: an admin-initiated action must always really try.
+  if (!opts.force && isResellerAccountDown(account)) {
     throw new Error(`${String(account).toUpperCase()} reseller access is temporarily disabled — skipping ${action} for ${domain}.`);
   }
   const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
@@ -5460,7 +5461,15 @@ app.post('/api/admin/billing/unsuspend', authenticateCustomer, requireAdmin, asy
     const outcomes = [];
     for (const it of items) {
       try {
-        await setSubscriptionState(it.account, dom, it.skuId, 'activate', it.subscriptionId);
+        // Reason-aware: Google's activate can only lift a RESELLER_INITIATED
+        // suspension. If Google suspended it, say so explicitly instead of
+        // failing with an opaque error.
+        const rr = await reactivateAfterPayment(it.account, dom, it.skuId, it.subscriptionId);
+        if (!rr.ok) {
+          outcomes.push({ domain: dom, skuId: it.skuId, result: 'FAILED: ' + rr.message, googleSuspended: !!rr.googleSuspended, reasons: rr.reasons });
+          console.error('UNSUSPEND FAILED:', dom, it.skuId, '→', rr.message);
+          continue;
+        }
         // RULE 4: manual unsuspension = a COMPLETELY NEW billing cycle from now.
         // billing_cycle_start = now, next_billing_date = now + 29 days. Cron ignores until new due date.
         let rec = await SubBilling.findOne({ domain: dom, skuId: it.skuId });
@@ -5516,7 +5525,12 @@ app.post('/api/admin/billing/unsuspend-bulk', authenticateCustomer, requireAdmin
       let okCount = 0; const failures = [];
       for (const it of items) {
         try {
-          await setSubscriptionState(it.account, dom, it.skuId, 'activate', it.subscriptionId);
+          // Use the reason-aware reactivation: Google's activate can ONLY lift a
+          // RESELLER_INITIATED suspension. If Google suspended it (ToS, trial end,
+          // billing/state), a bare activate fails with an opaque error — this
+          // reports exactly why instead of a silent failure.
+          const r = await reactivateAfterPayment(it.account, dom, it.skuId, it.subscriptionId);
+          if (!r.ok) { failures.push({ skuId: it.skuId, error: r.message, googleSuspended: !!r.googleSuspended, reasons: r.reasons }); continue; }
           // Manual unsuspension → new cycle from now.
           let rec = await SubBilling.findOne({ domain: dom, skuId: it.skuId });
           if (!rec) rec = new SubBilling({ domain: dom, skuId: it.skuId, account: it.account, subscriptionId: it.subscriptionId });
@@ -5541,71 +5555,6 @@ app.post('/api/admin/billing/unsuspend-bulk', authenticateCustomer, requireAdmin
   }
 });
 
-// Admin: BULK unsuspend — paste a list of domains, reactivate ALL their suspended subscriptions.
-// Returns per-domain results so you can see which succeeded and which failed (to fix + retry).
-app.post('/api/admin/billing/unsuspend-bulk', authenticateCustomer, requireAdmin, async (req, res) => {
-  try {
-    const domains = (req.body.domains || []).map((d) => String(d).toLowerCase().trim()).filter(Boolean);
-    if (!domains.length) return res.status(400).json({ error: 'Provide a list of domains.' });
-    const now = new Date();
-    const next = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-
-    const results = [];   // { domain, reactivated, failed, errors:[] }
-    for (const dom of domains) {
-      const domResult = { domain: dom, reactivated: 0, failed: 0, errors: [], found: 0 };
-      // Find this domain's suspended subs across both accounts
-      const items = [];
-      for (const account of ['pk', 'usa']) {
-        let auth;
-        try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); } catch (_) { continue; }
-        const reseller = google.reseller({ version: 'v1', auth });
-        try {
-          const resp = await reseller.subscriptions.list({ customerId: dom });
-          for (const s of (resp.data.subscriptions || [])) {
-            if (s.status === 'SUSPENDED') items.push({ account, skuId: String(s.skuId), subscriptionId: s.subscriptionId });
-          }
-        } catch (_) { }
-      }
-      domResult.found = items.length;
-      if (!items.length) { domResult.errors.push('No suspended subscriptions found (domain may not exist in your reseller account or is already active).'); }
-      for (const it of items) {
-        try {
-          await setSubscriptionState(it.account, dom, it.skuId, 'activate', it.subscriptionId);
-          // Manual unsuspension → new cycle from now.
-          let rec = await SubBilling.findOne({ domain: dom, skuId: it.skuId });
-          if (!rec) rec = new SubBilling({ domain: dom, skuId: it.skuId, account: it.account, subscriptionId: it.subscriptionId });
-          startNewBillingCycle(rec, now);
-          rec.lastManualUnsuspendAt = now;
-          rec.account = it.account;
-          if (it.subscriptionId) rec.subscriptionId = it.subscriptionId;
-          await rec.save();
-          domResult.reactivated++;
-          console.log('BULK UNSUSPEND (new cycle):', dom, it.skuId, it.account, '| next billing', rec.nextBillingDate.toISOString().slice(0, 10));
-        } catch (e) {
-          const detail = e?.errors?.[0]?.message || e?.response?.data?.error?.message || e.message;
-          domResult.failed++;
-          domResult.errors.push(`${it.skuId}: ${detail}`);
-          console.error('BULK UNSUSPEND FAILED:', dom, it.skuId, '→', detail);
-        }
-      }
-      results.push(domResult);
-    }
-
-    // Summary: which domains fully succeeded vs had any failure
-    const succeeded = results.filter((r) => r.reactivated > 0 && r.failed === 0).map((r) => r.domain);
-    const failedDomains = results.filter((r) => r.failed > 0 || (r.found === 0)).map((r) => ({ domain: r.domain, reason: r.errors.join('; ') }));
-    res.json({
-      success: true,
-      totalDomains: domains.length,
-      totalReactivated: results.reduce((a, r) => a + r.reactivated, 0),
-      succeededDomains: succeeded,
-      failedDomains,        // <-- the domains you can fix and retry
-      details: results,
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
 // Admin: run the workspace-anchored check. ?dryRun=1 to PREVIEW without suspending.
 app.post('/api/admin/billing/run-workspace-anchored', authenticateCustomer, requireAdmin, async (req, res) => {
