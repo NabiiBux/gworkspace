@@ -4416,7 +4416,18 @@ async function syncSubscriptionsForBilling(account) {
     const creation = s.creationTime && !isNaN(Number(s.creationTime))
       ? new Date(Number(s.creationTime))
       : new Date();
-    const seededNext = addDays(creation, BILLING_CYCLE_DAYS);
+    // Importing an EXISTING subscription must not create an already-past-due
+    // record: creation + 29d is in the past for anything older than a month, so
+    // the very first billing run would read it as unpaid+overdue and suspend a
+    // live customer. Roll the cycle forward (keeping the same anniversary) so a
+    // newly imported subscription always starts with a FUTURE due date.
+    let seededStart = creation;
+    let seededNext = addDays(creation, BILLING_CYCLE_DAYS);
+    let guard = 0;
+    while (seededNext.getTime() <= Date.now() && guard++ < 1000) {
+      seededStart = seededNext;
+      seededNext = addDays(seededNext, BILLING_CYCLE_DAYS);
+    }
 
     try {
       // Insert if new. DO NOT overwrite an existing record's schedule (payments/cron own it).
@@ -4425,7 +4436,7 @@ async function syncSubscriptionsForBilling(account) {
         {
           $setOnInsert: {
             account,
-            billingCycleStart: creation,
+            billingCycleStart: seededStart,
             purchaseDate: creation,
             nextBillingDate: seededNext,
             currentCycleStatus: 'unpaid',
@@ -4843,6 +4854,49 @@ async function runSubscriptionBillingCheck(opts = {}) {
   }
   return results;
 }
+
+// Admin: repair legacy imported subscriptions that were seeded ALREADY past-due.
+// Those were never billed through the portal (no lastPaymentDate), so they are
+// not real delinquents — but the billing check reads them as unpaid+overdue and
+// queues them for suspension. Roll their cycle forward to the next future date.
+// Pure database work: needs no Google API, so it runs while an account is down.
+// GET/POST ?dryRun=1 to preview counts without changing anything.
+app.post('/api/admin/billing/repair-legacy-cycles', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const dryRun = req.query.dryRun === '1' || req.body?.dryRun === true;
+    const now = Date.now();
+    const candidates = await SubBilling.find({
+      nextBillingDate: { $ne: null, $lt: new Date(now) },
+      lastPaymentDate: null,          // never paid through the portal => imported, not delinquent
+      whitelisted: { $ne: true },
+    });
+
+    const changed = [];
+    for (const r of candidates) {
+      let start = new Date(r.billingCycleStart || r.nextBillingDate);
+      let next = new Date(r.nextBillingDate);
+      let guard = 0;
+      while (next.getTime() <= now && guard++ < 1000) {
+        start = next;
+        next = addDays(next, BILLING_CYCLE_DAYS);
+      }
+      changed.push({ domain: r.domain, skuId: r.skuId, account: r.account, from: r.nextBillingDate, to: next });
+      if (!dryRun) {
+        r.billingCycleStart = start;
+        r.nextBillingDate = next;
+        // Reset reminder flags so the new cycle notifies correctly.
+        r.notified7DaysBefore = false;
+        r.notifiedOnExpiration = false;
+        if (r.billingStatus === 'warned') r.billingStatus = 'active';
+        await r.save();
+      }
+    }
+    console.log(`BILLING LEGACY REPAIR${dryRun ? ' (dry run)' : ''}: ${changed.length} record(s) rolled forward.`);
+    res.json({ success: true, dryRun, repaired: changed.length, records: changed.slice(0, 100) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // Admin: migrate existing billing records to the fixed 29-day cycle schema.
 // Sets billingCycleStart from purchaseDate (or existing nextBillingDate - 29d), recomputes nextBillingDate.
