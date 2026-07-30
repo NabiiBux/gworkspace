@@ -5837,10 +5837,12 @@ app.get('/api/cron/subscription-billing', async (req, res) => {
   if (!req.query.secret || req.query.secret !== process.env.JWT_SECRET) {
     return res.status(403).json({ error: 'Invalid secret.' });
   }
-  try {
-    // Optionally re-sync to pick up new subs, then check. Sync failures on one
-    // account must NOT abort the billing check (a disabled USA account used to
-    // block PK renewals entirely).
+  // The full run can outlive a reverse-proxy timeout, which makes it look like a
+  // hang even when it succeeds. ?background=1 returns immediately and logs the
+  // outcome (check: pm2 logs | grep SUBSCRIPTION BILLING CHECK).
+  const doRun = async () => {
+    // Sync failures on one account must NOT abort the billing check (a disabled
+    // USA account used to block PK renewals entirely).
     const syncErrors = {};
     if (req.query.sync === '1') {
       for (const acct of ['pk', 'usa']) {
@@ -5851,8 +5853,19 @@ app.get('/api/cron/subscription-billing', async (req, res) => {
       }
     }
     const results = await runSubscriptionBillingCheck();
-    console.log('SUBSCRIPTION BILLING CHECK:', JSON.stringify(results));
-    res.json({ success: true, ...results, syncErrors });
+    console.log('SUBSCRIPTION BILLING CHECK:', JSON.stringify({ ...results, syncErrors }));
+    return { ...results, syncErrors };
+  };
+
+  if (req.query.background === '1') {
+    res.status(202).json({ started: true, message: 'Billing run started in background. Check logs: pm2 logs gworkspace-api | grep "SUBSCRIPTION BILLING CHECK"' });
+    doRun().catch((e) => console.error('SUBSCRIPTION BILLING CHECK failed:', e.message));
+    return;
+  }
+
+  try {
+    const out = await doRun();
+    res.json({ success: true, ...out });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
