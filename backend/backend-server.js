@@ -4668,9 +4668,16 @@ async function suspendAllCustomerSubscriptions(domain, now) {
 }
 
 // The 29-day check for ALL tracked subscriptions (existing + new).
-async function runSubscriptionBillingCheck() {
+async function runSubscriptionBillingCheck(opts = {}) {
   const now = new Date();
-  const results = { checked: 0, warned: [], suspended: [], advanced: [], skippedWhitelisted: 0 };
+  const dryRun = !!opts.dryRun;
+  // SAFETY: a bad seed (e.g. imported subscriptions whose cycle was seeded as
+  // 'unpaid' with a past due date) can make a single run try to suspend every
+  // customer at once. Cap it, log loudly, and require a deliberate override.
+  const maxSuspends = Number(process.env.BILLING_MAX_SUSPENDS_PER_RUN || 5);
+  let suspendsDone = 0;
+  const canSuspend = () => suspendsDone < maxSuspends;
+  const results = { checked: 0, warned: [], suspended: [], advanced: [], skippedWhitelisted: 0, dryRun, suspendCap: maxSuspends };
 
   const allRecords = await SubBilling.find();
   const diag = { totalRecords: allRecords.length, statusCounts: {}, whitelistedCount: 0, nullNextDate: 0, pastDueUnpaid: 0 };
@@ -4789,15 +4796,27 @@ async function runSubscriptionBillingCheck() {
       }
       if (chargeOutcome === 'exhausted') {
         // Card failed 3 times → suspend ALL of this customer's subscriptions until they pay.
+        if (dryRun || !canSuspend()) {
+          results.suspendSkipped = results.suspendSkipped || [];
+          results.suspendSkipped.push(`${r.domain} (ALL — card failed 3x) [${dryRun ? 'dry run' : 'suspend cap reached'}]`);
+          continue;
+        }
         try { await suspendAllCustomerSubscriptions(r.domain, now); } catch (e) { console.error('[auto-renew] suspend-all failed:', r.domain, e.message); }
+        suspendsDone++;
         results.suspended.push(`${r.domain} (ALL SUBSCRIPTIONS — card failed 3x)`);
         try { await sendSuspensionEmail(await emailForDomain(r.domain), r.domain); } catch (_) { }
         continue;
       }
 
       // 'skip' → no saved card / auto-renew off: original manual-billing suspension.
+      if (dryRun || !canSuspend()) {
+        results.suspendSkipped = results.suspendSkipped || [];
+        results.suspendSkipped.push(`${r.domain} (${r.skuId}) [${dryRun ? 'dry run' : 'suspend cap reached'}]`);
+        continue;
+      }
       try {
         await setSubscriptionState(r.account, r.domain, r.skuId, 'suspend', r.subscriptionId);
+        suspendsDone++;
         r.billingStatus = 'suspended';
         r.suspendedAt = now;
         await r.save();
@@ -4817,6 +4836,10 @@ async function runSubscriptionBillingCheck() {
       results.recordErrors = results.recordErrors || [];
       results.recordErrors.push({ domain: r.domain, skuId: r.skuId, account: r.account, error: detail });
     }
+  }
+  if (results.suspendSkipped?.length && !dryRun) {
+    console.warn(`⚠️  SUSPEND CAP: ${results.suspendSkipped.length} subscription(s) were due for suspension beyond the cap of ${maxSuspends} and were LEFT ACTIVE. ` +
+      'If this is unexpected, do NOT raise BILLING_MAX_SUSPENDS_PER_RUN — investigate why so many records are marked unpaid/past-due first.');
   }
   return results;
 }
@@ -5852,8 +5875,13 @@ app.get('/api/cron/subscription-billing', async (req, res) => {
         } catch (e) { syncErrors[acct] = e.message; }
       }
     }
-    const results = await runSubscriptionBillingCheck();
-    console.log('SUBSCRIPTION BILLING CHECK:', JSON.stringify({ ...results, syncErrors }));
+    // ?dryRun=1 reports what WOULD be suspended without touching Google.
+    const results = await runSubscriptionBillingCheck({ dryRun: req.query.dryRun === '1' });
+    console.log('SUBSCRIPTION BILLING CHECK:', JSON.stringify({
+      dryRun: results.dryRun, checked: results.checked,
+      suspended: results.suspended.length, suspendSkipped: results.suspendSkipped?.length || 0,
+      warned: results.warned.length, advanced: results.advanced.length, syncErrors,
+    }));
     return { ...results, syncErrors };
   };
 
