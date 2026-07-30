@@ -81,7 +81,7 @@ const getCountryCode = (name) => {
 // Reusable Google Maps Places address autocomplete.
 // Renders an input; on selection, calls onPick({ street, city, state, zip }).
 const ALLOWED_COUNTRIES_DEFAULT = ['us'];
-const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT, initialValue = '' }) => {
+const AddressAutocomplete = ({ onPick, onTextChange, countries = ALLOWED_COUNTRIES_DEFAULT, initialValue = '' }) => {
   const [mapsKey, setMapsKey] = useState(MAPS_KEY);
   const [query, setQuery] = useState(initialValue);
   const [suggestions, setSuggestions] = useState([]);
@@ -177,8 +177,11 @@ const AddressAutocomplete = ({ onPick, countries = ALLOWED_COUNTRIES_DEFAULT, in
   };
 
   // Debounced: only call Google after the user pauses (350ms) and has typed >=3 chars.
+  // onTextChange keeps the parent form in sync with what's typed, so a manually
+  // entered address still counts (suggestions are an aid, not a requirement).
   const onInput = (v) => {
     setQuery(v);
+    if (onTextChange) onTextChange(v);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => runSearch(v.trim()), 350);
   };
@@ -9417,14 +9420,23 @@ function WorkspaceOrderFlow() {
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
   const canContinueStep1 = selectedPlan && seats >= 1;
-  const canSubmit =
-    form.organizationName &&
-    /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(form.domain) &&
-    domainStatus.state === 'available' &&
-    form.desiredAdminUsername && form.tempPassword.length >= 8 &&
-    form.streetAddress && form.city && form.state && /^\d{5}$/.test(form.zip) &&
-    form.firstName && form.lastName &&
-    /\S+@\S+\.\S+/.test(form.email) && /\S+@\S+\.\S+/.test(form.alternateEmail);
+  // Build the list of what's still missing so the UI can tell the customer
+  // exactly why the Review button is disabled (instead of a vague message).
+  const missingFields = [];
+  if (!form.organizationName) missingFields.push('organization name');
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(form.domain)) missingFields.push('a valid domain');
+  else if (domainStatus.state !== 'available') missingFields.push('an available domain (check the domain status)');
+  if (!form.desiredAdminUsername) missingFields.push('admin username');
+  if (!form.tempPassword || form.tempPassword.length < 8) missingFields.push('temporary password (8+ characters)');
+  if (!form.streetAddress) missingFields.push('street address');
+  if (!form.city) missingFields.push('city');
+  if (!form.state) missingFields.push('state');
+  if (!/^\d{5}$/.test(form.zip)) missingFields.push('5-digit ZIP');
+  if (!form.firstName) missingFields.push('first name');
+  if (!form.lastName) missingFields.push('last name');
+  if (!/\S+@\S+\.\S+/.test(form.email)) missingFields.push('contact email');
+  if (!/\S+@\S+\.\S+/.test(form.alternateEmail)) missingFields.push('alternate email');
+  const canSubmit = missingFields.length === 0;
 
   const placeOrder = async () => {
     setSubmitting(true); setSubmitError('');
@@ -9661,6 +9673,7 @@ function WorkspaceOrderFlow() {
           <div className="wof-field">
             <label>Street address *</label>
             <AddressAutocomplete countries={['us']} initialValue={form.streetAddress}
+              onTextChange={(v) => setForm((f) => ({ ...f, streetAddress: v }))}
               onPick={({ street, city, state, zip }) => setForm((f) => ({
                 ...f,
                 streetAddress: street || f.streetAddress,
@@ -9668,7 +9681,7 @@ function WorkspaceOrderFlow() {
                 state: state || f.state,
                 zip: zip || f.zip,
               }))} />
-            <small>Start typing and pick your address from the list.</small>
+            <small>Start typing and pick your address from the list, or type it in full.</small>
           </div>
           <div className="wof-field"><label>Street address line 2</label>
             <input value={form.streetAddress2} onChange={set('streetAddress2')} placeholder="Suite 400 (optional)" /></div>
@@ -9705,7 +9718,11 @@ function WorkspaceOrderFlow() {
             <button type="button" className="wof-btn ghost" onClick={() => setStep(1)}>Back</button>
             <button type="button" className="wof-btn primary" disabled={!canSubmit} onClick={() => setStep(3)}>Review order</button>
           </div>
-          {!canSubmit && <small className="wof-muted">Complete all required (*) fields to continue.</small>}
+          {!canSubmit && (
+            <small className="wof-muted">
+              Still needed: {missingFields.join(', ')}.
+            </small>
+          )}
         </section>
       )}
 
