@@ -4062,8 +4062,32 @@ const AdminPaymentsSection = () => {
   const [selectedSubs, setSelectedSubs] = useState([]);
 
   const loadSuspended = async () => {
-    try { const r = await axios.get(`${API_URL}/admin/billing/suspended`); setSuspendedList(r.data.suspended || []); }
-    catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Could not load suspended list.'); }
+    setSubBillingMsg('Loading suspended domains from Google…');
+    try {
+      const r = await axios.get(`${API_URL}/admin/billing/suspended`);
+      const list = r.data.suspended || [];
+      setSuspendedList(list);
+      const errs = r.data.errors || [];
+      // Report partial failures instead of silently showing an empty list.
+      if (errs.length) setSubBillingMsg(`Loaded ${list.length} suspended domain(s). Some accounts could not be read — ${errs.join(' | ')}`);
+      else setSubBillingMsg(`✓ Loaded ${list.length} suspended domain(s) from Google.`);
+    } catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Could not load suspended list.'); }
+  };
+
+  // Whitelist domains straight from the Unsuspend tab (protects them permanently).
+  const [wlDomains, setWlDomains] = useState('');
+  const [wlBusy, setWlBusy] = useState(false);
+  const whitelistFromUnsuspend = async () => {
+    const domains = wlDomains.split(/[\s,]+/).map(d => d.trim().toLowerCase()).filter(Boolean);
+    if (!domains.length) { setSubBillingMsg('Paste at least one domain to whitelist.'); return; }
+    if (!window.confirm(`Whitelist ${domains.length} domain(s)? They will be permanently protected from the billing cycle (never auto-suspended) until removed.`)) return;
+    setWlBusy(true); setSubBillingMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/admin/billing/whitelist-bulk`, { domains });
+      setSubBillingMsg(`✓ Whitelisted ${r.data.updated} of ${r.data.requested} requested (${r.data.totalWhitelisted} total protected).`);
+      setWlDomains('');
+    } catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Bulk whitelist failed.'); }
+    finally { setWlBusy(false); }
   };
   const reactivateDomain = async (s) => {
     if (!window.confirm(`Reactivate ALL suspended subscriptions for ${s.domain}?`)) return;
@@ -4805,9 +4829,20 @@ const AdminPaymentsSection = () => {
           <h3 style={{ marginTop: 0 }}>Unsuspend a paid customer</h3>
           <p style={{ color: '#6b7280', fontSize: 14 }}>Search and select a suspended domain, then reactivate all of their subscriptions or pick specific ones.</p>
           {subBillingMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: subBillingMsg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: subBillingMsg.startsWith('✓') ? '#166534' : '#92600a' }}>{subBillingMsg}</div>}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
             <button className="btn btn-secondary" onClick={loadSuspended}>Refresh list</button>
             <button className="btn btn-secondary" style={{ color: '#166534', borderColor: '#166534' }} onClick={() => setShowBulkUnsuspend(!showBulkUnsuspend)}>Bulk unsuspend</button>
+          </div>
+
+          {/* Whitelist straight from here — protects domains from ever being auto-suspended. */}
+          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+            <h4 style={{ margin: '0 0 8px' }}>🛡 Whitelist domains (permanent protection)</h4>
+            <p style={{ color: '#166534', fontSize: 13, margin: '0 0 10px' }}>
+              Paste domains (one per line or comma-separated). They are removed from the billing cycle and never auto-suspended, until an admin removes the whitelist. Works even if a reseller account is temporarily unavailable.
+            </p>
+            <textarea value={wlDomains} onChange={e => setWlDomains(e.target.value)} placeholder={"customer1.com\ncustomer2.com"}
+              style={{ width: '100%', minHeight: 90, borderRadius: 8, border: '1px solid #bbf7d0', padding: '10px 12px', fontSize: 14, fontFamily: 'monospace', marginBottom: 10 }} />
+            <button className="btn btn-primary" onClick={whitelistFromUnsuspend} disabled={wlBusy}>{wlBusy ? 'Whitelisting…' : 'Whitelist these domains'}</button>
           </div>
 
           {showBulkUnsuspend && (
