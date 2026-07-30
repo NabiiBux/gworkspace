@@ -4321,6 +4321,40 @@ function recalcNextBilling(rec, from = new Date()) {
 
 
 // Pull all subscriptions from a Google reseller account and seed/update billing records.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// The Google Reseller API is quota-limited. Bursty calls get rejected with
+// "Your reseller access has been disabled temporarily. Check back in some time."
+// (or 429/5xx) — these are TRANSIENT, not a broken account, so retry with
+// exponential backoff instead of failing the whole billing run.
+function isTransientResellerError(e) {
+  const msg = String(e?.message || '').toLowerCase();
+  const code = e?.code || e?.response?.status;
+  return (
+    code === 429 || code === 500 || code === 502 || code === 503 ||
+    msg.includes('temporarily') ||
+    msg.includes('rate limit') ||
+    msg.includes('ratelimit') ||
+    msg.includes('quota') ||
+    msg.includes('backend error') ||
+    msg.includes('try again')
+  );
+}
+
+async function resellerCallWithRetry(fn, label, maxAttempts = 4) {
+  let delay = 1500;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt >= maxAttempts || !isTransientResellerError(e)) throw e;
+      console.warn(`[reseller] ${label}: transient error (attempt ${attempt}/${maxAttempts}) — ${e.message}. Retrying in ${delay}ms`);
+      await sleep(delay);
+      delay *= 2;
+    }
+  }
+}
+
 async function syncSubscriptionsForBilling(account) {
   let auth;
   try {
@@ -4331,11 +4365,19 @@ async function syncSubscriptionsForBilling(account) {
   const reseller = google.reseller({ version: 'v1', auth });
   let subs = [];
   let pageToken;
+  let pages = 0;
   do {
-    const resp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
+    // Throttle + retry: an unpaced pagination loop trips the Reseller API quota,
+    // which Google reports as "Your reseller access has been disabled temporarily".
+    const resp = await resellerCallWithRetry(
+      () => reseller.subscriptions.list({ maxResults: 100, pageToken }),
+      `subscriptions.list(${account})`
+    );
     subs = subs.concat(resp.data.subscriptions || []);
     pageToken = resp.data.nextPageToken;
-  } while (pageToken);
+    pages++;
+    if (pageToken) await sleep(350); // stay well under the per-minute quota
+  } while (pageToken && pages < 100);
 
   let seeded = 0;
   const seen = new Set();
@@ -9739,7 +9781,10 @@ app.get('/api/admin/preflight', authenticateCustomer, requireAdmin, async (req, 
     try {
       const auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth();
       const reseller = google.reseller({ version: 'v1', auth });
-      const r = await reseller.subscriptions.list({ maxResults: 1 });
+      const r = await resellerCallWithRetry(
+        () => reseller.subscriptions.list({ maxResults: 1 }),
+        `preflight subscriptions.list(${acct})`
+      );
       const n = (r.data?.subscriptions || []).length;
       add(`Reseller API (${acct.toUpperCase()})`, true,
         `Connected${auth.isServiceAccount ? ' via service account' : ' via OAuth'}; subscriptions readable (${n} in first page).`);
@@ -11167,10 +11212,13 @@ async function runDailyBillingTasks() {
   // account's sync or — critically — the billing/renewal check itself.
   for (const acct of ['pk', 'usa']) {
     try {
-      await syncSubscriptionsForBilling(acct);
+      const r = await syncSubscriptionsForBilling(acct);
+      if (r?.error) console.warn(`Daily billing: ${acct.toUpperCase()} sync skipped — ${r.error}`);
+      else console.log(`Daily billing: ${acct.toUpperCase()} sync ok (${r?.total ?? 0} subs, ${r?.seeded ?? 0} newly tracked).`);
     } catch (e) {
       console.error(`Daily billing: ${acct.toUpperCase()} sync failed (continuing):`, e.message);
     }
+    await sleep(1000); // don't hit both accounts back-to-back
   }
   try {
     const subResults = await runSubscriptionBillingCheck();
