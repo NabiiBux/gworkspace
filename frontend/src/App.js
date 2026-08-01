@@ -295,11 +295,20 @@ const AuthProvider = ({ children }) => {
           const res = await axios.get(`${API_URL}/auth/me`);
           setUser(res.data);
         } catch (e) {
-          // token invalid/expired
-          setToken(null);
-          setUser(null);
-          localStorage.removeItem('token');
-          delete axios.defaults.headers.common['Authorization'];
+          const status = e?.response?.status;
+          if (status === 401 || status === 403) {
+            // Genuinely invalid/expired token — sign out.
+            setToken(null);
+            setUser(null);
+            localStorage.removeItem('token');
+            delete axios.defaults.headers.common['Authorization'];
+          } else {
+            // Server error / network blip: the token is probably fine. Keep the
+            // session instead of silently bouncing the user back to the login
+            // form (which looked like "login doesn't work").
+            console.error('auth/me failed but keeping session:', status || e.message);
+            setUser({ businessEmail: '', role: 'customer' });
+          }
         }
       }
       setLoading(false);
@@ -499,8 +508,15 @@ const CustomerAuthFlow = () => {
       if (otpVal) body.otp = otpVal;
       const r = await axios.post(`${API_URL}/auth/login`, body);
       if (r.data.twoFactorRequired) { setStep('2fa'); setLoading(false); return; }
+      if (!r.data?.token || !r.data?.customer) {
+        setError('Unexpected response from the server — please try again.');
+        return;
+      }
       login(r.data.customer.businessEmail, r.data.token, r.data.customer);
-    } catch (e2) { setError(e2?.response?.data?.error || 'Login failed.'); }
+    } catch (e2) {
+      console.error('login failed:', e2?.response?.status, e2?.response?.data);
+      setError(e2?.response?.data?.error || `Login failed${e2?.response?.status ? ` (${e2.response.status})` : ''}.`);
+    }
     finally { setLoading(false); }
   };
   const doLogin = (e) => { e?.preventDefault?.(); submitLogin(); };
