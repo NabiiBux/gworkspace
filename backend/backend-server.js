@@ -4856,19 +4856,97 @@ async function runSubscriptionBillingCheck(opts = {}) {
   return results;
 }
 
+// Auth: either an admin JWT, or ?secret=<JWT_SECRET> so it can be run straight
+// from the server without needing portal credentials (same pattern as the cron
+// endpoint). Declared before the routes that use it.
+const allowAdminOrSecret = async (req, res, next) => {
+  if (req.query.secret && req.query.secret === process.env.JWT_SECRET) return next();
+  return authenticateCustomer(req, res, () => requireAdmin(req, res, next));
+};
+
+// Admin: recover payments whose webhook never arrived (e.g. Stripe was still
+// pointed at a dead host). Pulls recent Checkout Sessions straight from Stripe
+// and provisions any that are paid but still unpaid locally — the same work the
+// webhook would have done. Auth: admin JWT or ?secret=<JWT_SECRET>.
+// ?days=14 (lookback), ?dryRun=1 to preview.
+app.all('/api/admin/payments/reconcile-stripe', allowAdminOrSecret, async (req, res) => {
+  try {
+    const dryRun = req.query.dryRun === '1';
+    const days = Math.min(Number(req.query.days || 14), 90);
+    const since = Math.floor(Date.now() / 1000) - days * 86400;
+    const stripe = await getStripeForMode();
+
+    const found = [];
+    let startingAfter;
+    let pages = 0;
+    do {
+      const page = await stripe.checkout.sessions.list({
+        limit: 100, created: { gte: since }, ...(startingAfter ? { starting_after: startingAfter } : {}),
+      });
+      for (const session of page.data) {
+        // Only sessions the customer actually completed.
+        const paid = session.payment_status === 'paid' || (session.mode === 'setup' && session.status === 'complete');
+        if (!paid) continue;
+
+        if (session.mode === 'setup') {
+          // Card-save session: make sure the card is stored.
+          const custId = session.metadata?.portalCustomerId || session.client_reference_id;
+          const me = custId ? await Customer.findById(custId).catch(() => null) : null;
+          if (me && !me.cardPmId && session.setup_intent) {
+            found.push({ type: 'card', session: session.id, customer: String(me._id), action: dryRun ? 'would save card' : 'saving card' });
+            if (!dryRun) {
+              try {
+                const si = await stripe.setupIntents.retrieve(String(session.setup_intent));
+                const pmId = si?.payment_method;
+                if (pmId) {
+                  const pm = await stripe.paymentMethods.retrieve(String(pmId));
+                  me.stripeCustomerId = me.stripeCustomerId || (typeof session.customer === 'string' ? session.customer : session.customer?.id);
+                  me.cardPmId = String(pmId);
+                  me.cardBrand = pm?.card?.brand || null;
+                  me.cardLast4 = pm?.card?.last4 || null;
+                  me.cardAddedAt = new Date();
+                  await me.save();
+                }
+              } catch (e) { console.error('[reconcile] card save failed:', session.id, e.message); }
+            }
+          }
+          continue;
+        }
+
+        const pid = session.metadata?.paymentId || session.client_reference_id;
+        if (!pid) continue;
+        const payment = await Payment.findById(pid).catch(() => null);
+        if (!payment) { found.push({ type: 'orphan', session: session.id, paymentId: pid, action: 'no local payment record' }); continue; }
+        if (payment.status === 'paid') continue; // already handled
+
+        found.push({
+          type: payment.orderType || 'order', session: session.id, paymentId: String(payment._id),
+          domain: payment.domain || null, amount: session.amount_total ? session.amount_total / 100 : null,
+          action: dryRun ? 'would provision' : 'provisioning',
+        });
+        if (!dryRun) {
+          try { await markPaidAndProvision(payment); }
+          catch (e) { console.error('[reconcile] provisioning failed:', String(payment._id), e.message); }
+        }
+      }
+      startingAfter = page.has_more ? page.data[page.data.length - 1].id : null;
+      pages++;
+    } while (startingAfter && pages < 20);
+
+    console.log(`STRIPE RECONCILE${dryRun ? ' (dry run)' : ''}: ${found.length} item(s) over ${days}d.`);
+    res.json({ success: true, dryRun, days, count: found.length, items: found });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Admin: repair legacy imported subscriptions that were seeded ALREADY past-due.
 // Those were never billed through the portal (no lastPaymentDate), so they are
 // not real delinquents — but the billing check reads them as unpaid+overdue and
 // queues them for suspension. Roll their cycle forward to the next future date.
 // Pure database work: needs no Google API, so it runs while an account is down.
 // GET/POST ?dryRun=1 to preview counts without changing anything.
-// Auth: either an admin JWT, or ?secret=<JWT_SECRET> so it can be run straight
-// from the server without needing portal credentials (same pattern as the cron
-// endpoint). Accepts GET or POST for convenience.
-const allowAdminOrSecret = async (req, res, next) => {
-  if (req.query.secret && req.query.secret === process.env.JWT_SECRET) return next();
-  return authenticateCustomer(req, res, () => requireAdmin(req, res, next));
-};
+// Accepts GET or POST for convenience (auth helper declared above).
 app.all('/api/admin/billing/repair-legacy-cycles', allowAdminOrSecret, async (req, res) => {
   try {
     const dryRun = req.query.dryRun === '1' || req.body?.dryRun === true;
