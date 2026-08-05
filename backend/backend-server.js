@@ -3639,8 +3639,10 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
     } else {
       event = JSON.parse(req.body.toString());
     }
+    console.log(`[stripe-webhook] received: ${event.type} id=${event.id}`);
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
+      console.log(`[stripe-webhook] checkout.session.completed session=${session.id} mode=${session.mode} payment_status=${session.payment_status} paymentId=${session.metadata?.paymentId || session.client_reference_id || 'none'}`);
       if (session.mode === 'setup') {
         // Card-save session (auto-renewal): store the verified payment method on the customer.
         try {
@@ -3668,12 +3670,20 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
         const pid = session.metadata?.paymentId || session.client_reference_id;
         if (pid) {
           const payment = await Payment.findById(pid);
+          if (!payment) console.error(`[stripe-webhook] no local Payment for id=${pid}`);
+          else if (payment.status === 'paid') console.log(`[stripe-webhook] payment ${pid} already paid — nothing to do`);
+          else console.log(`[stripe-webhook] provisioning payment ${pid} (${payment.orderType || 'order'})`);
           await markPaidAndProvision(payment);
+        } else {
+          console.warn('[stripe-webhook] session had no paymentId/client_reference_id — cannot match an order');
         }
       }
     }
     res.json({ received: true });
   } catch (e) {
+    // Signature failures land here: the endpoint's signing secret does not match
+    // STRIPE_WEBHOOK_SECRET, so every payment would silently fail to provision.
+    console.error('[stripe-webhook] ERROR:', e.message);
     res.status(400).send(`Webhook Error: ${e.message}`);
   }
 });
