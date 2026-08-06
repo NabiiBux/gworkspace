@@ -4,7 +4,7 @@
 
 :root {
   --primary-color: #111827;
-  --secondary-color: #0f766e;
+  --secondary-color: #6e46eb;
   --success-color: #10b981;
   --warning-color: #f59e0b;
   --danger-color: #ef4444;
@@ -165,7 +165,7 @@ body {
 }
 
 .btn-primary:hover:not(:disabled) {
-  background-color: #0b5953;
+  background-color: #5433bd;
   transform: translateY(-2px);
   box-shadow: var(--shadow);
 }
@@ -372,7 +372,7 @@ body {
 }
 
 .stat-card {
-  background: linear-gradient(135deg, var(--secondary-color), #0b5953);
+  background: linear-gradient(135deg, var(--secondary-color), #5433bd);
   color: var(--white);
   padding: 24px;
   border-radius: 12px;
@@ -1181,10 +1181,10 @@ body {
 }
 
 .menu-item.active {
-  background-color: rgba(15, 118, 110, 0.12) !important;
-  color: #2dd4bf !important;
+  background-color: rgba(110, 70, 235, 0.12) !important;
+  color: #a78bfa !important;
   font-weight: 600 !important;
-  border-left: 3px solid #0f766e !important;
+  border-left: 3px solid #6e46eb !important;
   border-radius: 0 8px 8px 0 !important;
 }
 
@@ -1304,7 +1304,7 @@ div:has(> .data-table),
   }
 
   .bottom-nav-item.active {
-    color: #2dd4bf !important;
+    color: #a78bfa !important;
     font-weight: 600 !important;
   }
 
