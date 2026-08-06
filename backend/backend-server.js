@@ -614,7 +614,7 @@ const PaymentSettings = mongoose.model('PaymentSettings', PaymentSettingsSchema)
 const BrandSettingsSchema = new mongoose.Schema({
   singleton: { type: String, default: 'main', unique: true },
   brandName: { type: String, default: 'GNB MENTOR LLC' },
-  brandColor: { type: String, default: '#0F766E' },
+  brandColor: { type: String, default: '#6e46eb' },
   logoDataUrl: { type: String, default: '' },     // data:image/png;base64,...
   faviconDataUrl: { type: String, default: '' },
   updatedAt: { type: Date, default: Date.now },
@@ -941,11 +941,11 @@ const PORTAL_URL = process.env.PORTAL_URL || process.env.CORS_ORIGIN || 'https:/
 
 function emailShell(title, bodyHtml) {
   return `<div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
-    <div style="background:#0F766E;color:#fff;padding:20px 24px;font-size:20px;font-weight:700">${BRAND_NAME}</div>
+    <div style="background:#6e46eb;color:#fff;padding:20px 24px;font-size:20px;font-weight:700">${BRAND_NAME}</div>
     <div style="padding:24px;color:#1f2937;line-height:1.6">
       <h2 style="margin:0 0 12px;font-size:20px">${title}</h2>
       ${bodyHtml}
-      <div style="margin-top:24px"><a href="${PORTAL_URL}" style="background:#0F766E;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Go to your portal</a></div>
+      <div style="margin-top:24px"><a href="${PORTAL_URL}" style="background:#6e46eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Go to your portal</a></div>
     </div>
     <div style="background:#f8fafc;padding:16px 24px;color:#6b7280;font-size:12px">You're receiving this because you have a subscription with ${BRAND_NAME}.</div>
   </div>`;
@@ -1790,7 +1790,7 @@ app.post('/api/customer/send-verification', authenticateCustomer, async (req, re
     const html = emailShell('Confirm your email', `
       <p>Hi ${me.firstName || me.username || 'there'},</p>
       <p>Please confirm this email address for your ${BRAND_NAME} account.</p>
-      <p style="margin:24px 0"><a href="${link}" style="background:#0F766E;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Confirm email</a></p>
+      <p style="margin:24px 0"><a href="${link}" style="background:#6e46eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Confirm email</a></p>
       <p style="color:#6b7280;font-size:13px">Or paste this link into your browser:<br>${link}</p>
       <p style="color:#6b7280;font-size:13px">This link expires in 24 hours. If you didn't request this, you can ignore it.</p>
     `);
@@ -3944,7 +3944,7 @@ async function markPaidAndProvision(payment) {
             <p>Your transfer of <strong>${tOrder.domainName}</strong> into our system has been submitted.</p>
             <p>Domain transfers usually take <strong>5–7 days</strong>. You may receive an approval email from the current registrar — approving it speeds things up. We'll email you when it completes.</p>
             <p>Track status anytime under <strong>Domains → Transfers</strong> in your portal.</p>
-            <p><a href="${PORTAL_URL}/#domains" style="color:#0F766E">Open your domains</a></p>`);
+            <p><a href="${PORTAL_URL}/#domains" style="color:#6e46eb">Open your domains</a></p>`);
           await sendEmail(me?.businessEmail, `Transfer started: ${tOrder.domainName}`, html);
         } catch (_) { }
       }
@@ -4017,7 +4017,7 @@ async function markPaidAndProvision(payment) {
             <p>Your domain <strong>${dOrder.domainName}</strong> has been ${isRenew ? 'renewed' : 'registered'} successfully${dOrder.period ? ` for ${dOrder.period} year${dOrder.period === 1 ? '' : 's'}` : ''}.</p>
             ${isRenew ? '' : `<p><strong>Important — verify your email:</strong> ICANN requires you to verify the registrant email (<strong>${regEmail}</strong>) within 15 days. Namecheap has sent a verification email — please open it and click the link, or your domain may be suspended.</p>`}
             <p>You can manage DNS, nameservers, and contacts anytime from your portal under <strong>Domains → My domains → Manage</strong>.</p>
-            <p><a href="${PORTAL_URL}/#domains" style="color:#0F766E">Open your domains</a></p>`);
+            <p><a href="${PORTAL_URL}/#domains" style="color:#6e46eb">Open your domains</a></p>`);
           await sendEmail(regEmail, `${dOrder.domainName} ${isRenew ? 'renewed' : 'registered'} ✓`, html);
         } catch (_) { }
       }
@@ -8754,12 +8754,12 @@ app.get('/api/branding', async (req, res) => {
     const b = await BrandSettings.findOne({ singleton: 'main' });
     res.json({
       brandName: b?.brandName || process.env.BRAND_NAME || 'GNB MENTOR LLC',
-      brandColor: b?.brandColor || '#0F766E',
+      brandColor: b?.brandColor || '#6e46eb',
       logoDataUrl: b?.logoDataUrl || '',
       faviconDataUrl: b?.faviconDataUrl || '',
     });
   } catch (e) {
-    res.json({ brandName: 'GNB MENTOR LLC', brandColor: '#0F766E', logoDataUrl: '', faviconDataUrl: '' });
+    res.json({ brandName: 'GNB MENTOR LLC', brandColor: '#6e46eb', logoDataUrl: '', faviconDataUrl: '' });
   }
 });
 

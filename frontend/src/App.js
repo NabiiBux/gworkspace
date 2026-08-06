@@ -237,11 +237,11 @@ const AddressAutocomplete = ({ onPick, onTextChange, countries = ALLOWED_COUNTRI
 const AuthContext = createContext();
 
 // Branding Context — loads logo/favicon/name/color from the backend and applies the favicon.
-const BrandingContext = createContext({ brandName: 'GNB MENTOR LLC', brandColor: '#0F766E', logoDataUrl: '', faviconDataUrl: '' });
+const BrandingContext = createContext({ brandName: 'GNB MENTOR LLC', brandColor: '#6e46eb', logoDataUrl: '', faviconDataUrl: '' });
 const useBranding = () => useContext(BrandingContext);
 
 const BrandingProvider = ({ children }) => {
-  const [branding, setBranding] = useState({ brandName: 'GNB MENTOR LLC', brandColor: '#0F766E', logoDataUrl: '', faviconDataUrl: '' });
+  const [branding, setBranding] = useState({ brandName: 'GNB MENTOR LLC', brandColor: '#6e46eb', logoDataUrl: '', faviconDataUrl: '' });
   const refresh = async () => {
     try {
       const r = await axios.get(`${API_URL}/branding`);
@@ -555,11 +555,11 @@ const CustomerAuthFlow = () => {
   });
 
   return (
-    <div className="auth-container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: 'linear-gradient(135deg,#0F766E 0%,#0b5750 45%,#0a3f3a 100%)' }}>
+    <div className="auth-container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: 'linear-gradient(135deg,#6e46eb 0%,#5433bd 45%,#3f2590 100%)' }}>
       <style>{`
         .cauth, .cauth * { box-sizing: border-box; }
         .cauth .field { width: 100%; height: 46px; border-radius: 8px; border: 1px solid #d8dbe6; padding: 0 12px; font-size: 15px; }
-        .cauth .field:focus { outline: none; border-color: #0F766E; }
+        .cauth .field:focus { outline: none; border-color: #6e46eb; }
         .cauth .btn-primary { width: 100%; height: 48px; border-radius: 8px; font-weight: 700; cursor: pointer; border: none; background: #3b5cff; color: #fff; font-size: 15px; }
         .cauth .btn-primary:disabled { opacity: 0.6; cursor: default; }
         .cauth .btn-social { width: 100%; height: 46px; border-radius: 8px; font-weight: 600; cursor: pointer; border: 1px solid #d8dbe6; background: #fff; color: #111827; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15px; }
@@ -575,7 +575,7 @@ const CustomerAuthFlow = () => {
         <div style={{ textAlign: 'center', marginBottom: 18 }}>
           {brand.logoDataUrl
             ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 46, maxWidth: 180, marginBottom: 6 }} />
-            : <div style={{ width: 48, height: 48, borderRadius: 12, background: '#0F766E', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 22, marginBottom: 8 }}>{(brand.brandName || 'G')[0]}</div>}
+            : <div style={{ width: 48, height: 48, borderRadius: 12, background: '#6e46eb', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 22, marginBottom: 8 }}>{(brand.brandName || 'G')[0]}</div>}
         </div>
 
         {step === 'email' && (
@@ -612,7 +612,7 @@ const CustomerAuthFlow = () => {
               <form onSubmit={doLogin} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ position: 'relative' }}>
                   <input className="field" type={showPw ? 'text' : 'password'} placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ paddingRight: 60 }} autoFocus />
-                  <button type="button" onClick={() => setShowPw((v) => !v)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#0F766E', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{showPw ? 'Hide' : 'Show'}</button>
+                  <button type="button" onClick={() => setShowPw((v) => !v)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{showPw ? 'Hide' : 'Show'}</button>
                 </div>
                 <button type="button" className="linkbtn" onClick={() => setInfo('To reset your password, please contact support and we\'ll help you back in.')} style={{ alignSelf: 'flex-start' }}>Forgot Password?</button>
                 <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Logging in…' : 'Continue with Email'}</button>
@@ -650,7 +650,7 @@ const CustomerAuthFlow = () => {
             <form onSubmit={doSignup} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ position: 'relative' }}>
                 <input className="field" type={showPw ? 'text' : 'password'} placeholder="Choose a password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ paddingRight: 60 }} autoFocus />
-                <button type="button" onClick={() => setShowPw((v) => !v)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#0F766E', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{showPw ? 'Hide' : 'Show'}</button>
+                <button type="button" onClick={() => setShowPw((v) => !v)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{showPw ? 'Hide' : 'Show'}</button>
               </div>
               <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Creating account…' : 'Sign Up'}</button>
             </form>
@@ -814,7 +814,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
   };
 
   return (
-    <div className="auth-container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: 'linear-gradient(135deg,#0F766E 0%,#0b5750 45%,#0a3f3a 100%)' }}>
+    <div className="auth-container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: 'linear-gradient(135deg,#6e46eb 0%,#5433bd 45%,#3f2590 100%)' }}>
       <style>{`
         .auth-card, .auth-card * { box-sizing: border-box; }
         .auth-card .auth-form { display: flex; flex-direction: column; gap: 14px; width: 100%; }
@@ -831,9 +831,9 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
         }
         .auth-card .form-group select { padding-right: 28px; text-overflow: ellipsis; }
         .auth-card .form-group input:focus,
-        .auth-card .form-group select:focus { outline: none; border-color: #0F766E; }
+        .auth-card .form-group select:focus { outline: none; border-color: #6e46eb; }
         .auth-card .btn { width: 100%; height: 44px; border-radius: 8px; font-weight: 700; cursor: pointer; border: none; }
-        .auth-card .btn-primary { background: #0F766E; color: #fff; }
+        .auth-card .btn-primary { background: #6e46eb; color: #fff; }
         .auth-card .btn-primary:disabled { opacity: 0.6; cursor: default; }
         .auth-card .btn-google { width: 100%; height: 44px; border-radius: 8px; font-weight: 600; cursor: pointer;
           border: 1px solid #d8dbe6; background: #fff; color: #374151; display: flex; align-items: center;
@@ -843,7 +843,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
         .auth-card .auth-divider::before, .auth-card .auth-divider::after { content: ''; flex: 1; height: 1px; background: #e5e7eb; }
         .auth-card .auth-tabs { display: flex; gap: 8px; margin: 16px 0; }
         .auth-card .auth-tabs .tab { flex: 1; height: 40px; border-radius: 8px; border: 1px solid #d8dbe6; background: #fff; cursor: pointer; font-weight: 600; color: #6b7280; }
-        .auth-card .auth-tabs .tab.active { background: #0F766E; color: #fff; border-color: #0F766E; }
+        .auth-card .auth-tabs .tab.active { background: #6e46eb; color: #fff; border-color: #6e46eb; }
         .auth-card .error-message { background: #fde8e8; color: #b42318; padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 8px; word-break: break-word; }
         @media (max-width: 460px) { .auth-card .form-row { flex-direction: column; gap: 14px; } }
       `}</style>
@@ -851,7 +851,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
         <div className="auth-header" style={{ textAlign: 'center', marginBottom: 8 }}>
           {brand.logoDataUrl
             ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 54, maxWidth: 200, marginBottom: 8 }} />
-            : <div style={{ width: 54, height: 54, borderRadius: 14, background: '#0F766E', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 24, marginBottom: 8 }}>{(brand.brandName || 'G')[0]}</div>}
+            : <div style={{ width: 54, height: 54, borderRadius: 14, background: '#6e46eb', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 24, marginBottom: 8 }}>{(brand.brandName || 'G')[0]}</div>}
           <h1 style={{ fontSize: 22, margin: '6px 0 2px', color: '#111827' }}>{adminMode ? 'Admin sign in' : (brand.brandName || 'GNB MENTOR LLC')}</h1>
           <p style={{ color: '#6b7280', margin: 0, fontSize: 14 }}>{adminMode ? 'Administrator access' : 'Sign in or create your account'}</p>
         </div>
@@ -917,7 +917,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
                   style={{ paddingRight: 64 }}
                 />
                 <button type="button" onClick={() => setShowPw(v => !v)}
-                  style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#0F766E', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                  style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                   {showPw ? 'Hide' : 'Show'}
                 </button>
               </div>
@@ -1013,7 +1013,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
                     onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })}
                     style={{ paddingRight: 64 }} />
                   <button type="button" onClick={() => setShowPwReg(v => !v)}
-                    style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#0F766E', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                    style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                     {showPwReg ? 'Hide' : 'Show'}
                   </button>
                 </div>
@@ -1025,7 +1025,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
                 <input type="checkbox" checked={registerForm.aupAccepted} style={{ marginTop: 3 }}
                   onChange={(e) => setRegisterForm({ ...registerForm, aupAccepted: e.target.checked })} />
                 <span>
-                  I have read and agree to the <a href="/voice-aup" target="_blank" rel="noreferrer" style={{ color: '#0F766E', fontWeight: 600 }}>Voice Acceptable Use Policy</a>.
+                  I have read and agree to the <a href="/voice-aup" target="_blank" rel="noreferrer" style={{ color: '#6e46eb', fontWeight: 600 }}>Voice Acceptable Use Policy</a>.
                   I understand that spam, harassment, fraud, illegal use, or other violations may result in immediate suspension of my service.
                 </span>
               </label>
@@ -1449,7 +1449,7 @@ const OverviewSection = ({ stats }) => {
         </div>
         <div className="stat-card" id="kpi-card-subscriptions">
           <h3>Tracked Subscriptions</h3>
-          <p className="stat-value" style={{ color: '#0d9488' }}>
+          <p className="stat-value" style={{ color: '#8461f0' }}>
             {analyticsLoading ? '…' : (analytics?.overallStats?.totalSubscriptions ?? 0)}
           </p>
           <span style={{ fontSize: 12, color: '#6b7280' }}>Total active and suspended</span>
@@ -1514,7 +1514,7 @@ const OverviewSection = ({ stats }) => {
                     <YAxis tickLine={false} axisLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
                     <Tooltip content={<CustomTooltip prefix="" />} />
                     <Legend verticalAlign="top" height={36} iconType="circle" />
-                    <Bar name="New Registrations" dataKey="newSubscriptions" fill="#0d9488" radius={[4, 4, 0, 0]} barSize={24} />
+                    <Bar name="New Registrations" dataKey="newSubscriptions" fill="#8461f0" radius={[4, 4, 0, 0]} barSize={24} />
                     <Line name="Cumulative Total" type="monotone" dataKey="totalSubscriptions" stroke="#4f46e5" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -1593,7 +1593,7 @@ const OverviewSection = ({ stats }) => {
       <h3 style={{ marginTop: 24, marginBottom: 12, fontSize: 15, fontWeight: 700, color: '#1e293b' }}>Live Google Reseller Node Breakdown</h3>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }} className="grid-2" id="overview-account-breakdown">
         {[
-          { key: 'pk', label: 'Pakistan reseller', sub: 'gnbmentor.com · Workspace', color: '#0F766E', data: live?.pk },
+          { key: 'pk', label: 'Pakistan reseller', sub: 'gnbmentor.com · Workspace', color: '#6e46eb', data: live?.pk },
           { key: 'usa', label: 'USA reseller', sub: 'artisandrywallaz.com · Voice', color: '#1d4ed8', data: live?.usa },
         ].map(acc => (
           <div key={acc.key} style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #e5e7eb', borderTop: `4px solid ${acc.color}` }}>
@@ -2841,7 +2841,7 @@ const AdminCustomersSection = () => {
                               if (!acctRes?.found) return null;
                               return (
                                 <div key={acct} style={{ marginTop: 4 }}>
-                                  <div style={{ fontSize: 11, fontWeight: 600, color: '#0f766e' }}>{acct.toUpperCase() === 'USA' ? '🇺🇸 USA Reseller' : '🇵🇰 PK Reseller'}:</div>
+                                  <div style={{ fontSize: 11, fontWeight: 600, color: '#6e46eb' }}>{acct.toUpperCase() === 'USA' ? '🇺🇸 USA Reseller' : '🇵🇰 PK Reseller'}:</div>
                                   {acctRes.subscriptions && acctRes.subscriptions.length > 0 ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginLeft: 8, marginTop: 2 }}>
                                       {acctRes.subscriptions.map((sub, i) => {
@@ -2986,7 +2986,7 @@ const AdminLeadsSection = () => {
     <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto', fontFamily: 'Inter, system-ui, sans-serif' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: '#0F766E' }}>💼 Prospective Leads</h2>
+          <h2 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: '#6e46eb' }}>💼 Prospective Leads</h2>
           <p style={{ margin: '4px 0 0', color: '#6b7280' }}>Manage incoming business setup services inquiries.</p>
         </div>
         <button onClick={loadLeads} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -2997,7 +2997,7 @@ const AdminLeadsSection = () => {
       {/* Metrics Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
         {[
-          { label: 'Total Inquiries', count: leads.length, color: '#0F766E', bg: '#f0f7f5' },
+          { label: 'Total Inquiries', count: leads.length, color: '#6e46eb', bg: '#f5f2fe' },
           { label: 'New Leads', count: countByStatus('New'), color: '#3b82f6', bg: '#eff6ff' },
           { label: 'In Discussion', count: countByStatus('In Discussion'), color: '#f59e0b', bg: '#fffbeb' },
           { label: 'Closed/Done', count: countByStatus('Closed'), color: '#10b981', bg: '#ecfdf5' },
@@ -3078,7 +3078,7 @@ const AdminLeadsSection = () => {
                 </div>
 
                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13, color: '#4b5563', borderTop: '1px dashed #f3f4f6', paddingTop: 8 }}>
-                  <div>✉️ <a href={`mailto:${lead.email}`} style={{ color: '#0F766E', textDecoration: 'none', fontWeight: 500 }}>{lead.email}</a></div>
+                  <div>✉️ <a href={`mailto:${lead.email}`} style={{ color: '#6e46eb', textDecoration: 'none', fontWeight: 500 }}>{lead.email}</a></div>
                   {lead.phone && <div>📞 {lead.phone}</div>}
                   {lead.domain && <div>🌐 <span style={{ fontWeight: 500 }}>{lead.domain}</span></div>}
                 </div>
@@ -3109,7 +3109,7 @@ const AdminLeadsSection = () => {
                     onClick={() => handleNotesSave(lead._id)}
                     disabled={savingNotes[lead._id]}
                     style={{
-                      background: '#0F766E',
+                      background: '#6e46eb',
                       color: '#fff',
                       border: 'none',
                       borderRadius: 6,
@@ -3305,7 +3305,7 @@ const AdminDomainsSslSection = () => {
 
   const card = { background: '#fff', borderRadius: 14, padding: 20, marginBottom: 18, border: '1px solid #e5e7eb' };
   const tabBtn = (k, label) => (
-    <button onClick={() => setTab(k)} style={{ background: tab === k ? '#0F766E' : '#fff', color: tab === k ? '#fff' : '#111', border: '1px solid ' + (tab === k ? '#0F766E' : '#d8dbe6'), borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}>{label}</button>
+    <button onClick={() => setTab(k)} style={{ background: tab === k ? '#6e46eb' : '#fff', color: tab === k ? '#fff' : '#111', border: '1px solid ' + (tab === k ? '#6e46eb' : '#d8dbe6'), borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}>{label}</button>
   );
   const inp = { borderRadius: 8, border: '1px solid #d8dbe6', padding: '6px 8px', fontSize: 14, width: 90 };
 
@@ -3313,7 +3313,7 @@ const AdminDomainsSslSection = () => {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <h1 style={{ margin: 0 }}>Domains & SSL</h1>
-        {balance && <div style={{ background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 10, padding: '8px 16px', fontWeight: 600, color: '#0F766E' }}>
+        {balance && <div style={{ background: '#f0fdfa', border: '1px solid #c9b8fb', borderRadius: 10, padding: '8px 16px', fontWeight: 600, color: '#6e46eb' }}>
           Namecheap balance: {balance.currency || '$'} {Number(balance.availableBalance ?? balance.balance ?? 0).toFixed(2)}
         </div>}
       </div>
@@ -3409,8 +3409,8 @@ const TldPriceRow = ({ row, inp, onSave }) => {
       <td>{row.cost != null ? `$${Number(row.cost).toFixed(2)}` : (row.error ? '—' : '…')}</td>
       <td><input style={inp} value={mk} onChange={e => setMk(e.target.value)} placeholder="e.g. 20" /></td>
       <td><input style={inp} value={fx} onChange={e => setFx(e.target.value)} placeholder="e.g. 14.99" /></td>
-      <td style={{ fontWeight: 600, color: '#0F766E' }}>{row.price != null ? `$${Number(row.price).toFixed(2)}` : '—'}</td>
-      <td><button onClick={() => onSave('tld', row.tld, mk, fx, row.cost)} style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Save</button></td>
+      <td style={{ fontWeight: 600, color: '#6e46eb' }}>{row.price != null ? `$${Number(row.price).toFixed(2)}` : '—'}</td>
+      <td><button onClick={() => onSave('tld', row.tld, mk, fx, row.cost)} style={{ background: '#6e46eb', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Save</button></td>
     </tr>
   );
 };
@@ -3425,8 +3425,8 @@ const SslPriceRow = ({ row, inp, onSave }) => {
       <td>{row.cost != null ? `$${Number(row.cost).toFixed(2)}` : '…'}</td>
       <td><input style={inp} value={mk} onChange={e => setMk(e.target.value)} placeholder="e.g. 20" /></td>
       <td><input style={inp} value={fx} onChange={e => setFx(e.target.value)} placeholder="e.g. 29.99" /></td>
-      <td style={{ fontWeight: 600, color: '#0F766E' }}>{row.price != null ? `$${Number(row.price).toFixed(2)}` : '—'}</td>
-      <td><button onClick={() => onSave('ssl', row.name, mk, fx, row.cost)} style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Save</button></td>
+      <td style={{ fontWeight: 600, color: '#6e46eb' }}>{row.price != null ? `$${Number(row.price).toFixed(2)}` : '—'}</td>
+      <td><button onClick={() => onSave('ssl', row.name, mk, fx, row.cost)} style={{ background: '#6e46eb', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Save</button></td>
     </tr>
   );
 };
@@ -3447,7 +3447,7 @@ const AdminVoiceMonitorSection = () => {
     finally { setChecking(false); }
   };
 
-  const TEAL = '#0F766E';
+  const TEAL = '#6e46eb';
   const card = { background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 16 };
   const inp = { width: '100%', borderRadius: 8, border: '1px solid #d8dbe6', padding: '10px 12px', marginBottom: 12, fontSize: 14, fontFamily: 'inherit' };
 
@@ -3690,7 +3690,7 @@ const AdminEmailsSection = () => {
   const [mTo, setMTo] = useState(''); const [mSubject, setMSubject] = useState(''); const [mBody, setMBody] = useState('');
   const [mMsg, setMMsg] = useState('');
 
-  const TEAL = '#0F766E';
+  const TEAL = '#6e46eb';
   const card = { background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 16 };
   const inp = { width: '100%', borderRadius: 8, border: '1px solid #d8dbe6', padding: '10px 12px', marginBottom: 12, fontSize: 14, fontFamily: 'inherit' };
 
@@ -4494,7 +4494,7 @@ const AdminPaymentsSection = () => {
             </div>
             {nickyTestUrl && (
               <div style={{ fontSize: 12, marginTop: 6 }}>
-                Checkout link: <a href={nickyTestUrl} target="_blank" rel="noreferrer" style={{ color: '#0F766E' }}>{nickyTestUrl}</a> — open it to confirm Nicky can load the order.
+                Checkout link: <a href={nickyTestUrl} target="_blank" rel="noreferrer" style={{ color: '#6e46eb' }}>{nickyTestUrl}</a> — open it to confirm Nicky can load the order.
               </div>
             )}
           </div>
@@ -4510,7 +4510,7 @@ const AdminPaymentsSection = () => {
             <p style={{ color: '#6b7280', fontSize: 14 }}>Your DomainNameAPI deposit balance — domains are charged from here when customers buy.</p>
             {balErr && <div style={{ color: '#b42318', fontSize: 14 }}>{balErr}</div>}
             {balance ? (
-              <div style={{ fontSize: 32, fontWeight: 800, color: '#0F766E' }}>
+              <div style={{ fontSize: 32, fontWeight: 800, color: '#6e46eb' }}>
                 {balance.balance != null ? `${balance.currency || ''} ${Number(balance.balance).toFixed(2)}` : 'See details'}
               </div>
             ) : !balErr ? <div style={{ color: '#6b7280' }}>Loading…</div> : null}
@@ -4970,8 +4970,8 @@ const AdminPaymentsSection = () => {
   );
 };
 // Shared theme tokens for the customer portal (matches portal.gnbmentor.com)
-const TEAL = '#0F766E';
-const TEAL_DARK = '#115E56';
+const TEAL = '#6e46eb';
+const TEAL_DARK = '#5a37c4';
 const INK = '#1f2937';
 const MUTE = '#6b7280';
 
@@ -5073,7 +5073,7 @@ const CustomerPortal = () => {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <span style={{ color: MUTE }}>Welcome, <strong style={{ color: INK }}>{name}</strong></span>
-          <span style={{ background: '#e6f4f1', color: TEAL, padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600 }}>Customer</span>
+          <span style={{ background: '#efeafe', color: TEAL, padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600 }}>Customer</span>
           <button onClick={logout} style={{ border: '1px solid #e5e7eb', background: '#fff', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', color: INK }}>Logout</button>
         </div>
       </header>
@@ -5667,7 +5667,7 @@ const CustomerDomains = () => {
         {result && result.results && (
           <div style={{ marginTop: 16 }}>
             {result.results.map((r, i) => (
-              <div key={i} style={{ background: r.available ? '#f0f7f5' : '#fafafa', borderRadius: 12, padding: '12px 16px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, opacity: r.available ? 1 : 0.7 }}>
+              <div key={i} style={{ background: r.available ? '#f5f2fe' : '#fafafa', borderRadius: 12, padding: '12px 16px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, opacity: r.available ? 1 : 0.7 }}>
                 <div>
                   <span style={{ fontSize: 16, fontWeight: 700 }}>{r.domain}</span>
                   {r.isPremium && <span style={{ marginLeft: 8, fontSize: 11, background: '#fde68a', color: '#92600a', padding: '2px 8px', borderRadius: 999 }}>Premium</span>}
@@ -6332,7 +6332,7 @@ const CustomerSubscriptions = () => {
               return (
                 <tr key={i}>
                   <td style={{ fontWeight: 600 }}>{s.skuName}</td>
-                  <td>{isPrimary ? <span style={{ fontSize: 12, background: '#e0f2f1', color: '#0F766E', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>Primary</span> : <span style={{ fontSize: 12, background: '#f3f4f6', color: '#6b7280', padding: '2px 8px', borderRadius: 99 }}>Add-on</span>}</td>
+                  <td>{isPrimary ? <span style={{ fontSize: 12, background: '#e0f2f1', color: '#6e46eb', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>Primary</span> : <span style={{ fontSize: 12, background: '#f3f4f6', color: '#6b7280', padding: '2px 8px', borderRadius: 99 }}>Add-on</span>}</td>
                   <td>
                     {isPrimary && s.status === 'ACTIVE' ? (() => {
                       const cur = s.seats || 1;
@@ -6404,7 +6404,7 @@ const CustomerSubscriptions = () => {
                           transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
                           transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
                           transitionDuration: '200ms',
-                          backgroundColor: s.autoRenew ? '#0f766e' : '#d1d5db',
+                          backgroundColor: s.autoRenew ? '#6e46eb' : '#d1d5db',
                           outline: 'none',
                           padding: 0
                         }}
@@ -6425,7 +6425,7 @@ const CustomerSubscriptions = () => {
                           }}
                         />
                       </button>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: s.autoRenew ? '#0f766e' : '#4b5563' }}>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: s.autoRenew ? '#6e46eb' : '#4b5563' }}>
                         {s.autoRenew ? 'On' : 'Off'}
                       </span>
                     </div>
@@ -6490,15 +6490,15 @@ const CustomerSubscriptions = () => {
               <div style={{ background: '#f8fafc', borderRadius: 10, padding: '12px 16px', marginBottom: 14, fontSize: 14 }}>
                 Adding <strong>{added}</strong> user{added === 1 ? '' : 's'}
                 {price != null
-                  ? <> · <strong style={{ color: '#0F766E' }}>${cost.toFixed(2)}</strong>/month <span style={{ color: '#6b7280' }}>(+ tax)</span></>
+                  ? <> · <strong style={{ color: '#6e46eb' }}>${cost.toFixed(2)}</strong>/month <span style={{ color: '#6b7280' }}>(+ tax)</span></>
                   : <span style={{ color: '#b45309' }}> · price will be confirmed at checkout</span>}
               </div>
 
               {seatMsg && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{seatMsg}</div>}
 
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <button onClick={() => doSeatChange('stripe')} disabled={seatBusy || added < 1} style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{seatBusy ? '…' : '💳 Pay by card'}</button>
-                <button onClick={() => doSeatChange('nicky')} disabled={seatBusy || added < 1} style={{ background: '#fff', color: '#0F766E', border: '1px solid #0F766E', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{seatBusy ? '…' : '🪙 Crypto'}</button>
+                <button onClick={() => doSeatChange('stripe')} disabled={seatBusy || added < 1} style={{ background: '#6e46eb', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{seatBusy ? '…' : '💳 Pay by card'}</button>
+                <button onClick={() => doSeatChange('nicky')} disabled={seatBusy || added < 1} style={{ background: '#fff', color: '#6e46eb', border: '1px solid #6e46eb', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{seatBusy ? '…' : '🪙 Crypto'}</button>
                 <button onClick={() => setSeatSub(null)} disabled={seatBusy} style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}>Cancel</button>
               </div>
               <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 10, marginBottom: 0 }}>After payment, the new user licenses are applied to your domain automatically. Create the users in your Google Admin console.</p>
@@ -6516,8 +6516,8 @@ const CustomerSubscriptions = () => {
             <p style={{ color: '#374151', fontSize: 14 }}>Renewing keeps your subscription active and moves your next renewal date forward by one month. Choose how to pay:</p>
             {renewMsg && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{renewMsg}</div>}
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button onClick={() => doRenew('stripe')} disabled={renewBusy} style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{renewBusy ? '…' : '💳 Pay by card'}</button>
-              <button onClick={() => doRenew('nicky')} disabled={renewBusy} style={{ background: '#fff', color: '#0F766E', border: '1px solid #0F766E', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{renewBusy ? '…' : '🪙 Pay with crypto'}</button>
+              <button onClick={() => doRenew('stripe')} disabled={renewBusy} style={{ background: '#6e46eb', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{renewBusy ? '…' : '💳 Pay by card'}</button>
+              <button onClick={() => doRenew('nicky')} disabled={renewBusy} style={{ background: '#fff', color: '#6e46eb', border: '1px solid #6e46eb', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{renewBusy ? '…' : '🪙 Pay with crypto'}</button>
               <button onClick={() => setRenewing(null)} disabled={renewBusy} style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}>Cancel</button>
             </div>
           </div>
@@ -6693,7 +6693,7 @@ const CustomerAddons = () => {
     finally { setBusy(false); }
   };
 
-  const TEAL = '#0F766E';
+  const TEAL = '#6e46eb';
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>🧩 Add-ons</h2>
@@ -7446,7 +7446,7 @@ const FaqSection = ({ brand, T, INKL, MUTEL }) => {
         }
         .faq-card-interactive:hover {
           transform: translateY(-4px) !important;
-          box-shadow: 0 16px 32px rgba(15,118,110,0.1), 0 4px 12px rgba(15,118,110,0.04) !important;
+          box-shadow: 0 16px 32px rgba(110, 70, 235,0.1), 0 4px 12px rgba(110, 70, 235,0.04) !important;
           border-color: ${T} !important;
         }
       `}</style>
@@ -7529,7 +7529,7 @@ const FaqSection = ({ brand, T, INKL, MUTEL }) => {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 8,
-                    boxShadow: isActive ? '0 4px 12px rgba(15,118,110,0.15)' : 'none'
+                    boxShadow: isActive ? '0 4px 12px rgba(110, 70, 235,0.15)' : 'none'
                   }}
                 >
                   <span>{icon}</span> {label}
@@ -7564,7 +7564,7 @@ const FaqSection = ({ brand, T, INKL, MUTEL }) => {
                           borderRadius: 12,
                           border: '1px solid',
                           borderColor: isExpanded ? T : '#e2e8f0',
-                          boxShadow: isExpanded ? '0 4px 18px rgba(15,118,110,0.03)' : '0 1px 2px rgba(0,0,0,0.01)',
+                          boxShadow: isExpanded ? '0 4px 18px rgba(110, 70, 235,0.03)' : '0 1px 2px rgba(0,0,0,0.01)',
                           overflow: 'hidden',
                         }}
                       >
@@ -7721,7 +7721,7 @@ const WorkspaceCalculator = ({ plans, T, TD, INKL, MUTEL }) => {
                         flexDirection: 'column',
                         justifyContent: 'space-between',
                         minHeight: 110,
-                        boxShadow: isSelected ? '0 4px 12px rgba(15,118,110,0.06)' : 'none'
+                        boxShadow: isSelected ? '0 4px 12px rgba(110, 70, 235,0.06)' : 'none'
                       }}
                     >
                       <div>
@@ -7881,7 +7881,7 @@ const WorkspaceCalculator = ({ plans, T, TD, INKL, MUTEL }) => {
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'space-between',
-              boxShadow: '0 12px 30px rgba(15,118,110,0.15)',
+              boxShadow: '0 12px 30px rgba(110, 70, 235,0.15)',
               border: '1px solid rgba(255,255,255,0.08)'
             }}>
               <div>
@@ -8030,7 +8030,7 @@ const SuccessStoriesSection = ({ brand, T, INKL, MUTEL }) => {
       rating: 5,
       quote: "Switching our company's emails and collaboration tools to Google Workspace through GNB Mentor was completely seamless. They configured all DNS settings, SPF, DKIM, and DMARC correctly, and our email deliverability increased dramatically. Best reseller service out there!",
       date: 'June 2026',
-      avatarColor: '#0F766E',
+      avatarColor: '#6e46eb',
       verified: true
     },
     {
@@ -8118,7 +8118,7 @@ const SuccessStoriesSection = ({ brand, T, INKL, MUTEL }) => {
       rating: formRating,
       quote,
       date: 'Just Now',
-      avatarColor: '#0D9488',
+      avatarColor: '#8461f0',
       verified: true
     };
 
@@ -8163,7 +8163,7 @@ const SuccessStoriesSection = ({ brand, T, INKL, MUTEL }) => {
         }
         .success-card-interactive:hover {
           transform: translateY(-6px) !important;
-          box-shadow: 0 20px 32px rgba(15,118,110,0.06), 0 8px 16px rgba(15,118,110,0.03) !important;
+          box-shadow: 0 20px 32px rgba(110, 70, 235,0.06), 0 8px 16px rgba(110, 70, 235,0.03) !important;
           border-color: ${T} !important;
         }
       `}</style>
@@ -8497,7 +8497,7 @@ const SuccessStoriesSection = ({ brand, T, INKL, MUTEL }) => {
                   cursor: 'pointer',
                   marginTop: 8,
                   transition: 'background 0.2s',
-                  boxShadow: '0 4px 12px rgba(15,118,110,0.15)',
+                  boxShadow: '0 4px 12px rgba(110, 70, 235,0.15)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -8610,7 +8610,7 @@ const LandingPage = () => {
     })();
   }, []);
 
-  const T = '#0F766E', TD = '#115E56', INKL = '#111827', MUTEL = '#4b5563';
+  const T = '#6e46eb', TD = '#5a37c4', INKL = '#111827', MUTEL = '#4b5563';
   const go = (p) => { window.location.href = p; };
 
   const searchDomain = async () => {
@@ -8648,10 +8648,10 @@ const LandingPage = () => {
               </>}
           </div>
           <div style={{ display: 'flex', gap: 24, alignItems: 'center' }} className="nav-links-desktop">
-            <a href="#workspace-calculator-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#0f766e]">Workspace Configurator</a>
-            <a href="#setup-services-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#0f766e]">Services</a>
-            <a href="#faq-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#0f766e]">FAQ</a>
-            <a href="#success-stories-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#0f766e]">Success Stories</a>
+            <a href="#workspace-calculator-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">Workspace Configurator</a>
+            <a href="#setup-services-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">Services</a>
+            <a href="#faq-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">FAQ</a>
+            <a href="#success-stories-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">Success Stories</a>
             <div style={{ display: 'flex', gap: 12, marginLeft: 16 }}>
               <button onClick={() => go('/login')} className="btn btn-outline" style={{ padding: '0.75rem 1.5rem', borderRadius: 12, fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', border: '1px solid rgba(17, 24, 39, 0.08)', background: '#fff', color: INKL, transition: 'all 0.2s' }}>↪ Login</button>
               <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '0.75rem 1.5rem', borderRadius: 12, fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', background: T, color: '#fff', transition: 'all 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', border: 'none' }}>+ Sign Up</button>
@@ -8664,7 +8664,7 @@ const LandingPage = () => {
       <section className="landing-hero" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '4rem', maxWidth: 1400, margin: '0 auto', padding: '4rem', alignItems: 'center' }}>
         <ScrollReveal duration={1000}>
           <div style={{ minWidth: 320 }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: '#f0fdfa', color: '#0f766e', borderRadius: 99, padding: '0.4rem 1rem', fontSize: '0.8rem', fontWeight: 600, marginBottom: '1.5rem' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: '#f0fdfa', color: '#6e46eb', borderRadius: 99, padding: '0.4rem 1rem', fontSize: '0.8rem', fontWeight: 600, marginBottom: '1.5rem' }}>
               <span style={{ display: 'flex', gap: 4 }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6' }} />
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444' }} />
@@ -8741,27 +8741,27 @@ const LandingPage = () => {
               flexWrap: 'wrap',
               color: 'rgba(17, 24, 39, 0.35)'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', transition: 'color 0.2s' }} className="hover:text-[#0f766e]">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">
                 <svg viewBox="0 0 60 25" fill="currentColor" style={{ height: 18, pointerEvents: 'none' }}><path d="M54.12 11.23c0-3.32-1.63-5.32-4.63-5.32-3.1 0-5.11 2.37-5.11 5.48 0 3.86 2.5 5.34 5.38 5.34 1.48 0 2.82-.36 3.69-.87v-2.31c-.82.4-1.92.68-2.97.68-1.57 0-2.61-.59-2.73-1.85h8.33c.02-.32.04-.71.04-1.15zm-6.38-1.58c0-1.11.75-1.74 1.73-1.74 1.01 0 1.63.63 1.63 1.74h-3.36zm-8.23-3.65c-1.34 0-2.29.61-2.72 1.15l-.16-.95h-2.9v15.2h3.33v-3.41c.45.38 1.25.83 2.45.83 2.52 0 4.41-1.91 4.41-5.06-.01-4.04-2.1-7.76-4.41-7.76zm-.97 10.15c-1.28 0-1.85-.68-1.85-1.9v-2.73c0-1.11.57-1.85 1.85-1.85 1.15 0 1.82.83 1.82 2.05v2.54c0 1.23-.67 1.89-1.82 1.89zm-10.22-4.14c0-1.56-.91-2.11-2.45-2.11-1.3 0-2.53.4-3.33.87v-2.65c.99-.41 2.42-.71 3.55-.71 3.32 0 5.56 1.44 5.56 4.67v8.52h-2.94l-.16-.95c-.53.67-1.5 1.15-2.82 1.15-2.27 0-3.9-1.34-3.9-3.43 0-3.21 2.8-3.9 6.27-3.9l.22.51zm-.24 1.78c-1.5 0-2.42.22-2.42 1.15 0 .69.51 1.05 1.34 1.05 1.23 0 1.89-.79 1.89-1.93l-.81-.27zm-11.45-7.79h3.33v11.4h-3.33zm0-4.02h3.33v2.85h-3.33zm-2.8 5.76c-.53-.59-1.42-1.03-2.63-1.03-2.6 0-4.51 2.13-4.51 5.34 0 3.75 2.11 5.36 4.7 5.36 1.03 0 1.95-.36 2.41-.83v3.13l-3.23.68v2.57l3.23-.68h3.36V6.15H7.07zm-.26 7.42c-.41.4-1.05.67-1.74.67-1.25 0-1.97-.83-1.97-2.11v-2.31c0-1.25.75-2.09 1.97-2.09.73 0 1.3.26 1.74.75v5.09z" /></svg>
                 <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Stripe</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#0f766e]">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">
                 <svg viewBox="0 0 60 25" fill="currentColor" style={{ height: 18, pointerEvents: 'none' }}><path d="M51.8 7.3h-7.1c-.5 0-.9.3-1 .8L40 20.8c-.1.3.1.6.4.6h3.4c.4 0 .8-.3.9-.8l.8-5c.1-.4.4-.7.9-.7h2.2c3.5 0 5.8-1.7 6.5-5.5.3-1.7.1-3-.9-3.8-.8-.7-2-1.2-3.4-1.2zm.4 4.5c-.3 2-1.7 2.8-3.7 2.8h-1.5l.8-4.8c0-.2.2-.4.4-.4h1c1.2 0 2 .2 2.5.6.5.4.7 1 .5 1.8zM24.8 7.3h-7.1c-.5 0-.9.3-1 .8l-3.7 12.7c-.1.3.1.6.4.6h3.4c.4 0 .8-.3.9-.8l.8-5c.1-.4.4-.7.9-.7h2.2c3.5 0 5.8-1.7 6.5-5.5.3-1.7.1-3-.9-3.8-.8-.7-2-1.2-3.4-1.2zm.4 4.5c-.3 2-1.7 2.8-3.7 2.8h-1.5l.8-4.8c0-.2.2-.4.4-.4h1c1.2 0 2 .2 2.5.6.5.4.7 1 .5 1.8zm11.2-4.5h-3.3c-.3 0-.6.2-.7.5l-5.3 7.7-2.3-7.5c-.1-.3-.4-.5-.7-.5h-3.3c-.4 0-.6.4-.4.7l4.3 12.3-3.6 5.1c-.2.3 0 .8.4.8h3.3c.3 0 .6-.2.7-.5l11.3-16.1c.3-.4 0-.9-.4-.9z" /></svg>
                 <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>PayPal</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#0f766e]">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">
                 <svg viewBox="0 0 100 25" fill="currentColor" style={{ height: 16, pointerEvents: 'none' }}><path d="M12.5 10c0-1.4-1.1-2.5-2.5-2.5S7.5 8.6 7.5 10v2.5H10c1.4 0 2.5-1.1 2.5-2.5zm-5 0V5c0-1.4-1.1-2.5-2.5-2.5S2.5 3.6 2.5 5v5c0 1.4 1.1 2.5 2.5 2.5h2.5V10zM10 12.5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5H7.5V15c0-1.4 1.1-2.5 2.5-2.5zm0 5h5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5h-5c-1.4 0-2.5-1.1-2.5-2.5s1.1-2.5 2.5-2.5zm5-5c0 1.4 1.1 2.5 2.5 2.5s2.5-1.1 2.5-2.5V10H15v2.5zm5 0V5c0-1.4-1.1-2.5-2.5-2.5S15 3.6 15 5v5c0 1.4 1.1 2.5 2.5 2.5H20V12.5zm-2.5 2.5c-1.4 0-2.5-1.1-2.5-2.5V10H15v2.5c0 1.4 1.1 2.5 2.5 2.5h2.5V15c0-1.4-1.1-2.5-2.5-2.5zm0-5h-5c-1.4 0-2.5-1.1-2.5-2.5S11.1 2.5 12.5 2.5h5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5zM29 7.5c-2.3 0-4.1 1.2-5 3V3H21v14.5h3v-6c0-2.2 1.8-4 4-4s4 1.8 4 4v6h3V11.5c0-2.2-1.8-4-4-4zm15.5 0c-3 0-5.5 2.5-5.5 5.5s2.5 5.5 5.5 5.5 5.5-2.5 5.5-5.5-2.5-5.5-5.5-5.5zm0 8c-1.4 0-2.5-1.1-2.5-2.5s1.1-2.5 2.5-2.5 2.5 1.1 2.5 2.5-1.1 2.5-2.5 2.5zm16-8c-2.2 0-4.1 1.2-5 3v-2.5h-3v11h3v-6c0-2.2 1.8-4 4-4s4 1.8 4 4v6h3V11.5c0-2.2-1.8-4-4-4z" /></svg>
                 <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Slack</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#0f766e]">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">
                 <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>💬</span>
                 <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Workspace</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#0f766e]">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">
                 <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>🛍️</span>
                 <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Shopify</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#0f766e]">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">
                 <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>📦</span>
                 <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Salesforce</span>
               </div>
@@ -8815,7 +8815,7 @@ const LandingPage = () => {
                   // In transfer mode a registered ("taken") domain is the good one.
                   const good = searchMode === 'transfer' ? !r.available : r.available;
                   return (
-                  <div key={i} style={{ background: good ? '#f0f7f5' : '#fafafa', borderRadius: 12, padding: '14px 18px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, opacity: good ? 1 : 0.65 }}>
+                  <div key={i} style={{ background: good ? '#f5f2fe' : '#fafafa', borderRadius: 12, padding: '14px 18px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, opacity: good ? 1 : 0.65 }}>
                     <div style={{ textAlign: 'left' }}>
                       <span style={{ fontSize: 16, fontWeight: 700, color: INKL }}>{r.domain}</span>
                       {r.isPremium && <span style={{ marginLeft: 8, fontSize: 11, background: '#fde68a', color: '#92600a', padding: '2px 8px', borderRadius: 999 }}>Premium</span>}
@@ -8867,7 +8867,7 @@ const LandingPage = () => {
                   transition: 'border-color 0.3s, transform 0.3s',
                   display: 'flex',
                   flexDirection: 'column',
-                  boxShadow: isStandard ? '0 10px 25px rgba(15,118,110,0.06)' : 'none'
+                  boxShadow: isStandard ? '0 10px 25px rgba(110, 70, 235,0.06)' : 'none'
                 }}>
                   <h3 style={{ fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: MUTEL, margin: '0 0 1rem 0', fontWeight: 700 }}>{p.name.replace('Google Workspace ', '')}</h3>
                   <div style={{ fontSize: '2.5rem', fontWeight: 800, marginBottom: '1.5rem', color: INKL }}>
@@ -9063,7 +9063,7 @@ const LandingPage = () => {
                   type="submit"
                   disabled={submittingLead}
                   style={{
-                    background: submittingLead ? '#0d9488' : T,
+                    background: submittingLead ? '#8461f0' : T,
                     opacity: submittingLead ? 0.75 : 1,
                     color: '#fff',
                     border: 'none',
@@ -9074,7 +9074,7 @@ const LandingPage = () => {
                     cursor: submittingLead ? 'not-allowed' : 'pointer',
                     marginTop: 8,
                     transition: 'all 0.2s ease',
-                    boxShadow: '0 4px 12px rgba(15,118,110,0.15)',
+                    boxShadow: '0 4px 12px rgba(110, 70, 235,0.15)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -9120,7 +9120,7 @@ const LandingPage = () => {
                   e.currentTarget.style.borderColor = T;
                   e.currentTarget.style.color = T;
                   e.currentTarget.style.transform = 'translateY(-2px)';
-                  e.currentTarget.style.boxShadow = '0 10px 15px -3px rgba(15,118,110,0.1), 0 4px 6px -2px rgba(15,118,110,0.05)';
+                  e.currentTarget.style.boxShadow = '0 10px 15px -3px rgba(110, 70, 235,0.1), 0 4px 6px -2px rgba(110, 70, 235,0.05)';
                 }}
                 onMouseOut={(e) => {
                   e.currentTarget.style.borderColor = '#e2e8f0';
@@ -9228,7 +9228,7 @@ const LandingPage = () => {
             style={{
               pointerEvents: 'auto',
               background: '#ffffff',
-              borderLeft: '4px solid #0F766E',
+              borderLeft: '4px solid #6e46eb',
               borderTop: '1px solid #e5e7eb',
               borderRight: '1px solid #e5e7eb',
               borderBottom: '1px solid #e5e7eb',
@@ -9246,7 +9246,7 @@ const LandingPage = () => {
           >
             <div style={{
               background: '#f0fdf4',
-              color: '#0f766e',
+              color: '#6e46eb',
               width: 28,
               height: 28,
               borderRadius: '50%',
@@ -9289,7 +9289,7 @@ const LandingPage = () => {
               bottom: 0,
               left: 0,
               height: '3px',
-              background: '#0F766E',
+              background: '#6e46eb',
               animation: 'shrinkProgress 5s linear forwards',
               width: '100%'
             }} />
@@ -9678,8 +9678,8 @@ function WorkspaceOrderFlow() {
                   <button key={opt.v} type="button" onClick={() => setPlanType(opt.v)}
                     style={{
                       textAlign: 'left', padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
-                      border: planType === opt.v ? '2px solid #0F766E' : '1px solid #d8dbe6',
-                      background: planType === opt.v ? '#f0f7f5' : '#fff'
+                      border: planType === opt.v ? '2px solid #6e46eb' : '1px solid #d8dbe6',
+                      background: planType === opt.v ? '#f5f2fe' : '#fff'
                     }}>
                     <div style={{ fontWeight: 700, marginBottom: 4 }}>{opt.t}{planType === opt.v && ' ✓'}</div>
                     <div style={{ fontSize: 12, color: '#6b7280' }}>{opt.d}</div>
@@ -9942,7 +9942,7 @@ const wofStyles = `
 const AdminBrandingSection = () => {
   const { refresh } = useBranding();
   const [brandName, setBrandName] = useState('');
-  const [brandColor, setBrandColor] = useState('#0F766E');
+  const [brandColor, setBrandColor] = useState('#6e46eb');
   const [logo, setLogo] = useState('');
   const [favicon, setFavicon] = useState('');
   const [msg, setMsg] = useState('');
@@ -9952,7 +9952,7 @@ const AdminBrandingSection = () => {
     (async () => {
       try {
         const r = await axios.get(`${API_URL}/branding`);
-        if (r.data) { setBrandName(r.data.brandName || ''); setBrandColor(r.data.brandColor || '#0F766E'); setLogo(r.data.logoDataUrl || ''); setFavicon(r.data.faviconDataUrl || ''); }
+        if (r.data) { setBrandName(r.data.brandName || ''); setBrandColor(r.data.brandColor || '#6e46eb'); setLogo(r.data.logoDataUrl || ''); setFavicon(r.data.faviconDataUrl || ''); }
       } catch (_) { }
     })();
   }, []);
@@ -10014,7 +10014,7 @@ const AdminBrandingSection = () => {
           {favicon && <button onClick={() => setFavicon('')} style={{ marginLeft: 10, background: '#fef2f2', color: '#b42318', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>Remove</button>}
         </div>
 
-        <button onClick={save} disabled={saving} style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontWeight: 700, cursor: 'pointer' }}>
+        <button onClick={save} disabled={saving} style={{ background: '#6e46eb', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontWeight: 700, cursor: 'pointer' }}>
           {saving ? 'Saving…' : 'Save branding'}
         </button>
       </div>
@@ -10181,7 +10181,7 @@ const CustomerWorkspaceImport = () => {
                 <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Payment plan</label>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   {[['flexible', 'Flexible (monthly)'], ['annual', 'Annual (monthly pay)']].map(([v, l]) => (
-                    <button key={v} type="button" onClick={() => setPlanType(v)} style={{ padding: '8px 16px', borderRadius: 8, cursor: 'pointer', border: planType === v ? `2px solid ${TEAL}` : '1px solid #d8dbe6', background: planType === v ? '#f0f7f5' : '#fff', fontWeight: 600 }}>{l}{planType === v ? ' ✓' : ''}</button>
+                    <button key={v} type="button" onClick={() => setPlanType(v)} style={{ padding: '8px 16px', borderRadius: 8, cursor: 'pointer', border: planType === v ? `2px solid ${TEAL}` : '1px solid #d8dbe6', background: planType === v ? '#f5f2fe' : '#fff', fontWeight: 600 }}>{l}{planType === v ? ' ✓' : ''}</button>
                   ))}
                 </div>
               </div>
