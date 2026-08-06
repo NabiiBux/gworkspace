@@ -11379,10 +11379,19 @@ const path = require('path');
 const frontendBuildPath = path.join(__dirname, '../frontend/build');
 app.use(express.static(frontendBuildPath));
 
+// Private areas that must never be indexed. Sent as an HTTP header so crawlers
+// honour it without executing JavaScript (the in-app meta tag covers client-side
+// navigation within the SPA).
+const NOINDEX_PATHS = ['/admin', '/login', '/register', '/signup', '/cart', '/checkout', '/account', '/settings', '/portal'];
+
 // Fallback all non-API GET requests to index.html (SPA fallback)
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) {
     return next();
+  }
+  const p = req.path.toLowerCase();
+  if (NOINDEX_PATHS.some((prefix) => p === prefix || p.startsWith(prefix + '/'))) {
+    res.set('X-Robots-Tag', 'noindex, nofollow');
   }
   res.sendFile(path.join(frontendBuildPath, 'index.html'));
 });
