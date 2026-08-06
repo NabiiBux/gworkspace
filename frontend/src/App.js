@@ -9306,8 +9306,35 @@ function tag(T) {
 
 
 // ==================== MAIN APP ====================
+// Keep search engines out of private areas. This is a single-page app with one
+// index.html, so the robots tag is managed at runtime: it is added on the admin,
+// login/signup and every signed-in page (account, cart, checkout, portal), and
+// removed on the public landing page so that stays indexable.
+const useNoIndexOnPrivatePages = (isPrivate) => {
+  useEffect(() => {
+    const ID = 'robots-noindex';
+    const existing = document.getElementById(ID);
+    if (isPrivate) {
+      if (!existing) {
+        const m = document.createElement('meta');
+        m.id = ID;
+        m.name = 'robots';
+        m.content = 'noindex, nofollow';
+        document.head.appendChild(m);
+      }
+    } else if (existing) {
+      existing.remove();
+    }
+  }, [isPrivate]);
+};
+
 function App() {
   const { token, user, loading } = useAuth();
+
+  // Private = signed in (portal, account, cart, checkout, admin) or on an auth page.
+  const p = typeof window !== 'undefined' ? window.location.pathname : '/';
+  const onAuthPage = p.startsWith('/login') || p.startsWith('/register') || p.startsWith('/admin');
+  useNoIndexOnPrivatePages(!!token || onAuthPage);
 
   if (loading) {
     return <div className="loading">Loading...</div>;
