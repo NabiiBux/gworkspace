@@ -3218,6 +3218,7 @@ const AdminTicketsSection = () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                 <div>
                   <strong>{t.subject}</strong>
+                  {t.ticketNumber && <div style={{ fontSize: 12, color: '#6b7280', fontFamily: 'monospace' }}>{t.ticketNumber}</div>}
                   <div style={{ fontSize: 12, color: '#6b7280' }}>{t.customerEmail} {t.customerDomain ? `• ${t.customerDomain}` : ''} • {t.priority}</div>
                 </div>
                 <span className={`status ${t.status}`}>{t.status.replace('_', ' ')}</span>
@@ -6919,8 +6920,10 @@ const CustomerSupport = () => {
   const submit = async () => {
     if (!form.subject || !form.message) { setMsg('Please enter a subject and message.'); return; }
     try {
-      await axios.post(`${API_URL}/customer/tickets`, form);
-      setForm({ subject: '', message: '', priority: 'normal' }); setMsg('✓ Ticket submitted.');
+      const r = await axios.post(`${API_URL}/customer/tickets`, form);
+      const num = r.data?.ticketNumber || r.data?.ticket?.ticketNumber;
+      setForm({ subject: '', message: '', priority: 'normal' });
+      setMsg(num ? `✓ Ticket ${num} created — we've emailed you the details.` : '✓ Ticket submitted.');
       load();
     } catch (e) { setMsg(e?.response?.data?.error || 'Could not submit ticket.'); }
   };
@@ -6957,7 +6960,10 @@ const CustomerSupport = () => {
           {tickets.map(t => (
             <div key={t._id} style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <strong>{t.subject}</strong>
+                <div>
+                  <strong>{t.subject}</strong>
+                  {t.ticketNumber && <div style={{ fontSize: 12, color: '#6b7280', fontFamily: 'monospace' }}>{t.ticketNumber}</div>}
+                </div>
                 <span className={`status ${t.status}`}>{t.status.replace('_', ' ')}</span>
               </div>
               <button className="btn btn-secondary" style={{ marginTop: 8 }}
