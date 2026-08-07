@@ -1286,6 +1286,21 @@ app.post('/api/auth/login', async (req, res) => {
     const isValid = await bcrypt.compare(password, customer.password);
     if (!isValid) return res.status(401).json({ error: 'Invalid password' });
 
+    // Portal separation: admins sign in ONLY at /admin, customers ONLY at the
+    // customer login. Enforced here so it cannot be bypassed from the client.
+    // `portal` is sent by the frontend ('admin' | 'customer').
+    {
+      const portal = String(req.body.portal || '').toLowerCase();
+      const effectiveRole = ((customer.businessEmail || '').trim().toLowerCase() === (process.env.ADMIN_EMAIL || '').trim().toLowerCase())
+        ? 'admin' : (customer.role || 'customer');
+      if (portal === 'admin' && effectiveRole !== 'admin') {
+        return res.status(403).json({ error: 'This sign-in is for administrators only. Please use the customer login.' });
+      }
+      if (portal === 'customer' && effectiveRole === 'admin') {
+        return res.status(403).json({ error: 'Administrator accounts must sign in at /admin.' });
+      }
+    }
+
     // Two-step verification: if enabled, require a valid authenticator code
     // before issuing a token. The frontend re-submits with `otp`.
     if (customer.twoFactorEnabled) {
@@ -1451,6 +1466,11 @@ app.post('/api/auth/google', async (req, res) => {
       catch (e) { console.error('Welcome email (google signup) failed:', e.message); }
     }
 
+    // Google sign-in lives on the CUSTOMER login screen — admins must use /admin.
+    if ((customer.role || 'customer') === 'admin') {
+      return res.status(403).json({ error: 'Administrator accounts must sign in at /admin.' });
+    }
+
     const token = generateToken(customer._id, customer.businessEmail, customer.role || 'customer');
     res.json({
       success: true, token,
@@ -1564,6 +1584,11 @@ app.get('/api/auth/microsoft/callback', async (req, res) => {
       try { await sendWelcomeEmail(customer.businessEmail, customer.firstName || customer.username); } catch (_) { }
     }
 
+    // Social sign-in is customer-side only — admins must use /admin.
+    if ((customer.role || 'customer') === 'admin') {
+      return fail('Administrator accounts must sign in at /admin.');
+    }
+
     const token = generateToken(customer._id, customer.businessEmail, customer.role || 'customer');
     // Hand the JWT to the SPA via the URL hash; AuthProvider picks it up on load.
     res.redirect(`${trimSlash(FRONTEND_URL)}/#sso_token=${encodeURIComponent(token)}`);
@@ -1659,6 +1684,11 @@ app.get('/api/auth/facebook/callback', async (req, res) => {
     }
     if (isNewUser) {
       try { await sendWelcomeEmail(customer.businessEmail, customer.firstName || customer.username); } catch (_) { }
+    }
+
+    // Social sign-in is customer-side only — admins must use /admin.
+    if ((customer.role || 'customer') === 'admin') {
+      return fail('Administrator accounts must sign in at /admin.');
     }
 
     const token = generateToken(customer._id, customer.businessEmail, customer.role || 'customer');

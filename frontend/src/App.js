@@ -504,7 +504,7 @@ const CustomerAuthFlow = () => {
   const submitLogin = async (otpVal) => {
     setError(''); setInfo(''); setLoading(true);
     try {
-      const body = { businessEmail: email.trim(), password };
+      const body = { businessEmail: email.trim(), password, portal: 'customer' };
       if (otpVal) body.otp = otpVal;
       const r = await axios.post(`${API_URL}/auth/login`, body);
       if (r.data.twoFactorRequired) { setStep('2fa'); setLoading(false); return; }
@@ -774,7 +774,9 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
     setError('');
 
     try {
-      const body = { ...loginForm };
+      // Tell the backend which portal this sign-in came from so it can enforce
+      // the admin/customer separation server-side.
+      const body = { ...loginForm, portal: adminMode ? 'admin' : 'customer' };
       if (needOtp && otp) body.otp = otp;
       const response = await axios.post(`${API_URL}/auth/login`, body);
       if (response.data.twoFactorRequired) { setNeedOtp(true); setLoading(false); return; }
@@ -9358,20 +9360,29 @@ function App() {
 
   const role = user?.role || 'customer';
 
-  // Admin portal lives at /admin and requires admin role
+  // Admin portal lives at /admin and requires admin role.
   if (isAdminPath) {
     if (role === 'admin') return <Dashboard />;
-    // Non-admins can't access /admin
+    // Customers can never reach the admin area.
     return (
       <div className="loading" style={{ padding: 40, textAlign: 'center' }}>
         This area is for administrators only.{' '}
-        <a href="/" style={{ color: '#2563eb' }}>Go to your portal</a>
+        <a href="/" style={{ color: '#6e46eb' }}>Go to your portal</a>
       </div>
     );
   }
 
-  // Main URL: admins see admin dashboard; customers see the customer portal
-  return role === 'admin' ? <Dashboard /> : <CustomerPortal />;
+  // Admins do NOT get the customer portal — keep them on /admin.
+  if (role === 'admin') {
+    return (
+      <div className="loading" style={{ padding: 40, textAlign: 'center' }}>
+        Administrator accounts use the admin portal.{' '}
+        <a href="/admin" style={{ color: '#6e46eb', fontWeight: 600 }}>Go to /admin</a>
+      </div>
+    );
+  }
+
+  return <CustomerPortal />;
 }
 
 // ==================== STAGE 1: WORKSPACE ORDER FLOW ====================
