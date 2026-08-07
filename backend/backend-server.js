@@ -212,6 +212,7 @@ const DomainSchema = new mongoose.Schema({
 
 // Support Ticket Schema
 const TicketSchema = new mongoose.Schema({
+  ticketNumber: { type: String, index: true },   // human-friendly ref, e.g. TKT-260805-4821
   customerId: mongoose.Schema.Types.ObjectId,
   customerEmail: String,
   customerDomain: String,
@@ -3343,12 +3344,25 @@ app.post('/api/admin/customers/:id/reset-password', authenticateCustomer, requir
 
 // ==================== SUPPORT TICKETS ====================
 // Customer: open a ticket
+// Human-friendly ticket reference: TKT-YYMMDD-NNNN
+function generateTicketNumber() {
+  const d = new Date();
+  const ymd = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  return `TKT-${ymd}-${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
 app.post('/api/customer/tickets', authenticateCustomer, async (req, res) => {
   try {
     const { subject, message, priority } = req.body;
     if (!subject || !message) return res.status(400).json({ error: 'Subject and message are required.' });
     const me = await Customer.findById(req.customerId);
+
+    // Ensure the reference is unique (retry on the rare collision).
+    let ticketNumber = generateTicketNumber();
+    for (let i = 0; i < 5 && await Ticket.exists({ ticketNumber }); i++) ticketNumber = generateTicketNumber();
+
     const ticket = await Ticket.create({
+      ticketNumber,
       customerId: me._id,
       customerEmail: me.businessEmail,
       customerDomain: me.domain,
@@ -3357,7 +3371,34 @@ app.post('/api/customer/tickets', authenticateCustomer, async (req, res) => {
       status: 'open',
       messages: [{ fromRole: 'customer', fromName: me.username || me.businessEmail, body: message }],
     });
-    res.status(201).json({ success: true, ticket });
+
+    // Confirmation email with the ticket number (Resend, SMTP fallback).
+    try {
+      const html = emailShell('We received your request', `
+        <p>Hi ${me.firstName || me.username || 'there'},</p>
+        <p>Thanks for contacting support. Your ticket has been created and our team will reply shortly.</p>
+        <p style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;margin:18px 0">
+          <strong>Ticket number:</strong> ${ticket.ticketNumber}<br>
+          <strong>Subject:</strong> ${subject}<br>
+          <strong>Priority:</strong> ${ticket.priority}
+        </p>
+        <p>Please quote <strong>${ticket.ticketNumber}</strong> in any follow-up.</p>
+        <p style="margin:24px 0"><a href="${trimSlash(PORTAL_URL)}/#support" style="background:#6e46eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">View your ticket</a></p>`);
+      await sendEmail(me.businessEmail, `[${ticket.ticketNumber}] We received your request: ${subject}`, html);
+    } catch (e) { console.error('[ticket] confirmation email failed:', e.message); }
+
+    // Let the team know a ticket came in.
+    try {
+      const adminTo = process.env.ADMIN_NOTIFY_EMAIL || process.env.ADMIN_EMAIL;
+      if (adminTo) {
+        await sendEmail(adminTo, `New ticket ${ticket.ticketNumber} from ${me.businessEmail}`, emailShell('New support ticket', `
+          <p><strong>${ticket.ticketNumber}</strong> — ${subject}</p>
+          <p>From: ${me.businessEmail}${me.domain ? ` (${me.domain})` : ''}<br>Priority: ${ticket.priority}</p>
+          <p style="white-space:pre-wrap">${String(message).slice(0, 2000)}</p>`));
+      }
+    } catch (_) { }
+
+    res.status(201).json({ success: true, ticket, ticketNumber: ticket.ticketNumber });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -3421,6 +3462,29 @@ app.post('/api/admin/tickets/:id/reply', authenticateCustomer, requireAdmin, asy
     if (ticket.status === 'open') ticket.status = 'in_progress';
     ticket.updatedAt = new Date();
     await ticket.save();
+
+    // Notify the customer that support replied (Resend, SMTP fallback).
+    try {
+      const to = ticket.customerEmail || (await Customer.findById(ticket.customerId))?.businessEmail;
+      const ref = ticket.ticketNumber || String(ticket._id);
+      if (to) {
+        const html = emailShell('Support replied to your ticket', `
+          <p>Hi there,</p>
+          <p>Our support team has replied to your ticket.</p>
+          <p style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;margin:18px 0">
+            <strong>Ticket number:</strong> ${ref}<br>
+            <strong>Subject:</strong> ${ticket.subject || '(no subject)'}
+          </p>
+          <p style="white-space:pre-wrap;border-left:3px solid #6e46eb;padding-left:14px;color:#374151">${String(message).slice(0, 4000)}</p>
+          <p style="margin:24px 0"><a href="${trimSlash(PORTAL_URL)}/#support" style="background:#6e46eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Reply in your portal</a></p>
+          <p style="color:#6b7280;font-size:13px">Please keep <strong>${ref}</strong> in the subject when replying.</p>`);
+        const sent = await sendEmail(to, `[${ref}] Re: ${ticket.subject || 'your support ticket'}`, html);
+        console.log(`[ticket] reply notification ${sent ? 'sent' : 'FAILED'} → ${to} (${ref})`);
+      } else {
+        console.warn('[ticket] no customer email on ticket', ref);
+      }
+    } catch (e) { console.error('[ticket] reply email failed:', e.message); }
+
     res.json({ success: true, ticket });
   } catch (e) {
     res.status(500).json({ error: e.message });
