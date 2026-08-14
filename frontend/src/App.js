@@ -9528,7 +9528,7 @@ function WorkspaceOrderFlow() {
         if (res.data.available) {
           setDomainStatus({ state: 'available', message: res.data.message || 'Domain is available.' });
         } else {
-          setDomainStatus({ state: 'taken', message: res.data.message || 'This domain is not available.' });
+          setDomainStatus({ state: 'taken', message: res.data.message || 'This domain is not available.', reason: res.data.reason || '' });
         }
       } catch (e) {
         setDomainStatus({ state: 'invalid', message: 'Could not check domain. Try again.' });
@@ -9785,7 +9785,10 @@ function WorkspaceOrderFlow() {
                 {domainStatus.state === 'checking' && '⏳ '}
                 {domainStatus.state === 'available' && '✓ '}
                 {(domainStatus.state === 'taken' || domainStatus.state === 'invalid') && '✕ '}
-                {domainStatus.message}
+                {domainStatus.message}{' '}
+                {domainStatus.reason === 'other_reseller' && (
+                  <a href="#import" style={{ color: '#2563eb' }}>transfer this customer</a>
+                )}
               </small>
             )}
           </div>
@@ -10420,11 +10423,37 @@ const AdminOrderWorkspace = () => {
     desiredAdminUsername: 'admin', tempPassword: '',
   });
   const [showAdminPw, setShowAdminPw] = useState(false);
+  // Live domain check: mirrors Google's console, which refuses a domain that
+  // already belongs to another reseller (transfer only).
+  const [domStatus, setDomStatus] = useState({ state: 'idle', message: '', reason: '' });
   // Google rejects a recovery address on the customer's primary domain.
   const adminAltOnDomain = !!(form.alternateEmail && form.domain
     && (form.alternateEmail.split('@')[1] || '').toLowerCase() === form.domain.trim().toLowerCase());
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    const d = (form.domain || '').toLowerCase().trim();
+    if (!d) { setDomStatus({ state: 'idle', message: '', reason: '' }); return; }
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(d)) {
+      setDomStatus({ state: 'invalid', message: 'Enter a valid domain (e.g. example.com).', reason: 'invalid' });
+      return;
+    }
+    setDomStatus({ state: 'checking', message: 'Checking…', reason: '' });
+    const t = setTimeout(async () => {
+      try {
+        const r = await axios.get(`${API_URL}/workspace-orders/check-domain/${encodeURIComponent(d)}`);
+        setDomStatus({
+          state: r.data.available ? 'available' : 'taken',
+          message: r.data.message || '',
+          reason: r.data.reason || '',
+        });
+      } catch (e) {
+        setDomStatus({ state: 'idle', message: '', reason: '' });
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [form.domain]);
 
   // Bulk create
   const [bulkText, setBulkText] = useState('');
@@ -10496,6 +10525,7 @@ const AdminOrderWorkspace = () => {
 
   const submit = async () => {
     if (!form.domain || !form.planId || !form.seats) { setMsg('Domain, plan, and seats are required.'); return; }
+    if (domStatus.state === 'taken' || domStatus.state === 'invalid') { setMsg('✗ ' + domStatus.message); return; }
     if (!/\S+@\S+\.\S+/.test(form.alternateEmail)) { setMsg('An alternate email is required.'); return; }
     if (adminAltOnDomain) { setMsg(`The alternate email must not use ${form.domain}.`); return; }
     setBusy(true); setMsg('');
@@ -10567,7 +10597,20 @@ const AdminOrderWorkspace = () => {
 
       <div style={box}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }} className="grid-2">
-          <div><label style={lab}>Domain *</label><input style={inp} value={form.domain} onChange={e => set('domain', e.target.value)} placeholder="redvi.shop" /></div>
+          <div><label style={{ ...lab, color: domStatus.state === 'taken' || domStatus.state === 'invalid' ? '#b42318' : lab.color }}>Domain *</label>
+            <input style={{ ...inp, borderColor: domStatus.state === 'taken' || domStatus.state === 'invalid' ? '#b42318' : inp.borderColor }}
+              value={form.domain} onChange={e => set('domain', e.target.value)} placeholder="redvi.shop" />
+            {domStatus.state === 'checking' && <small style={{ color: '#5b6075' }}>⏳ Checking…</small>}
+            {domStatus.state === 'available' && <small style={{ color: '#166534' }}>✓ {domStatus.message}</small>}
+            {(domStatus.state === 'taken' || domStatus.state === 'invalid') && (
+              <small style={{ color: '#b42318', display: 'block' }}>
+                {domStatus.message}{' '}
+                {domStatus.reason === 'other_reseller' && (
+                  <a href="/#import" style={{ color: '#2563eb' }}>transfer this customer</a>
+                )}
+              </small>
+            )}
+          </div>
           <div><label style={lab}>Reseller account</label>
             <select style={inp} value={form.account} onChange={e => set('account', e.target.value)}>
               <option value="">Auto (by order routing)</option>

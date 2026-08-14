@@ -9746,6 +9746,13 @@ app.delete('/api/workspace-orders/draft', authenticateCustomer, async (req, res)
 });
 
 // Check whether a domain is already taken (DB-level now; Google API check added in Stage 2c)
+// customers.get returns the customer when the domain is on this reseller account,
+// 404 when it has no Workspace at all, and 403 when it belongs to another reseller.
+async function reseller_get_customer(auth, domain) {
+  const reseller = google.reseller({ version: 'v1', auth });
+  return reseller.customers.get({ customerId: domain });
+}
+
 app.get('/api/workspace-orders/check-domain/:domain', authenticateCustomer, async (req, res) => {
   try {
     const domain = (req.params.domain || '').toLowerCase().trim();
@@ -9762,31 +9769,45 @@ app.get('/api/workspace-orders/check-domain/:domain', authenticateCustomer, asyn
       });
     }
 
-    // Ask Google: does this domain already have a Workspace customer on our reseller account?
-    try {
-      const auth = await getResellerAuth();
-      const reseller = google.reseller({ version: 'v1', auth });
-      // customers.get with a domain returns the customer if it exists, else 404
-      await reseller.customers.get({ customerId: domain });
-      // If we got here, the customer EXISTS on Google -> domain already has Workspace
+    // Ask Google about this domain on BOTH reseller accounts. The response code
+    // tells us which case we are in:
+    //   404 -> no Workspace customer at all, free to create
+    //   200 -> the customer is on OUR reseller account
+    //   403 -> the customer EXISTS but belongs to ANOTHER reseller (transfer only)
+    let sawForbidden = false;
+    let checkedAny = false;
+    for (const account of ['pk', 'usa']) {
+      let auth;
+      try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
+      catch (_) { continue; }
+      checkedAny = true;
+      try {
+        await reseller_get_customer(auth, domain);
+        return res.json({
+          available: false,
+          reason: 'google_taken',
+          account,
+          message: 'This domain already has Google Workspace on our reseller account. Use the existing customer to purchase add-ons.',
+        });
+      } catch (gErr) {
+        const code = gErr?.code || gErr?.response?.status;
+        if (code === 404) continue;              // free on this account, try the other
+        if (code === 403) { sawForbidden = true; continue; }
+        // Anything else (quota, transient): ignore and keep checking.
+      }
+    }
+
+    if (sawForbidden) {
       return res.json({
         available: false,
-        reason: 'google_taken',
-        message: 'This domain already has Google Workspace. Please use a different domain.',
+        reason: 'other_reseller',
+        message: 'This domain is already registered with another reseller. You can only transfer this customer.',
       });
-    } catch (gErr) {
-      const code = gErr?.code || gErr?.response?.status;
-      if (code === 404) {
-        // 404 = no customer for this domain on Google -> it's free to use
-        return res.json({ available: true, message: 'Domain is available.' });
-      }
-      if (String(gErr.message || '').includes('not connected')) {
-        // Google not connected — fall back to DB-only result (don't hard-block)
-        return res.json({ available: true, message: 'Domain is available (Google check unavailable).' });
-      }
-      // Other Google errors: be safe, let them proceed but note it
-      return res.json({ available: true, message: 'Domain is available.' });
     }
+    if (!checkedAny) {
+      return res.json({ available: true, message: 'Domain is available (Google check unavailable).' });
+    }
+    return res.json({ available: true, message: 'Domain is available.' });
   } catch (error) {
     res.status(500).json({ available: false, reason: 'error', message: 'Could not check domain right now.' });
   }
