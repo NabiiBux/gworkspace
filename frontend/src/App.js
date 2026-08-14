@@ -10414,9 +10414,15 @@ const AdminOrderWorkspace = () => {
   const [form, setForm] = useState({
     domain: '', planId: '', seats: 1, planType: 'flexible', account: '',
     orgName: '', firstName: '', lastName: '', email: '', alternateEmail: '', phone: '',
-    country: 'United States', streetAddress: '', streetAddress2: '', city: '', state: '', zip: '',
+    languageCode: 'en-US',
+    country: 'United States', streetAddress: '', streetAddress2: '', streetAddress3: '',
+    city: '', state: '', zip: '',
     desiredAdminUsername: 'admin', tempPassword: '',
   });
+  const [showAdminPw, setShowAdminPw] = useState(false);
+  // Google rejects a recovery address on the customer's primary domain.
+  const adminAltOnDomain = !!(form.alternateEmail && form.domain
+    && (form.alternateEmail.split('@')[1] || '').toLowerCase() === form.domain.trim().toLowerCase());
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
@@ -10490,11 +10496,25 @@ const AdminOrderWorkspace = () => {
 
   const submit = async () => {
     if (!form.domain || !form.planId || !form.seats) { setMsg('Domain, plan, and seats are required.'); return; }
+    if (!/\S+@\S+\.\S+/.test(form.alternateEmail)) { setMsg('An alternate email is required.'); return; }
+    if (adminAltOnDomain) { setMsg(`The alternate email must not use ${form.domain}.`); return; }
     setBusy(true); setMsg('');
     try {
       const payload = {
-        organization: { domain: form.domain.toLowerCase().trim(), name: form.orgName, country: form.country, streetAddress: form.streetAddress, streetAddress2: form.streetAddress2, city: form.city, state: form.state, zip: form.zip, desiredAdminUsername: form.desiredAdminUsername, tempPassword: form.tempPassword },
-        contact: { firstName: form.firstName, lastName: form.lastName, email: form.email, alternateEmail: form.alternateEmail, phone: form.phone },
+        organization: {
+          domain: form.domain.toLowerCase().trim(), name: form.orgName,
+          languageCode: form.languageCode || 'en-US',
+          country: form.country, streetAddress: form.streetAddress,
+          streetAddress2: form.streetAddress2, streetAddress3: form.streetAddress3,
+          city: form.city, state: form.state, zip: form.zip,
+          desiredAdminUsername: form.desiredAdminUsername, tempPassword: form.tempPassword,
+        },
+        contact: {
+          firstName: form.firstName, lastName: form.lastName,
+          // Like Google's console, the admin address is the contact email.
+          email: `${(form.desiredAdminUsername || 'admin').toLowerCase()}@${form.domain.toLowerCase().trim()}`,
+          alternateEmail: form.alternateEmail, phone: form.phone,
+        },
         plan: plans.find(p => p.id === form.planId),
         seats: Number(form.seats),
         planType: form.planType,
@@ -10567,31 +10587,73 @@ const AdminOrderWorkspace = () => {
               <option value="annual">Annual (monthly pay)</option>
             </select>
           </div>
-          <div><label style={lab}>Organization name</label><input style={inp} value={form.orgName} onChange={e => set('orgName', e.target.value)} /></div>
-          <div><label style={lab}>Admin first name</label><input style={inp} value={form.firstName} onChange={e => set('firstName', e.target.value)} /></div>
-          <div><label style={lab}>Admin last name</label><input style={inp} value={form.lastName} onChange={e => set('lastName', e.target.value)} /></div>
-          <div><label style={lab}>Contact email</label><input style={inp} value={form.email} onChange={e => set('email', e.target.value)} placeholder="owner@redvi.shop" /></div>
-          <div><label style={lab}>Alternate email</label><input style={inp} value={form.alternateEmail} onChange={e => set('alternateEmail', e.target.value)} placeholder="recovery email" /></div>
-          <div><label style={lab}>Phone</label><input style={inp} value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
-          <div><label style={lab}>Admin username</label><input style={inp} value={form.desiredAdminUsername} onChange={e => set('desiredAdminUsername', e.target.value)} placeholder="admin" /></div>
-          <div><label style={lab}>Temp password (optional)</label><input style={inp} value={form.tempPassword} onChange={e => set('tempPassword', e.target.value)} placeholder="auto-generated if blank" /></div>
-          <div><label style={lab}>Country</label>
+          <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #eef1f4', marginTop: 6, paddingTop: 14 }}>
+            <h4 style={{ margin: '0 0 2px' }}>Customer information</h4>
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}><label style={lab}>Organization name *</label>
+            <input style={inp} value={form.orgName} onChange={e => set('orgName', e.target.value)} placeholder="Acme Inc." /></div>
+          <div><label style={lab}>Language code *</label>
+            <select style={inp} value={form.languageCode} onChange={e => set('languageCode', e.target.value)}>
+              {LANGUAGE_CODES.map(([code, label]) => (<option key={code} value={code}>{label}</option>))}
+            </select>
+          </div>
+          <div><label style={lab}>Country / Region *</label>
             <select style={inp} value={form.country} onChange={e => set('country', e.target.value)}>
               {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
-           <div style={{ gridColumn: '1 / -1' }}>
-             <label style={lab}>Address lookup (Google Maps)</label>
-             <AddressAutocomplete
-               countries={getCountryCode(form.country)}
-               onPick={({ street, city, state, zip }) => setForm(f => ({ ...f, streetAddress: street || f.streetAddress, city: city || f.city, state: state || f.state, zip: zip || f.zip }))}
-             />
-           </div>
-          <div><label style={lab}>Street address</label><input style={inp} value={form.streetAddress} onChange={e => set('streetAddress', e.target.value)} /></div>
-          <div><label style={lab}>Street address 2 (optional)</label><input style={inp} value={form.streetAddress2} onChange={e => set('streetAddress2', e.target.value)} /></div>
-          <div><label style={lab}>City</label><input style={inp} value={form.city} onChange={e => set('city', e.target.value)} /></div>
-          <div><label style={lab}>State</label><input style={inp} value={form.state} onChange={e => set('state', e.target.value)} /></div>
-          <div><label style={lab}>ZIP</label><input style={inp} value={form.zip} onChange={e => set('zip', e.target.value)} /></div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label style={lab}>Street address *</label>
+            <AddressAutocomplete
+              countries={getCountryCode(form.country)}
+              initialValue={form.streetAddress}
+              onTextChange={(v) => setForm(f => ({ ...f, streetAddress: v }))}
+              onPick={({ street, city, state, zip }) => setForm(f => ({ ...f, streetAddress: street || f.streetAddress, city: city || f.city, state: state || f.state, zip: zip || f.zip }))}
+            />
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <input style={inp} value={form.streetAddress2} onChange={e => set('streetAddress2', e.target.value)} placeholder="Address line 2 (optional)" /></div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <input style={inp} value={form.streetAddress3} onChange={e => set('streetAddress3', e.target.value)} placeholder="Address line 3 (optional)" /></div>
+          <div style={{ gridColumn: '1 / -1' }}><label style={lab}>City *</label>
+            <input style={inp} value={form.city} onChange={e => set('city', e.target.value)} placeholder="Newhall" /></div>
+          <div><label style={lab}>State *</label>
+            <select style={inp} value={form.state} onChange={e => set('state', e.target.value)}>
+              <option value="">Please select</option>
+              {US_STATES.map(([abbr, name]) => (<option key={abbr} value={abbr}>{name}</option>))}
+            </select>
+          </div>
+          <div><label style={lab}>ZIP code *</label>
+            <input style={inp} value={form.zip} onChange={e => set('zip', e.target.value.replace(/[^\d-]/g, '').slice(0, 10))} placeholder="91321-2563" /></div>
+
+          <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #eef1f4', marginTop: 6, paddingTop: 14 }}>
+            <h4 style={{ margin: '0 0 2px' }}>Contact information</h4>
+            <p style={{ color: '#5b6075', fontSize: 13, margin: 0 }}>The name and email address may be used to create the initial administrator account for Google Workspace, Cloud Identity, and Chrome Enterprise Upgrade orders, as applicable.</p>
+          </div>
+          <div><label style={lab}>First name *</label><input style={inp} value={form.firstName} onChange={e => set('firstName', e.target.value)} placeholder="First name" /></div>
+          <div><label style={lab}>Last name *</label><input style={inp} value={form.lastName} onChange={e => set('lastName', e.target.value)} placeholder="Last name" /></div>
+          <div style={{ gridColumn: '1 / -1' }}><label style={lab}>Email *</label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input style={{ ...inp, flex: 1 }} value={form.desiredAdminUsername} onChange={e => set('desiredAdminUsername', e.target.value)} placeholder="username" />
+              <span style={{ whiteSpace: 'nowrap', fontSize: 14, color: form.domain ? '#111827' : '#9aa0b4', fontWeight: form.domain ? 600 : 400 }}>@{form.domain || 'yourdomain.com'}</span>
+            </div>
+            <small style={{ color: '#5b6075' }}>This becomes the Workspace administrator login.</small>
+          </div>
+          <div><label style={lab}>Alternate email *</label>
+            <input style={inp} value={form.alternateEmail} onChange={e => set('alternateEmail', e.target.value)} placeholder="xyz@gmail.com" />
+            <small style={{ color: '#5b6075' }}>Enter any email address that doesn't use the customer's primary domain.</small>
+            {adminAltOnDomain && <small style={{ color: '#b42318', display: 'block' }}>This address uses {form.domain}. Use one on a different domain.</small>}
+          </div>
+          <div><label style={lab}>Phone</label><input style={inp} value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="Phone" /></div>
+          <div style={{ gridColumn: '1 / -1' }}><label style={lab}>Temp password (optional)</label>
+            <div style={{ position: 'relative' }}>
+              <input type={showAdminPw ? 'text' : 'password'} style={{ ...inp, paddingRight: 62 }} value={form.tempPassword} onChange={e => set('tempPassword', e.target.value)} placeholder="auto-generated if blank" />
+              <button type="button" onClick={() => setShowAdminPw(v => !v)}
+                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                {showAdminPw ? 'Hide' : 'Show'}
+              </button>
+            </div>
+          </div>
         </div>
         <button onClick={submit} disabled={busy} className="btn btn-primary" style={{ marginTop: 16 }}>{busy ? 'Provisioning…' : 'Submit & create Workspace'}</button>
       </div>
