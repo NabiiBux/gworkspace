@@ -9392,6 +9392,16 @@ function App() {
 }
 
 // ==================== STAGE 1: WORKSPACE ORDER FLOW ====================
+// Language codes offered on the customer form (mirrors Google's console list).
+const LANGUAGE_CODES = [
+  ['en-US', 'English (United States)'], ['en-GB', 'English (United Kingdom)'],
+  ['es-ES', 'Spanish (Spain)'], ['es-419', 'Spanish (Latin America)'],
+  ['fr-FR', 'French (France)'], ['de-DE', 'German (Germany)'],
+  ['pt-BR', 'Portuguese (Brazil)'], ['it-IT', 'Italian (Italy)'],
+  ['nl-NL', 'Dutch (Netherlands)'], ['ar', 'Arabic'], ['hi', 'Hindi'],
+  ['ur', 'Urdu'], ['zh-CN', 'Chinese (Simplified)'], ['ja', 'Japanese'],
+];
+
 const US_STATES = [
   ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'],
   ['CO', 'Colorado'], ['CT', 'Connecticut'], ['DE', 'Delaware'], ['FL', 'Florida'], ['GA', 'Georgia'],
@@ -9416,7 +9426,9 @@ function WorkspaceOrderFlow() {
   const [orderOpts, setOrderOpts] = useState({ flexibleEnabled: true, annualEnabled: false });
   const [form, setForm] = useState({
     organizationName: '', domain: '', desiredAdminUsername: '', tempPassword: '',
-    country: 'United States', streetAddress: '', streetAddress2: '', city: '', state: '', zip: '',
+    crmId: '', languageCode: 'en-US',
+    country: 'United States', streetAddress: '', streetAddress2: '', streetAddress3: '',
+    city: '', state: '', zip: '',
     firstName: '', lastName: '', email: '', alternateEmail: '', phone: '',
   });
   const [submitting, setSubmitting] = useState(false);
@@ -9540,10 +9552,10 @@ function WorkspaceOrderFlow() {
   if (!form.streetAddress) missingFields.push('street address');
   if (!form.city) missingFields.push('city');
   if (!form.state) missingFields.push('state');
-  if (!/^\d{5}$/.test(form.zip)) missingFields.push('5-digit ZIP');
+  if (!/^\d{5}(-\d{4})?$/.test(form.zip)) missingFields.push('ZIP code');
   if (!form.firstName) missingFields.push('first name');
   if (!form.lastName) missingFields.push('last name');
-  if (!/\S+@\S+\.\S+/.test(form.email)) missingFields.push('contact email');
+
   // Google requires the alternate email to be OUTSIDE the customer's primary
   // domain — it is the recovery address for the new Workspace account.
   const altDomain = (form.alternateEmail || '').split('@')[1] || '';
@@ -9565,11 +9577,18 @@ function WorkspaceOrderFlow() {
         organization: {
           name: form.organizationName, domain: form.domain.toLowerCase(),
           desiredAdminUsername: form.desiredAdminUsername.toLowerCase(), tempPassword: form.tempPassword,
-          country: 'US', streetAddress: form.streetAddress, streetAddress2: form.streetAddress2,
+          crmId: form.crmId || undefined, languageCode: form.languageCode || 'en-US',
+          country: form.country || 'United States',
+          streetAddress: form.streetAddress, streetAddress2: form.streetAddress2,
+          streetAddress3: form.streetAddress3,
           city: form.city, state: form.state, zip: form.zip,
         },
         contact: {
-          firstName: form.firstName, lastName: form.lastName, email: form.email,
+          firstName: form.firstName, lastName: form.lastName,
+          // Google's form has no separate contact email: the admin address
+          // (username@domain) is the contact, and alternateEmail is the recovery
+          // address that must live outside the primary domain.
+          email: `${(form.desiredAdminUsername || 'admin').toLowerCase()}@${form.domain.toLowerCase()}`,
           alternateEmail: form.alternateEmail, phone: form.phone,
         },
       };
@@ -9754,37 +9773,37 @@ function WorkspaceOrderFlow() {
 
       {step === 2 && (
         <section className="wof-card">
-          <h3>Organization information</h3>
-          <div className="wof-grid">
-            <div className="wof-field"><label>Organization name *</label>
-              <input value={form.organizationName} onChange={set('organizationName')} placeholder="Acme Inc." /></div>
-            <div className="wof-field"><label>Domain *</label>
-              <input value={form.domain} onChange={set('domain')} placeholder="acme.com" />
-              {domainStatus.state !== 'idle' && (
-                <small className={`wof-domain-status ${domainStatus.state}`}>
-                  {domainStatus.state === 'checking' && '⏳ '}
-                  {domainStatus.state === 'available' && '✓ '}
-                  {(domainStatus.state === 'taken' || domainStatus.state === 'invalid') && '✕ '}
-                  {domainStatus.message}
-                </small>
-              )}
-            </div>
+          <h3>Customer information</h3>
+          <div className="wof-field"><label>Organization name *</label>
+            <input value={form.organizationName} onChange={set('organizationName')} placeholder="Acme Inc." /></div>
+
+          <div className="wof-field"><label>Domain *</label>
+            <input value={form.domain} onChange={set('domain')} placeholder="acme.com" />
+            {domainStatus.state !== 'idle' && (
+              <small className={`wof-domain-status ${domainStatus.state}`}>
+                {domainStatus.state === 'checking' && '⏳ '}
+                {domainStatus.state === 'available' && '✓ '}
+                {(domainStatus.state === 'taken' || domainStatus.state === 'invalid') && '✕ '}
+                {domainStatus.message}
+              </small>
+            )}
           </div>
-          <div className="wof-grid">
-            <div className="wof-field"><label>Desired admin username *</label>
-              <div className="wof-inline">
-                <input value={form.desiredAdminUsername} onChange={set('desiredAdminUsername')} placeholder="admin" />
-                <span className="wof-suffix">@{form.domain || 'yourdomain.com'}</span>
-              </div>
-              <small>This becomes the Workspace administrator login.</small>
-            </div>
-            <div className="wof-field"><label>Temporary password *</label>
-              <input type="password" value={form.tempPassword} onChange={set('tempPassword')} placeholder="At least 8 characters" />
-              <small>You'll be prompted to change this on first sign-in.</small>
-            </div>
+
+          <div className="wof-field"><label>CRM ID</label>
+            <input value={form.crmId} onChange={set('crmId')} placeholder="Optional" /></div>
+
+          <div className="wof-field"><label>Language code *</label>
+            <select value={form.languageCode} onChange={set('languageCode')}>
+              {LANGUAGE_CODES.map(([code, label]) => (<option key={code} value={code}>{label}</option>))}
+            </select>
           </div>
-          <h3 className="wof-subhead">Business address</h3>
-          <div className="wof-field"><label>Country *</label><input value="United States" disabled /></div>
+
+          <div className="wof-field"><label>Country / Region *</label>
+            <select value={form.country} onChange={set('country')}>
+              {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+
           <div className="wof-field">
             <label>Street address *</label>
             <AddressAutocomplete countries={['us']} initialValue={form.streetAddress}
@@ -9796,43 +9815,62 @@ function WorkspaceOrderFlow() {
                 state: state || f.state,
                 zip: zip || f.zip,
               }))} />
-            <small>Start typing and pick your address from the list, or type it in full.</small>
           </div>
-          <div className="wof-field"><label>Street address line 2</label>
-            <input value={form.streetAddress2} onChange={set('streetAddress2')} placeholder="Suite 400 (optional)" /></div>
+          <div className="wof-field">
+            <input value={form.streetAddress2} onChange={set('streetAddress2')} placeholder="Address line 2 (optional)" /></div>
+          <div className="wof-field">
+            <input value={form.streetAddress3} onChange={set('streetAddress3')} placeholder="Address line 3 (optional)" /></div>
+
+          <div className="wof-field"><label>City *</label>
+            <input value={form.city} onChange={set('city')} placeholder="Newhall" /></div>
+
           <div className="wof-grid">
-            <div className="wof-field"><label>City *</label>
-              <input value={form.city} onChange={set('city')} placeholder="Mountain View" /></div>
             <div className="wof-field"><label>State *</label>
               <select value={form.state} onChange={set('state')}>
                 <option value="">Please select</option>
                 {US_STATES.map(([abbr, name]) => (<option key={abbr} value={abbr}>{name}</option>))}
               </select>
             </div>
+            <div className="wof-field"><label>ZIP code *</label>
+              <input value={form.zip}
+                onChange={(e) => setForm({ ...form, zip: e.target.value.replace(/[^\d-]/g, '').slice(0, 10) })}
+                placeholder="91321-2563" inputMode="numeric" />
+            </div>
           </div>
-          <div className="wof-field" style={{ maxWidth: 220 }}><label>ZIP code *</label>
-            <input value={form.zip}
-              onChange={(e) => setForm({ ...form, zip: e.target.value.replace(/\D/g, '').slice(0, 5) })}
-              placeholder="ZIP" inputMode="numeric" />
-          </div>
+
           <h3 className="wof-subhead">Contact information</h3>
           <p className="wof-muted">The name and email address may be used to create the initial administrator account for Google Workspace, Cloud Identity, and Chrome Enterprise Upgrade orders, as applicable.</p>
           <div className="wof-grid">
-            <div className="wof-field"><label>First name *</label><input value={form.firstName} onChange={set('firstName')} /></div>
-            <div className="wof-field"><label>Last name *</label><input value={form.lastName} onChange={set('lastName')} /></div>
+            <div className="wof-field"><label>First name *</label><input value={form.firstName} onChange={set('firstName')} placeholder="First name" /></div>
+            <div className="wof-field"><label>Last name *</label><input value={form.lastName} onChange={set('lastName')} placeholder="Last name" /></div>
           </div>
+
+          {/* Google shows the admin email as username@domain in one field. */}
           <div className="wof-field"><label>Email *</label>
-            <input value={form.email} onChange={set('email')} placeholder="you@example.com" /></div>
+            <div className="wof-inline">
+              <input value={form.desiredAdminUsername} onChange={set('desiredAdminUsername')} placeholder="admin" />
+              <span className="wof-suffix">@{form.domain || 'yourdomain.com'}</span>
+            </div>
+            <small>This becomes the Workspace administrator login.</small>
+          </div>
+
           <div className="wof-grid">
             <div className="wof-field"><label>Alternate email *</label>
               <input value={form.alternateEmail} onChange={set('alternateEmail')} placeholder="you@gmail.com" />
               <small>Enter any email address that doesn't use the customer's primary domain.</small>
               {altOnPrimaryDomain && (
                 <small style={{ color: '#b91c1c' }}>This address uses {form.domain}. Use one on a different domain.</small>
-              )}</div>
+              )}
+            </div>
             <div className="wof-field"><label>Phone</label>
-              <input value={form.phone} onChange={set('phone')} placeholder="+1 555 123 4567" /></div>
+              <input value={form.phone} onChange={set('phone')} placeholder="Phone" /></div>
           </div>
+
+          <div className="wof-field"><label>Temporary password *</label>
+            <input type="password" value={form.tempPassword} onChange={set('tempPassword')} placeholder="At least 8 characters" />
+            <small>The administrator will be prompted to change this on first sign-in.</small>
+          </div>
+
           <div className="wof-actions">
             <button type="button" className="wof-btn ghost" onClick={() => setStep(1)}>Back</button>
             <button type="button" className="wof-btn primary" disabled={!canSubmit} onClick={() => setStep(3)}>Review order</button>
@@ -9857,7 +9895,8 @@ function WorkspaceOrderFlow() {
             <div className="wof-review-row"><span>Domain</span><strong>{form.domain}</strong></div>
             <div className="wof-review-row"><span>Admin</span><strong>{form.desiredAdminUsername}@{form.domain}</strong></div>
             <div className="wof-review-row"><span>Address</span><strong>{form.streetAddress}, {form.city}, {form.state} {form.zip}</strong></div>
-            <div className="wof-review-row"><span>Contact</span><strong>{form.firstName} {form.lastName} · {form.email}</strong></div>
+            <div className="wof-review-row"><span>Contact</span><strong>{form.firstName} {form.lastName} · {(form.desiredAdminUsername || 'admin')}@{form.domain || 'yourdomain.com'}</strong></div>
+            <div className="wof-review-row"><span>Alternate email</span><strong>{form.alternateEmail}</strong></div>
           </div>
           <div className="wof-note">
             After you place this order, you'll verify your domain at admin.google.com, then add Google Voice. We'll guide you through it.
