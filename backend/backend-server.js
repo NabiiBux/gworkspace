@@ -10541,6 +10541,23 @@ function countryNameToCode(input) {
 // Provision a workspace order into Google: create customer + create subscription
 // Reusable provisioning: creates Google customer + admin user + Workspace subscription.
 // Returns { success, message } or throws. Used by the manual endpoint AND auto-provision-on-payment.
+// Google requires the customer's recovery ("alternate") email to be OUTSIDE the
+// domain being created. The order form's Confirm Email mirrors the contact email,
+// so resolve whichever is usable and fail loudly if neither is.
+function resolveAlternateEmail(contact, domain) {
+  const dom = String(domain || '').trim().toLowerCase();
+  const offDomain = (e) => {
+    const v = String(e || '').trim().toLowerCase();
+    if (!/\S+@\S+\.\S+/.test(v)) return null;
+    return v.split('@')[1] === dom ? null : v;
+  };
+  const picked = offDomain(contact?.alternateEmail) || offDomain(contact?.email);
+  if (!picked) {
+    throw new Error(`A recovery email outside ${dom} is required. Please use an address that is not on ${dom} (e.g. a Gmail address).`);
+  }
+  return picked;
+}
+
 async function provisionWorkspaceOrder(order) {
   const planDoc = await Plan.findOne({ planId: order.plan?.id });
   if (!planDoc || !planDoc.skuId) throw new Error('Plan is missing a Google SKU.');
@@ -10575,7 +10592,7 @@ async function provisionWorkspaceOrder(order) {
     await reseller.customers.insert({
       requestBody: {
         customerDomain: domain,
-        alternateEmail: contact.alternateEmail,
+        alternateEmail: resolveAlternateEmail(contact, domain),
         customerDomainVerified: !!order.domainVerified,
         phoneNumber: contact.phone || undefined,
         postalAddress: {
@@ -10706,7 +10723,7 @@ app.post('/api/workspace-orders/:id/provision', authenticateCustomer, async (req
       await reseller.customers.insert({
         requestBody: {
           customerDomain: domain,
-          alternateEmail: contact.alternateEmail,
+          alternateEmail: resolveAlternateEmail(contact, domain),
           customerDomainVerified: !!order.domainVerified,
           phoneNumber: contact.phone || undefined,
           postalAddress: {
