@@ -9544,17 +9544,13 @@ function WorkspaceOrderFlow() {
   if (!form.firstName) missingFields.push('first name');
   if (!form.lastName) missingFields.push('last name');
   if (!/\S+@\S+\.\S+/.test(form.email)) missingFields.push('contact email');
-  // Confirm Email must match the contact email exactly.
-  if (!/\S+@\S+\.\S+/.test(form.alternateEmail)) missingFields.push('confirm email');
-  else if (form.alternateEmail.trim().toLowerCase() !== (form.email || '').trim().toLowerCase()) {
-    missingFields.push('the two email addresses to match');
-  }
-  // Google uses this address to recover the new Workspace account, so it cannot
-  // live on the domain being created.
-  const emailDomain = (form.email || '').split('@')[1] || '';
-  if (form.email && form.domain && emailDomain.toLowerCase() === form.domain.trim().toLowerCase()) {
-    missingFields.push(`an email that is NOT on ${form.domain} (used for account recovery)`);
-  }
+  // Google requires the alternate email to be OUTSIDE the customer's primary
+  // domain — it is the recovery address for the new Workspace account.
+  const altDomain = (form.alternateEmail || '').split('@')[1] || '';
+  const altOnPrimaryDomain = !!(form.alternateEmail && form.domain
+    && altDomain.toLowerCase() === form.domain.trim().toLowerCase());
+  if (!/\S+@\S+\.\S+/.test(form.alternateEmail)) missingFields.push('alternate email');
+  else if (altOnPrimaryDomain) missingFields.push(`an alternate email that doesn't use ${form.domain}`);
   const canSubmit = missingFields.length === 0;
 
   const placeOrder = async () => {
@@ -9820,19 +9816,19 @@ function WorkspaceOrderFlow() {
               placeholder="ZIP" inputMode="numeric" />
           </div>
           <h3 className="wof-subhead">Contact information</h3>
-          <p className="wof-muted">Used to create the initial administrator account.</p>
+          <p className="wof-muted">The name and email address may be used to create the initial administrator account for Google Workspace, Cloud Identity, and Chrome Enterprise Upgrade orders, as applicable.</p>
           <div className="wof-grid">
             <div className="wof-field"><label>First name *</label><input value={form.firstName} onChange={set('firstName')} /></div>
             <div className="wof-field"><label>Last name *</label><input value={form.lastName} onChange={set('lastName')} /></div>
           </div>
           <div className="wof-field"><label>Email *</label>
-            <input value={form.email} onChange={set('email')} placeholder="you@example.com" />
-            <small>Also used to recover the Workspace account, so it must not be on {form.domain || 'your new domain'}.</small></div>
+            <input value={form.email} onChange={set('email')} placeholder="you@example.com" /></div>
           <div className="wof-grid">
-            <div className="wof-field"><label>Confirm Email *</label>
-              <input value={form.alternateEmail} onChange={set('alternateEmail')} placeholder="re-enter the email above" />
-              {form.alternateEmail && form.email && form.alternateEmail.trim().toLowerCase() !== form.email.trim().toLowerCase() && (
-                <small style={{ color: '#b91c1c' }}>Emails do not match.</small>
+            <div className="wof-field"><label>Alternate email *</label>
+              <input value={form.alternateEmail} onChange={set('alternateEmail')} placeholder="you@gmail.com" />
+              <small>Enter any email address that doesn't use the customer's primary domain.</small>
+              {altOnPrimaryDomain && (
+                <small style={{ color: '#b91c1c' }}>This address uses {form.domain}. Use one on a different domain.</small>
               )}</div>
             <div className="wof-field"><label>Phone</label>
               <input value={form.phone} onChange={set('phone')} placeholder="+1 555 123 4567" /></div>
