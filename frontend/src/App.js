@@ -9853,7 +9853,7 @@ function WorkspaceOrderFlow() {
 
           <div className="wof-grid">
             <div className="wof-field"><label>Alternate email *</label>
-              <input value={form.alternateEmail} onChange={set('alternateEmail')} placeholder="you@gmail.com" />
+              <input value={form.alternateEmail} onChange={set('alternateEmail')} placeholder="xyz@gmail.com" />
               <small>Enter any email address that doesn't use the customer's primary domain.</small>
               {altOnPrimaryDomain && (
                 <small style={{ color: '#b91c1c' }}>This address uses {form.domain}. Use one on a different domain.</small>
