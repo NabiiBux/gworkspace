@@ -1065,6 +1065,7 @@ const Dashboard = () => {
   const sectionLabels = {
     'overview': '📊 Overview & Analytics',
     'order-workspace': '✨ Order Workspace',
+    'domain-orders': '🌐 Domain Orders',
     'products': '📦 Products',
     'addon-pricing': '🧩 Add-on Pricing',
     'subs-pk': '🇵🇰 Pakistan Workspace',
@@ -1152,6 +1153,15 @@ const Dashboard = () => {
               onClick={() => setActiveSection('order-workspace')}
             >
               ✨ Order Workspace
+            </button>
+          </li>
+          <li>
+            <button
+              id="menu-domain-orders-btn"
+              className={`menu-item ${activeSection === 'domain-orders' ? 'active' : ''}`}
+              onClick={() => setActiveSection('domain-orders')}
+            >
+              🌐 Domain Orders
             </button>
           </li>
           <li>
@@ -1281,6 +1291,7 @@ const Dashboard = () => {
       <main className="dashboard-content" id="admin-dashboard-content">
         {activeSection === 'overview' && <OverviewSection stats={stats} />}
         {activeSection === 'order-workspace' && <AdminOrderWorkspace />}
+        {activeSection === 'domain-orders' && <AdminDomainOrders />}
         {activeSection === 'products' && <ProductsSection />}
         {activeSection === 'addon-pricing' && <AdminAddonPricing />}
         {activeSection === 'subs-pk' && <SubscriptionsSection account="PK" />}
@@ -10412,6 +10423,67 @@ const CustomerHosting = () => {
 };
 
 // ==================== ADMIN: CREATE & PROVISION WORKSPACE (no payment) + TRACK ORDERS ====================
+
+// Admin: domain purchases (search + retry registration). Own sidebar section.
+const AdminDomainOrders = () => {
+  const inp = { width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', fontSize: 14, boxSizing: 'border-box' };
+  const [domQ, setDomQ] = useState('');
+  const [domOrders, setDomOrders] = useState([]);
+  const [domRetryBusy, setDomRetryBusy] = useState('');
+  const [domMsg, setDomMsg] = useState('');
+  const loadDomOrders = async () => {
+    try { const r = await axios.get(`${API_URL}/admin/domain-orders${domQ ? `?q=${encodeURIComponent(domQ)}` : ''}`); setDomOrders(r.data.orders || []); } catch (_) { }
+  };
+  const retryDom = async (orderNumber) => {
+    setDomRetryBusy(orderNumber); setDomMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/admin/domain-order-retry`, { orderNumber });
+      setDomMsg('✓ ' + orderNumber + ' → ' + (r.data.status || 'done'));
+      loadDomOrders();
+    } catch (e) { setDomMsg('✗ ' + orderNumber + ': ' + (e?.response?.data?.error || 'error')); }
+    finally { setDomRetryBusy(''); }
+  };
+  useEffect(() => { loadDomOrders(); }, []);
+
+  return (
+    <div className="section">
+      <h2 style={{ marginTop: 0 }}>🌐 Domain Orders</h2>
+      <p style={{ color: '#5b6075' }}>Search domain purchases by order number (DM-...) or domain. Retry registration for orders that were paid but not registered.</p>
+      {domMsg && <div style={{ padding: '8px 12px', borderRadius: 8, marginBottom: 12, background: domMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: domMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{domMsg}</div>}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <input style={{ ...inp, maxWidth: 360 }} value={domQ} onChange={e => setDomQ(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') loadDomOrders(); }} placeholder="DM-... or domain.com" />
+        <button onClick={loadDomOrders} className="btn btn-secondary">Search</button>
+      </div>
+      {domOrders.length === 0 ? <p style={{ color: '#9ca3af' }}>No domain orders found.</p> : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}>
+              <th style={{ padding: '8px 0' }}>Order #</th><th>Domain</th><th>Years</th><th>Status</th><th></th>
+            </tr></thead>
+            <tbody>
+              {domOrders.map(o => (
+                <tr key={o.orderNumber} style={{ borderTop: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '8px 0', fontFamily: 'monospace', fontSize: 13 }}>{o.orderNumber}</td>
+                  <td style={{ fontWeight: 600 }}>{o.domainName}</td>
+                  <td>{o.period}</td>
+                  <td><span style={{ color: o.status === 'registered' ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{o.status}</span>{o.error && <div style={{ fontSize: 11, color: '#b42318' }}>{o.error}</div>}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    {o.status !== 'registered' && (
+                      <button onClick={() => retryDom(o.orderNumber)} disabled={domRetryBusy === o.orderNumber} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>
+                        {domRetryBusy === o.orderNumber ? '…' : 'Retry register'}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const AdminOrderWorkspace = () => {
   const [plans, setPlans] = useState([]);
   const [form, setForm] = useState({
@@ -10503,23 +10575,7 @@ const AdminOrderWorkspace = () => {
     try { const r = await axios.get(`${API_URL}/admin/workspace-orders${q ? `?q=${encodeURIComponent(q)}` : ''}`); setOrders(r.data.orders || []); } catch (_) { }
   };
   // Domain order tracking
-  const [domQ, setDomQ] = useState('');
-  const [domOrders, setDomOrders] = useState([]);
-  const [domRetryBusy, setDomRetryBusy] = useState('');
-  const [domMsg, setDomMsg] = useState('');
-  const loadDomOrders = async () => {
-    try { const r = await axios.get(`${API_URL}/admin/domain-orders${domQ ? `?q=${encodeURIComponent(domQ)}` : ''}`); setDomOrders(r.data.orders || []); } catch (_) { }
-  };
-  const retryDom = async (orderNumber) => {
-    setDomRetryBusy(orderNumber); setDomMsg('');
-    try {
-      const r = await axios.post(`${API_URL}/admin/domain-order-retry`, { orderNumber });
-      setDomMsg('✓ ' + orderNumber + ' → ' + (r.data.status || 'done'));
-      loadDomOrders();
-    } catch (e) { setDomMsg('✗ ' + orderNumber + ': ' + (e?.response?.data?.error || 'error')); }
-    finally { setDomRetryBusy(''); }
-  };
-  useEffect(() => { loadPlans(); loadOrders(); loadDomOrders(); }, []);
+  useEffect(() => { loadPlans(); loadOrders(); }, []);
 
   const set = (k, v) => setForm({ ...form, [k]: v });
 
@@ -10811,39 +10867,6 @@ example3.com, 3, Acme Inc, admin`}</pre>
         <button onClick={retryRenewal} disabled={renewBusy} className="btn btn-secondary">{renewBusy ? 'Retrying…' : 'Retry renewal'}</button>
       </div>
 
-      <h2 style={{ marginTop: 32 }}>🌐 Domain orders</h2>
-      <p style={{ color: '#5b6075' }}>Search domain purchases by order number (DM-...) or domain. Retry registration for orders that were paid but not registered.</p>
-      {domMsg && <div style={{ padding: '8px 12px', borderRadius: 8, marginBottom: 12, background: domMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: domMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{domMsg}</div>}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-        <input style={{ ...inp, maxWidth: 360 }} value={domQ} onChange={e => setDomQ(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') loadDomOrders(); }} placeholder="DM-... or domain.com" />
-        <button onClick={loadDomOrders} className="btn btn-secondary">Search</button>
-      </div>
-      {domOrders.length === 0 ? <p style={{ color: '#9ca3af' }}>No domain orders found.</p> : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
-            <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}>
-              <th style={{ padding: '8px 0' }}>Order #</th><th>Domain</th><th>Years</th><th>Status</th><th></th>
-            </tr></thead>
-            <tbody>
-              {domOrders.map(o => (
-                <tr key={o.orderNumber} style={{ borderTop: '1px solid #f0f0f0' }}>
-                  <td style={{ padding: '8px 0', fontFamily: 'monospace', fontSize: 13 }}>{o.orderNumber}</td>
-                  <td style={{ fontWeight: 600 }}>{o.domainName}</td>
-                  <td>{o.period}</td>
-                  <td><span style={{ color: o.status === 'registered' ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{o.status}</span>{o.error && <div style={{ fontSize: 11, color: '#b42318' }}>{o.error}</div>}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    {o.status !== 'registered' && (
-                      <button onClick={() => retryDom(o.orderNumber)} disabled={domRetryBusy === o.orderNumber} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>
-                        {domRetryBusy === o.orderNumber ? '…' : 'Retry register'}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </div>
   );
 };
