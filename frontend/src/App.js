@@ -9431,6 +9431,7 @@ function WorkspaceOrderFlow() {
     city: '', state: '', zip: '',
     firstName: '', lastName: '', email: '', alternateEmail: '', phone: '',
   });
+  const [showTempPw, setShowTempPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [orderDone, setOrderDone] = useState(null);
@@ -9845,8 +9846,8 @@ function WorkspaceOrderFlow() {
           {/* Google shows the admin email as username@domain in one field. */}
           <div className="wof-field"><label>Email *</label>
             <div className="wof-inline">
-              <input value={form.desiredAdminUsername} onChange={set('desiredAdminUsername')} placeholder="admin" />
-              <span className="wof-suffix">@{form.domain || 'yourdomain.com'}</span>
+              <input value={form.desiredAdminUsername} onChange={set('desiredAdminUsername')} placeholder="username" />
+              <span className={`wof-suffix${form.domain ? ' filled' : ''}`}>@{form.domain || 'yourdomain.com'}</span>
             </div>
             <small>This becomes the Workspace administrator login.</small>
           </div>
@@ -9864,7 +9865,14 @@ function WorkspaceOrderFlow() {
           </div>
 
           <div className="wof-field"><label>Temporary password *</label>
-            <input type="password" value={form.tempPassword} onChange={set('tempPassword')} placeholder="At least 8 characters" />
+            <div style={{ position: 'relative' }}>
+              <input type={showTempPw ? 'text' : 'password'} value={form.tempPassword} onChange={set('tempPassword')}
+                placeholder="At least 8 characters" style={{ paddingRight: 62 }} />
+              <button type="button" onClick={() => setShowTempPw(v => !v)}
+                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                {showTempPw ? 'Hide' : 'Show'}
+              </button>
+            </div>
             <small>The administrator will be prompted to change this on first sign-in.</small>
           </div>
 
@@ -9980,7 +9988,10 @@ const wofStyles = `
 .wof-field small{margin-top:5px;color:#7a809a;font-size:12px}
 .wof-inline{display:flex;gap:8px;align-items:center}
 .wof-inline input{flex:1}
-.wof-suffix{color:#5b6075;font-size:14px;white-space:nowrap}
+.wof-suffix{color:#9aa0b4;font-size:14px;white-space:nowrap}
+.wof-suffix.filled{color:#111827;font-weight:600}
+.wof-field input,.wof-field select{color:#111827}
+.wof-field input::placeholder{color:#9aa0b4}
 .wof-zipmsg{color:#2563eb!important}
 .wof-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
 .wof-btn{height:44px;padding:0 20px;border-radius:10px;border:1px solid transparent;font-size:14px;font-weight:600;cursor:pointer}
