@@ -10653,15 +10653,42 @@ async function provisionWorkspaceOrder(order) {
       ? org.tempPassword
       : Math.random().toString(36).slice(2) + 'A1!';
     const directory = google.admin({ version: 'directory_v1', auth });
-    await directory.users.insert({
-      requestBody: {
-        primaryEmail: adminEmail,
-        name: { givenName: contact.firstName || 'Admin', familyName: contact.lastName || org.name || 'User' },
-        password,
-        changePasswordAtNextLogin: true,
-      },
-    });
-    await directory.users.makeAdmin({ userKey: adminEmail, requestBody: { status: true } });
+    // The customer was created moments ago; Google's directory often isn't ready
+    // yet and answers 503 "Service unavailable" or 404 for a few seconds. Retry
+    // with backoff instead of giving up on the first attempt.
+    const createAdminUser = async () => {
+      let delay = 3000;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await directory.users.insert({
+            requestBody: {
+              primaryEmail: adminEmail,
+              name: { givenName: contact.firstName || 'Admin', familyName: contact.lastName || org.name || 'User' },
+              password,
+              changePasswordAtNextLogin: true,
+            },
+          });
+          return;
+        } catch (e) {
+          const m = e?.errors?.[0]?.message || e?.message || '';
+          const code = e?.code || e?.response?.status;
+          const transient = code === 503 || code === 500 || code === 404
+            || /service unavailable|try again|backend error|not found/i.test(m);
+          if (attempt >= 4 || !transient || /already exists|entity already|duplicate|409/i.test(m)) throw e;
+          console.warn(`PROVISION [${account}] step 2: directory not ready (attempt ${attempt}/4) — ${m}. Retrying in ${delay}ms`);
+          await sleep(delay);
+          delay *= 2;
+        }
+      }
+    };
+    await createAdminUser();
+    try {
+      await directory.users.makeAdmin({ userKey: adminEmail, requestBody: { status: true } });
+    } catch (e) {
+      // The account exists; only the admin-role grant failed. Say so precisely.
+      console.error(`PROVISION [${account}] step 2: user created but makeAdmin failed:`, e?.message || e);
+      order.provisionNote = `Admin user ${adminEmail} was created but could not be granted admin rights on ${account.toUpperCase()}. Grant it in the Google Admin console.`;
+    }
     console.log(`PROVISION [${account}] step 2 OK: admin user ${adminEmail} created`);
   } catch (userErr) {
     const msg = userErr?.errors?.[0]?.message || userErr?.message || '';
@@ -10670,7 +10697,7 @@ async function provisionWorkspaceOrder(order) {
     } else {
       // Non-fatal: log it, but continue to create the subscription so the customer gets their plan.
       console.error(`PROVISION [${account}] step 2 SKIPPED (admin user could not be created — likely OAuth lacks domain delegation):`, msg);
-      order.provisionNote = `Admin user not auto-created on ${account.toUpperCase()}: ${msg}. Subscription still created.`;
+      order.provisionNote = `Admin user not auto-created on ${account.toUpperCase()}: ${msg}. The subscription was created successfully — create the admin user in the Google Admin console, or use Retry on this order.`;
     }
   }
 
