@@ -675,7 +675,6 @@ const WorkspaceOrderSchema = new mongoose.Schema(
       domain: String,
       desiredAdminUsername: String,
       tempPassword: String,
-      crmId: String,                                   // optional, mirrors Google's CRM ID
       languageCode: { type: String, default: 'en-US' },
       country: { type: String, default: 'US' },
       streetAddress: String,
