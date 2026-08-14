@@ -9544,7 +9544,7 @@ function WorkspaceOrderFlow() {
   if (!form.firstName) missingFields.push('first name');
   if (!form.lastName) missingFields.push('last name');
   if (!/\S+@\S+\.\S+/.test(form.email)) missingFields.push('contact email');
-  if (!/\S+@\S+\.\S+/.test(form.alternateEmail)) missingFields.push('alternate email');
+  if (!/\S+@\S+\.\S+/.test(form.alternateEmail)) missingFields.push('confirm email');
   const canSubmit = missingFields.length === 0;
 
   const placeOrder = async () => {
@@ -9818,7 +9818,7 @@ function WorkspaceOrderFlow() {
           <div className="wof-field"><label>Email *</label>
             <input value={form.email} onChange={set('email')} placeholder="you@example.com" /></div>
           <div className="wof-grid">
-            <div className="wof-field"><label>Alternate email * (not on your new domain)</label>
+            <div className="wof-field"><label>Confirm Email *</label>
               <input value={form.alternateEmail} onChange={set('alternateEmail')} placeholder="you@gmail.com" /></div>
             <div className="wof-field"><label>Phone</label>
               <input value={form.phone} onChange={set('phone')} placeholder="+1 555 123 4567" /></div>
