@@ -9544,7 +9544,17 @@ function WorkspaceOrderFlow() {
   if (!form.firstName) missingFields.push('first name');
   if (!form.lastName) missingFields.push('last name');
   if (!/\S+@\S+\.\S+/.test(form.email)) missingFields.push('contact email');
+  // Confirm Email must match the contact email exactly.
   if (!/\S+@\S+\.\S+/.test(form.alternateEmail)) missingFields.push('confirm email');
+  else if (form.alternateEmail.trim().toLowerCase() !== (form.email || '').trim().toLowerCase()) {
+    missingFields.push('the two email addresses to match');
+  }
+  // Google uses this address to recover the new Workspace account, so it cannot
+  // live on the domain being created.
+  const emailDomain = (form.email || '').split('@')[1] || '';
+  if (form.email && form.domain && emailDomain.toLowerCase() === form.domain.trim().toLowerCase()) {
+    missingFields.push(`an email that is NOT on ${form.domain} (used for account recovery)`);
+  }
   const canSubmit = missingFields.length === 0;
 
   const placeOrder = async () => {
@@ -9816,10 +9826,14 @@ function WorkspaceOrderFlow() {
             <div className="wof-field"><label>Last name *</label><input value={form.lastName} onChange={set('lastName')} /></div>
           </div>
           <div className="wof-field"><label>Email *</label>
-            <input value={form.email} onChange={set('email')} placeholder="you@example.com" /></div>
+            <input value={form.email} onChange={set('email')} placeholder="you@example.com" />
+            <small>Also used to recover the Workspace account, so it must not be on {form.domain || 'your new domain'}.</small></div>
           <div className="wof-grid">
             <div className="wof-field"><label>Confirm Email *</label>
-              <input value={form.alternateEmail} onChange={set('alternateEmail')} placeholder="you@gmail.com" /></div>
+              <input value={form.alternateEmail} onChange={set('alternateEmail')} placeholder="re-enter the email above" />
+              {form.alternateEmail && form.email && form.alternateEmail.trim().toLowerCase() !== form.email.trim().toLowerCase() && (
+                <small style={{ color: '#b91c1c' }}>Emails do not match.</small>
+              )}</div>
             <div className="wof-field"><label>Phone</label>
               <input value={form.phone} onChange={set('phone')} placeholder="+1 555 123 4567" /></div>
           </div>
