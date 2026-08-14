@@ -5048,12 +5048,12 @@ const CustomerPortal = () => {
     { key: 'overview', label: 'Overview', icon: '🏠' },
     { key: 'dashboard', label: 'My subscriptions', icon: '📚' },
     { key: 'order', label: 'New subscription', icon: '✨' },
+    { key: 'addons', label: 'Google Workspace Addon', icon: '🧩' },
     { key: 'import', label: 'Import Workspace', icon: '📥' },
     { key: 'domains', label: 'Domains', icon: '🌐' },
     { key: 'ssl', label: 'SSL certificates', icon: '🔒' },
     { key: 'hosting', label: 'Hosting', icon: '🖥' },
     { key: 'voice', label: 'Google Voice', icon: '📞' },
-    { key: 'addons', label: 'Add-ons', icon: '🧩' },
     { key: 'payments', label: 'Payments', icon: '💳' },
     { key: 'balance', label: 'Balance', icon: '💰' },
     { key: 'support', label: 'Support', icon: '🎫' },
@@ -6699,7 +6699,7 @@ const CustomerAddons = () => {
   const TEAL = '#6e46eb';
   return (
     <div>
-      <h2 style={{ marginTop: 0 }}>🧩 Add-ons</h2>
+      <h2 style={{ marginTop: 0 }}>🧩 Google Workspace Addon</h2>
       <p style={{ color: '#6b7280' }}>Enhance your Google Workspace with add-ons like Gemini AI, AppSheet, Cloud Identity, and more. Add-ons attach to a domain that already has an active Workspace plan.</p>
 
       {msg && <div style={{ padding: '12px 16px', borderRadius: 8, marginBottom: 16, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a' }}>{msg}</div>}
