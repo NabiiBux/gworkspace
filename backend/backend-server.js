@@ -240,6 +240,7 @@ const LeadSchema = new mongoose.Schema({
   message: String,
   status: { type: String, enum: ['New', 'In Discussion', 'Contacted', 'Qualified', 'Closed'], default: 'New' },
   notes: String,
+  autoReplySentAt: Date,          // qualifying-questions email (sent once)
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
@@ -8728,6 +8729,36 @@ app.post('/api/public/domains/search', async (req, res) => {
 // ==================== LEAD GENERATION & PROSPECTIVE CLIENTS ====================
 
 // Public Lead Inquiry Submission
+// Qualifying questions sent to a new lead immediately, so the conversation starts
+// without waiting for someone to be at a desk. Sent once per lead.
+async function sendLeadQualifyingEmail(lead) {
+  if (!lead?.email || lead.autoReplySentAt) return false;
+  const first = String(lead.fullName || '').trim().split(/\s+/)[0] || 'there';
+  // Don't ask for details the lead already gave us on the form.
+  const questions = [];
+  questions.push('How many Google Workspace licenses do you need?');
+  if (!lead.businessName) questions.push('What is your company name?');
+  questions.push('Where is your business located?');
+
+  const html = emailShell('Thanks for contacting us', `
+    <p>Hi ${first},</p>
+    <p>Thanks for contacting us. We are here to help you.</p>
+    <p>So we can prepare the right quote for you, could you reply with:</p>
+    <ul style="line-height:1.9;padding-left:20px">
+      ${questions.map((q) => `<li>${q}</li>`).join('')}
+    </ul>
+    <p>Just reply to this email and we'll take it from there.</p>
+    <p style="margin-top:22px">Best regards,<br><strong>${BRAND_NAME}</strong></p>`);
+
+  const ok = await sendEmail(lead.email, `Thanks for contacting ${BRAND_NAME} — a few quick questions`, html);
+  if (ok) {
+    lead.autoReplySentAt = new Date();
+    try { await lead.save(); } catch (_) { }
+  }
+  console.log(`[lead] qualifying email ${ok ? 'sent' : 'FAILED'} → ${lead.email}`);
+  return ok;
+}
+
 app.post('/api/public/leads', async (req, res) => {
   try {
     const { fullName, email, phone, businessName, domain, services, message } = req.body;
@@ -8746,6 +8777,24 @@ app.post('/api/public/leads', async (req, res) => {
     });
     await newLead.save();
     res.status(201).json({ success: true, message: 'Thank you for your inquiry! We will contact you shortly.', lead: newLead });
+
+    // Auto-reply with the qualifying questions immediately (after responding, so
+    // a slow mail provider never delays the form submission).
+    sendLeadQualifyingEmail(newLead).catch((e) => console.error('[lead] auto-reply failed:', e.message));
+    // Notify the team that a lead came in.
+    try {
+      const adminTo = process.env.ADMIN_NOTIFY_EMAIL || process.env.ADMIN_EMAIL;
+      if (adminTo) {
+        sendEmail(adminTo, `New lead: ${fullName}${businessName ? ` (${businessName})` : ''}`, emailShell('New lead', `
+          <p><strong>${fullName}</strong> — ${email}${phone ? ` · ${phone}` : ''}</p>
+          ${businessName ? `<p>Company: ${businessName}</p>` : ''}
+          ${domain ? `<p>Domain: ${domain}</p>` : ''}
+          ${Array.isArray(services) && services.length ? `<p>Interested in: ${services.join(', ')}</p>` : ''}
+          ${message ? `<p style="white-space:pre-wrap">${String(message).slice(0, 2000)}</p>` : ''}
+          <p style="color:#6b7280;font-size:13px">The qualifying-questions auto-reply has been sent to the lead.</p>`))
+          .catch(() => {});
+      }
+    } catch (_) { }
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -8773,7 +8822,31 @@ app.post('/api/admin/leads/:id', authenticateCustomer, requireAdmin, async (req,
     lead.updatedAt = new Date();
     await lead.save();
 
+    // Safety net: if the lead is marked Qualified but never received the
+    // qualifying questions (e.g. the auto-reply failed at capture time), send now.
+    if (status === 'Qualified' && !lead.autoReplySentAt) {
+      sendLeadQualifyingEmail(lead).catch((e) => console.error('[lead] qualified auto-reply failed:', e.message));
+    }
+
     res.json({ success: true, message: 'Lead updated successfully.', lead });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
+// Admin: send (or re-send) the qualifying questions to a lead.
+app.post('/api/admin/leads/:id/send-questions', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const lead = await Lead.findById(req.params.id);
+    if (!lead) return res.status(404).json({ error: 'Lead not found.' });
+    if (req.body?.force) lead.autoReplySentAt = null;   // allow a deliberate re-send
+    const ok = await sendLeadQualifyingEmail(lead);
+    if (!ok && lead.autoReplySentAt) {
+      return res.json({ success: true, alreadySent: true, sentAt: lead.autoReplySentAt, message: 'Already sent — pass force to send again.' });
+    }
+    if (!ok) return res.status(500).json({ error: 'Could not send the email. Check the email configuration.' });
+    res.json({ success: true, message: `Questions sent to ${lead.email}.` });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

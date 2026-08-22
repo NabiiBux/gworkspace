@@ -2968,6 +2968,22 @@ const AdminLeadsSection = () => {
     }
   };
 
+  const [sendingQs, setSendingQs] = useState({});
+  const sendQuestions = async (lead) => {
+    const already = !!lead.autoReplySentAt;
+    if (already && !window.confirm('The qualifying questions were already sent to this lead. Send them again?')) return;
+    setSendingQs(prev => ({ ...prev, [lead._id]: true }));
+    try {
+      const r = await axios.post(`${API_URL}/admin/leads/${lead._id}/send-questions`, already ? { force: true } : {});
+      alert(r.data.message || 'Questions sent.');
+      loadLeads();
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Could not send the questions.');
+    } finally {
+      setSendingQs(prev => ({ ...prev, [lead._id]: false }));
+    }
+  };
+
   const handleDeleteLead = async (id) => {
     if (!window.confirm('Are you sure you want to delete this lead?')) return;
     try {
@@ -3154,6 +3170,21 @@ const AdminLeadsSection = () => {
                     background: '#fffbeb',
                   }}
                 />
+                <div style={{ display: 'flex', gap: 8, alignSelf: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {lead.autoReplySentAt && (
+                    <span style={{ fontSize: 11, color: '#166534' }}>✓ Questions sent {new Date(lead.autoReplySentAt).toLocaleDateString()}</span>
+                  )}
+                  <button
+                    onClick={() => sendQuestions(lead)}
+                    disabled={!!sendingQs[lead._id]}
+                    style={{
+                      background: 'transparent', border: '1px solid #c9b8fb', color: '#6e46eb',
+                      borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >
+                    {sendingQs[lead._id] ? 'Sending…' : (lead.autoReplySentAt ? '✉ Resend questions' : '✉ Send questions')}
+                  </button>
+                </div>
                 <button
                   onClick={() => handleDeleteLead(lead._id)}
                   style={{
