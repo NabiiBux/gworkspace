@@ -140,10 +140,99 @@ export const NavIcons = {
       <line x1="4.93" y1="19.07" x2="9.17" y2="14.83" stroke="#e11d48" strokeWidth="2" strokeLinecap="round" />
     </svg>
   ),
+  Tickets: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M2 9a3 3 0 010 6v3a2 2 0 002 2h16a2 2 0 002-2v-3a3 3 0 010-6V6a2 2 0 00-2-2H4a2 2 0 00-2 2v3z" fill="#f43f5e" fillOpacity="0.16" stroke="#e11d48" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <line x1="12" y1="4" x2="12" y2="20" stroke="#e11d48" strokeWidth="1.8" strokeDasharray="2 3" />
+    </svg>
+  ),
+  Pricing: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <rect x="3" y="3" width="18" height="18" rx="4" fill="#a855f7" fillOpacity="0.18" stroke="#9333ea" strokeWidth="1.8" />
+      <path d="M12 7v10M8.5 9.5c0-1.5 1.5-2 3.5-2s3.5.7 3.5 2c0 2.5-7 1.5-7 4 0 1.3 1.5 2 3.5 2s3.5-.5 3.5-2" stroke="#9333ea" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  ),
   Settings: ({ size = 20 }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
       <circle cx="12" cy="12" r="3" fill="#475569" fillOpacity="0.25" stroke="#475569" strokeWidth="2" />
       <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="#475569" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  AdminProducts: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" fill="#f59e0b" fillOpacity="0.18" stroke="#d97706" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96" stroke="#d97706" strokeWidth="1.8" />
+      <line x1="12" y1="22.08" x2="12" y2="12" stroke="#d97706" strokeWidth="1.8" />
+    </svg>
+  ),
+  AdminCustomers: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" fill="#0284c7" fillOpacity="0.16" stroke="#0284c7" strokeWidth="1.8" />
+      <circle cx="9" cy="7" r="4" fill="#38bdf8" fillOpacity="0.3" stroke="#0284c7" strokeWidth="1.8" />
+      <path d="M23 21v-2a4 4 0 00-3-3.87" stroke="#0369a1" strokeWidth="1.8" />
+      <path d="M16 3.13a4 4 0 010 7.75" stroke="#0369a1" strokeWidth="1.8" />
+    </svg>
+  ),
+  AdminLeads: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <rect x="2" y="7" width="20" height="14" rx="2" fill="#8b5cf6" fillOpacity="0.18" stroke="#7c3aed" strokeWidth="1.8" />
+      <path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16" stroke="#7c3aed" strokeWidth="1.8" />
+      <circle cx="12" cy="13" r="1.5" fill="#f59e0b" />
+    </svg>
+  ),
+  AdminEmails: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" fill="#0ea5e9" fillOpacity="0.16" stroke="#0284c7" strokeWidth="1.8" />
+      <polyline points="22,6 12,13 2,6" stroke="#0284c7" strokeWidth="1.8" />
+    </svg>
+  ),
+  AdminMonitor: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" fill="#ef4444" fillOpacity="0.18" stroke="#dc2626" strokeWidth="1.8" />
+      <path d="M12 8v4" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="12" cy="15.5" r="1" fill="#dc2626" />
+    </svg>
+  ),
+  AdminBranding: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="10" fill="#ec4899" fillOpacity="0.16" stroke="#db2777" strokeWidth="1.8" />
+      <circle cx="8" cy="10" r="1.5" fill="#ef4444" />
+      <circle cx="12" cy="7.5" r="1.5" fill="#f59e0b" />
+      <circle cx="16" cy="10" r="1.5" fill="#10b981" />
+      <circle cx="14" cy="14" r="1.5" fill="#3b82f6" />
+      <path d="M9 16c1.5 1 3.5 1 5 0" stroke="#db2777" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  ),
+  AdminLogout: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points="16 17 21 12 16 7" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <line x1="21" y1="12" x2="9" y2="12" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  PkFlag: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <rect width="24" height="24" rx="5" fill="#01411C" />
+      <rect width="6" height="24" rx="2" fill="#FFFFFF" />
+      <circle cx="15.5" cy="12" r="5" fill="#01411C" />
+      <circle cx="16.8" cy="11.2" r="4.2" fill="#FFFFFF" />
+      <circle cx="15.5" cy="12" r="3.6" fill="#01411C" />
+      <polygon points="17.2,8.8 17.6,9.9 18.7,9.9 17.8,10.5 18.2,11.6 17.2,10.9 16.2,11.6 16.6,10.5 15.7,9.9 16.8,9.9" fill="#FFFFFF" />
+    </svg>
+  ),
+  UsaFlag: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <rect width="24" height="24" rx="5" fill="#FFFFFF" />
+      <rect y="0" width="24" height="3" fill="#B22234" />
+      <rect y="6" width="24" height="3" fill="#B22234" />
+      <rect y="12" width="24" height="3" fill="#B22234" />
+      <rect y="18" width="24" height="3" fill="#B22234" />
+      <rect width="11" height="12" rx="2" fill="#3C3B6E" />
+      <circle cx="3" cy="3" r="0.8" fill="#FFFFFF" />
+      <circle cx="8" cy="3" r="0.8" fill="#FFFFFF" />
+      <circle cx="5.5" cy="6" r="0.8" fill="#FFFFFF" />
+      <circle cx="3" cy="9" r="0.8" fill="#FFFFFF" />
+      <circle cx="8" cy="9" r="0.8" fill="#FFFFFF" />
     </svg>
   ),
   Menu: ({ size = 20, color = 'currentColor' }) => (
@@ -1226,6 +1315,25 @@ const Dashboard = () => {
     }
   };
 
+  const adminNavItems = [
+    { key: 'overview', label: 'Overview', icon: <NavIcons.Overview size={18} />, bg: '#eef2ff', border: '#e0e7ff' },
+    { key: 'order-workspace', label: 'Order Workspace', icon: <GoogleWorkspaceIcon size={18} />, bg: '#ffffff', border: '#e2e8f0', shadow: true },
+    { key: 'domain-orders', label: 'Domain Orders', icon: <NavIcons.Domains size={18} />, bg: '#ecfeff', border: '#cffafe' },
+    { key: 'products', label: 'Products', icon: <NavIcons.AdminProducts size={18} />, bg: '#fef3c7', border: '#fde68a' },
+    { key: 'addon-pricing', label: 'Add-on Pricing', icon: <NavIcons.Pricing size={18} />, bg: '#f5f3ff', border: '#ede9fe' },
+    { key: 'subs-pk', label: 'Pakistan Workspace', icon: <NavIcons.PkFlag size={18} />, bg: '#01411c', border: '#065f46' },
+    { key: 'subs-usa', label: 'USA Voice', icon: <NavIcons.UsaFlag size={18} />, bg: '#ffffff', border: '#e2e8f0' },
+    { key: 'customers', label: 'Customers', icon: <NavIcons.AdminCustomers size={18} />, bg: '#e0f2fe', border: '#bae6fd' },
+    { key: 'leads', label: 'Prospective Leads', icon: <NavIcons.AdminLeads size={18} />, bg: '#ede9fe', border: '#ddd6fe' },
+    { key: 'tickets', label: 'Tickets', icon: <NavIcons.Tickets size={18} />, bg: '#ffe4e6', border: '#fecdd3' },
+    { key: 'payments', label: 'Payments', icon: <NavIcons.Payments size={18} />, bg: '#faf5ff', border: '#f3e8ff' },
+    { key: 'voice', label: 'Voice', icon: <NavIcons.Voice size={18} />, bg: '#f0fdf4', border: '#dcfce7' },
+    { key: 'emails', label: 'Emails', icon: <NavIcons.AdminEmails size={18} />, bg: '#f0f9ff', border: '#e0f2fe' },
+    { key: 'domains-ssl', label: 'Domains & SSL', icon: <NavIcons.SSL size={18} />, bg: '#f0fdf4', border: '#dcfce7' },
+    { key: 'voice-monitor', label: 'Abuse Monitor', icon: <NavIcons.AdminMonitor size={18} />, bg: '#fef2f2', border: '#fecaca' },
+    { key: 'branding', label: 'Branding', icon: <NavIcons.AdminBranding size={18} />, bg: '#fdf2f8', border: '#fbcfe8' }
+  ];
+
   return (
     <div className="dashboard">
       {/* Mobile Top Header - Sticky on small screens */}
@@ -1269,154 +1377,35 @@ const Dashboard = () => {
         </div>
 
         <ul className="sidebar-menu">
-          <li>
-            <button
-              id="menu-overview-btn"
-              className={`menu-item ${activeSection === 'overview' ? 'active' : ''}`}
-              onClick={() => setActiveSection('overview')}
-            >
-              📈 Overview
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-order-btn"
-              className={`menu-item ${activeSection === 'order-workspace' ? 'active' : ''}`}
-              onClick={() => setActiveSection('order-workspace')}
-            >
-              ✨ Order Workspace
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-domain-orders-btn"
-              className={`menu-item ${activeSection === 'domain-orders' ? 'active' : ''}`}
-              onClick={() => setActiveSection('domain-orders')}
-            >
-              🌐 Domain Orders
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-products-btn"
-              className={`menu-item ${activeSection === 'products' ? 'active' : ''}`}
-              onClick={() => setActiveSection('products')}
-            >
-              📦 Products
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-addon-btn"
-              className={`menu-item ${activeSection === 'addon-pricing' ? 'active' : ''}`}
-              onClick={() => setActiveSection('addon-pricing')}
-            >
-              🧩 Add-on Pricing
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-subspk-btn"
-              className={`menu-item ${activeSection === 'subs-pk' ? 'active' : ''}`}
-              onClick={() => setActiveSection('subs-pk')}
-            >
-              🇵🇰 Pakistan Workspace
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-subsusa-btn"
-              className={`menu-item ${activeSection === 'subs-usa' ? 'active' : ''}`}
-              onClick={() => setActiveSection('subs-usa')}
-            >
-              🇺🇸 USA Voice
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-customers-btn"
-              className={`menu-item ${activeSection === 'customers' ? 'active' : ''}`}
-              onClick={() => setActiveSection('customers')}
-            >
-              👥 Customers
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-leads-btn"
-              className={`menu-item ${activeSection === 'leads' ? 'active' : ''}`}
-              onClick={() => setActiveSection('leads')}
-            >
-              💼 Prospective Leads
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-tickets-btn"
-              className={`menu-item ${activeSection === 'tickets' ? 'active' : ''}`}
-              onClick={() => setActiveSection('tickets')}
-            >
-              🎫 Tickets
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-payments-btn"
-              className={`menu-item ${activeSection === 'payments' ? 'active' : ''}`}
-              onClick={() => setActiveSection('payments')}
-            >
-              💳 Payments
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-voice-btn"
-              className={`menu-item ${activeSection === 'voice' ? 'active' : ''}`}
-              onClick={() => setActiveSection('voice')}
-            >
-              📞 Voice
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-emails-btn"
-              className={`menu-item ${activeSection === 'emails' ? 'active' : ''}`}
-              onClick={() => setActiveSection('emails')}
-            >
-              ✉️ Emails
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-ssl-btn"
-              className={`menu-item ${activeSection === 'domains-ssl' ? 'active' : ''}`}
-              onClick={() => setActiveSection('domains-ssl')}
-            >
-              🔒 Domains & SSL
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-monitor-btn"
-              className={`menu-item ${activeSection === 'voice-monitor' ? 'active' : ''}`}
-              onClick={() => setActiveSection('voice-monitor')}
-            >
-              🛡 Abuse Monitor
-            </button>
-          </li>
-          <li>
-            <button
-              id="menu-branding-btn"
-              className={`menu-item ${activeSection === 'branding' ? 'active' : ''}`}
-              onClick={() => setActiveSection('branding')}
-            >
-              🎨 Branding
-            </button>
-          </li>
+          {adminNavItems.map((item) => {
+            const active = activeSection === item.key;
+            return (
+              <li key={item.key}>
+                <button
+                  id={`menu-${item.key}-btn`}
+                  className={`admin-menu-btn ${active ? 'active' : ''}`}
+                  onClick={() => setActiveSection(item.key)}
+                >
+                  <span
+                    className="admin-nav-badge"
+                    style={{
+                      background: item.bg,
+                      border: `1px solid ${item.border}`,
+                      boxShadow: item.shadow ? '0 1px 2px rgba(0,0,0,0.15)' : 'none',
+                    }}
+                  >
+                    {item.icon}
+                  </span>
+                  <span style={{ flex: 1, whiteSpace: 'nowrap' }}>{item.label}</span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
 
-        <button onClick={logout} className="btn btn-logout" id="admin-logout-btn">
-          🚪 Logout
+        <button onClick={logout} className="btn btn-logout" id="admin-logout-btn" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <NavIcons.AdminLogout size={16} />
+          <span>Logout</span>
         </button>
       </nav>
 
