@@ -5726,8 +5726,14 @@ const CustomerDomains = () => {
                       {regBusy && buyingDomain === r.domain ? '…' : '💳 Buy'}
                     </button>
                     <button onClick={() => buyDomain('nicky', r)} disabled={regBusy}
-                      style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '8px 12px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
-                      🪙
+                      title="Buy with Crypto"
+                      style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      {regBusy && buyingDomain === r.domain ? '…' : (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M10 8h4a2 2 0 0 1 0 4h-4m0 0h4.5a2 2 0 0 1 0 4H10m0-8v8m2-10v2m2-2v2m-2 16v2m2-2v2"/></svg>
+                          <span>Crypto</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 )}
@@ -5773,8 +5779,14 @@ const CustomerDomains = () => {
                           {renewBusy === d.id ? '…' : 'Renew (card)'}
                         </button>
                         <button onClick={() => renewDomain(d, 'nicky')} disabled={renewBusy === d.id}
-                          style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
-                          🪙
+                          title="Renew with Crypto"
+                          style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          {renewBusy === d.id ? '…' : (
+                            <>
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M10 8h4a2 2 0 0 1 0 4h-4m0 0h4.5a2 2 0 0 1 0 4H10m0-8v8m2-10v2m2-2v2m-2 16v2m2-2v2"/></svg>
+                              <span>Renew (crypto)</span>
+                            </>
+                          )}
                         </button>
                       </div>
                     )}
@@ -10423,7 +10435,16 @@ const CustomerHosting = () => {
                 )}
                 <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
                   <button onClick={() => buy(p, 'stripe')} disabled={busy === p.planId} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>{busy === p.planId ? '…' : 'Buy (card)'}</button>
-                  <button onClick={() => buy(p, 'nicky')} disabled={busy === p.planId} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '9px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>🪙</button>
+                  <button onClick={() => buy(p, 'nicky')} disabled={busy === p.planId}
+                    title="Buy with Crypto"
+                    style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '9px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    {busy === p.planId ? '…' : (
+                      <>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M10 8h4a2 2 0 0 1 0 4h-4m0 0h4.5a2 2 0 0 1 0 4H10m0-8v8m2-10v2m2-2v2m-2 16v2m2-2v2"/></svg>
+                        <span>Buy (crypto)</span>
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
             ))}

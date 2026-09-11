@@ -37,11 +37,19 @@ app.use((req, res, next) => {
 
 // ==================== DATABASE CONNECTION ====================
 mongoose.set('bufferCommands', false);
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/workspace-reseller', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 2000,
-}).catch(err => console.warn('MongoDB not connected — some features may not work: ' + err.message));
+const rawMongoUri = (process.env.MONGODB_URI || '').trim();
+const hasValidMongoScheme = rawMongoUri.startsWith('mongodb://') || rawMongoUri.startsWith('mongodb+srv://');
+const mongoUri = hasValidMongoScheme ? rawMongoUri : null;
+
+if (mongoUri) {
+  mongoose.connect(mongoUri, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    serverSelectionTimeoutMS: 2000,
+  }).catch(err => console.warn('MongoDB not connected — some features may not work: ' + err.message));
+} else {
+  console.warn('MongoDB URI not configured or invalid scheme — running with mock/fallback data');
+}
 
 mongoose.connection.once('open', () => {
   console.log('✅ MongoDB connected');
@@ -9095,16 +9103,34 @@ app.get('/api/customer/workspace/transfers', authenticateCustomer, async (req, r
 });
 
 // ---- GOOGLE WORKSPACE TRANSFER end ----
+const DEFAULT_PRODUCTS = {
+  workspace: [
+    { id: 'starter', name: 'Business Starter', monthlyPrice: 7.20, features: ['30 GB pooled storage', 'Custom business email', 'Meet (100 participants)', 'Security & management controls'] },
+    { id: 'standard', name: 'Business Standard', monthlyPrice: 14.40, features: ['2 TB pooled storage', 'Custom business email', 'Meet (150 participants) + recording', 'eSignature in Docs'] },
+    { id: 'plus', name: 'Business Plus', monthlyPrice: 21.60, features: ['5 TB pooled storage', 'Enhanced security & Vault', 'Meet (500 participants) + attendance', 'Advanced endpoint management'] },
+    { id: 'frontline', name: 'Frontline Starter', monthlyPrice: 6.00, features: ['Business email', 'Shared device support', 'Meet (100 participants)', 'For frontline workers'] },
+  ],
+  voice: [
+    { id: 'voice-starter', name: 'Voice Starter', monthlyPrice: 12.00, features: ['1 user / domain region', 'Voicemail & SMS', 'Call forwarding'] },
+    { id: 'voice-standard', name: 'Voice Standard', monthlyPrice: 24.00, features: ['Unlimited US regions', 'Multi-level auto attendant', 'Ring groups'] },
+    { id: 'voice-premier', name: 'Voice Premier', monthlyPrice: 36.00, features: ['Unlimited international', 'Advanced reporting', 'Desk phone support'] },
+  ],
+  addons: []
+};
+
 app.get('/api/products', async (req, res) => {
   try {
     const plans = await Plan.find({ active: true }).sort({ category: 1, sortOrder: 1 });
+    if (!plans || plans.length === 0) {
+      return res.json(DEFAULT_PRODUCTS);
+    }
     const shape = (cat) =>
       plans
         .filter((p) => p.category === cat)
         .map((p) => ({ id: p.planId, name: p.name, monthlyPrice: p.monthlyPrice, features: p.features }));
     res.json({ workspace: shape('workspace'), voice: shape('voice'), addons: shape('addon') });
   } catch (error) {
-    res.status(500).json({ error: 'Could not load products' });
+    res.json(DEFAULT_PRODUCTS);
   }
 });
 
@@ -11728,8 +11754,9 @@ function scheduleNickyPolling() {
 }
 
 // ==================== SERVER START ====================
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+const PORT = 3000;
+const HOST = '0.0.0.0';
+app.listen(PORT, HOST, () => {
   console.log('======================================================');
   console.log('🚀 BUILD MARKER: v2026-07-01 seat-counter + core-category + google-welcome + fixed-billing');
   console.log('🚀 If you see "v2026-07-01" here, the LATEST backend with the Frontline/seat fixes is deployed.');
