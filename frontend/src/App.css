@@ -1333,3 +1333,125 @@ div:has(> .data-table),
   display: none;
 }
 
+/* ==================== CUSTOMER PORTAL ENHANCEMENTS ==================== */
+.cp-layout {
+  display: flex;
+  gap: 24px;
+  padding: 24px;
+  max-width: 1280px;
+  margin: 0 auto;
+  align-items: flex-start;
+  transition: padding 0.2s ease;
+}
+
+.cp-sidebar {
+  width: 260px;
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 16px 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(229, 231, 235, 0.8);
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.cp-nav-btn {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  width: 100% !important;
+  text-align: left !important;
+  padding: 10px 14px !important;
+  margin-top: 4px !important;
+  border-radius: 10px !important;
+  cursor: pointer !important;
+  border: none !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  outline: none !important;
+  white-space: nowrap !important;
+}
+
+.cp-nav-btn:hover:not(.active) {
+  background-color: #f8fafc !important;
+  color: #1e293b !important;
+}
+
+.cp-nav-btn.active {
+  box-shadow: 0 4px 12px rgba(110, 70, 235, 0.2) !important;
+}
+
+.cp-nav-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+/* Mobile & Tablet optimizations for Customer Portal */
+@media (max-width: 1024px) {
+  .cp-layout {
+    flex-direction: column !important;
+    gap: 16px !important;
+    padding: 16px !important;
+  }
+
+  .cp-sidebar {
+    width: 100% !important;
+    border-radius: 14px !important;
+    padding: 10px 12px !important;
+  }
+
+  .cp-nav-list {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    padding-bottom: 6px !important;
+    gap: 6px !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .cp-nav-list::-webkit-scrollbar {
+    height: 4px;
+  }
+
+  .cp-nav-list::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+  }
+
+  .cp-nav-btn {
+    width: auto !important;
+    margin-top: 0 !important;
+    padding: 8px 14px !important;
+    font-size: 13.5px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .cp-header {
+    padding: 12px 16px !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    align-items: flex-start !important;
+  }
+
+  .cp-header-right {
+    width: 100% !important;
+    justify-content: space-between !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .cp-layout {
+    padding: 12px 8px !important;
+  }
+
+  .cp-header-welcome {
+    display: none !important;
+  }
+}
+
+

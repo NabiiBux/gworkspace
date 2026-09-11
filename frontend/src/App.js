@@ -54,6 +54,101 @@ export const GoogleWorkspaceIcon = ({ size = 18, style = {} }) => (
   </svg>
 );
 
+// High-fidelity Feather-style vector navigation icons for customer portal
+export const NavIcons = {
+  Overview: ({ size = 18, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </svg>
+  ),
+  Subscriptions: ({ size = 18, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+    </svg>
+  ),
+  NewSubscription: ({ size = 18, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="8" x2="12" y2="16" />
+      <line x1="8" y1="12" x2="16" y2="12" />
+    </svg>
+  ),
+  Import: ({ size = 18, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  ),
+  Domains: ({ size = 18, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="10" />
+      <line x1="2" y1="12" x2="22" y2="12" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  ),
+  SSL: ({ size = 18, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  ),
+  Hosting: ({ size = 18, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+      <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+      <line x1="6" y1="6" x2="6.01" y2="6" strokeWidth="3" />
+      <line x1="6" y1="18" x2="6.01" y2="18" strokeWidth="3" />
+    </svg>
+  ),
+  Voice: ({ size = 18, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+    </svg>
+  ),
+  Payments: ({ size = 18, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+      <line x1="1" y1="10" x2="23" y2="10" />
+    </svg>
+  ),
+  Balance: ({ size = 18, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4" />
+      <path d="M4 6v12c0 1.1.9 2 2 2h14v-4" />
+      <circle cx="18" cy="12" r="2" />
+    </svg>
+  ),
+  Support: ({ size = 18, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+      <line x1="12" y1="17" x2="12.01" y2="17" strokeWidth="3" />
+    </svg>
+  ),
+  Settings: ({ size = 18, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  ),
+  Menu: ({ size = 20, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  ),
+  Close: ({ size = 20, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  )
+};
+
 // ====== EDIT THIS: allowed countries for the address autocomplete ======
 // Use lowercase 2-letter country codes. Examples:
 //   ['us']            -> United States only
@@ -5115,60 +5210,66 @@ const CustomerPortal = () => {
   }, []);
 
   const navItems = [
-    { key: 'overview', label: 'Overview', icon: '🏠' },
-    { key: 'dashboard', label: 'My subscriptions', icon: '📚' },
-    { key: 'order', label: 'New subscription', icon: '✨' },
-    { key: 'addons', label: 'Google Workspace Subscriptions', icon: <GoogleWorkspaceIcon size={18} /> },
-    { key: 'import', label: 'Import Workspace', icon: '📥' },
-    { key: 'domains', label: 'Domains', icon: '🌐' },
-    { key: 'ssl', label: 'SSL certificates', icon: '🔒' },
-    { key: 'hosting', label: 'Hosting', icon: '🖥' },
-    { key: 'voice', label: 'Google Voice', icon: '📞' },
-    { key: 'payments', label: 'Payments', icon: '💳' },
-    { key: 'balance', label: 'Balance', icon: '💰' },
-    { key: 'support', label: 'Support', icon: '🎫' },
-    { key: 'settings', label: 'Account settings', icon: '⚙' },
+    { key: 'overview', label: 'Overview', icon: (active) => <NavIcons.Overview size={18} color={active ? '#fff' : '#64748b'} /> },
+    { key: 'dashboard', label: 'My subscriptions', icon: (active) => <NavIcons.Subscriptions size={18} color={active ? '#fff' : '#64748b'} /> },
+    { key: 'order', label: 'New subscription', icon: (active) => <NavIcons.NewSubscription size={18} color={active ? '#fff' : '#64748b'} /> },
+    { key: 'addons', label: 'Google Workspace Subscriptions', icon: () => <GoogleWorkspaceIcon size={18} /> },
+    { key: 'import', label: 'Import Workspace', icon: (active) => <NavIcons.Import size={18} color={active ? '#fff' : '#64748b'} /> },
+    { key: 'domains', label: 'Domains', icon: (active) => <NavIcons.Domains size={18} color={active ? '#fff' : '#64748b'} /> },
+    { key: 'ssl', label: 'SSL certificates', icon: (active) => <NavIcons.SSL size={18} color={active ? '#fff' : '#64748b'} /> },
+    { key: 'hosting', label: 'Hosting', icon: (active) => <NavIcons.Hosting size={18} color={active ? '#fff' : '#64748b'} /> },
+    { key: 'voice', label: 'Google Voice', icon: (active) => <NavIcons.Voice size={18} color={active ? '#fff' : '#64748b'} /> },
+    { key: 'payments', label: 'Payments', icon: (active) => <NavIcons.Payments size={18} color={active ? '#fff' : '#64748b'} /> },
+    { key: 'balance', label: 'Balance', icon: (active) => <NavIcons.Balance size={18} color={active ? '#fff' : '#64748b'} /> },
+    { key: 'support', label: 'Support', icon: (active) => <NavIcons.Support size={18} color={active ? '#fff' : '#64748b'} /> },
+    { key: 'settings', label: 'Account settings', icon: (active) => <NavIcons.Settings size={18} color={active ? '#fff' : '#64748b'} /> },
   ];
 
   const name = user?.username || (user?.businessEmail || '').split('@')[0];
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f6f8f7', color: INK, fontFamily: 'Inter, system-ui, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: '#f8fafc', color: INK, fontFamily: "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>
       {/* Top bar */}
-      <header style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '14px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <header className="cp-header" style={{ background: '#fff', borderBottom: '1px solid #e2e8f0', padding: '14px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(8px)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {brand.logoDataUrl
             ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 38, maxWidth: 180 }} />
             : <>
-              <div style={{ width: 36, height: 36, borderRadius: 8, background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>{(brand.brandName || 'G')[0]}</div>
-              <strong style={{ fontSize: 18, color: TEAL }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 16, boxShadow: '0 2px 6px rgba(110,70,235,0.3)' }}>{(brand.brandName || 'G')[0]}</div>
+              <strong style={{ fontSize: 18, color: '#0f172a', letterSpacing: '-0.02em', fontWeight: 700 }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
             </>}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <span style={{ color: MUTE }}>Welcome, <strong style={{ color: INK }}>{name}</strong></span>
-          <span style={{ background: '#efeafe', color: TEAL, padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600 }}>Customer</span>
-          <button onClick={logout} style={{ border: '1px solid #e5e7eb', background: '#fff', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', color: INK }}>Logout</button>
+        <div className="cp-header-right" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <span className="cp-header-welcome" style={{ color: MUTE, fontSize: 14 }}>Welcome, <strong style={{ color: INK }}>{name}</strong></span>
+          <span style={{ background: '#f1f5f9', color: '#475569', padding: '4px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600, border: '1px solid #e2e8f0' }}>Customer</span>
+          <button onClick={logout} style={{ border: '1px solid #e2e8f0', background: '#fff', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', color: '#475569', fontSize: 13, fontWeight: 600, transition: 'all 0.15s ease' }}>Logout</button>
         </div>
       </header>
 
-      <div className="cp-layout" style={{ display: 'flex', gap: 24, padding: 24, maxWidth: 1200, margin: '0 auto', alignItems: 'flex-start' }}>
+      <div className="cp-layout">
         {/* Sidebar card */}
-        <aside className="cp-sidebar" style={{ width: 240, background: '#fff', borderRadius: 16, padding: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', flexShrink: 0 }}>
-          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700, padding: '6px 12px' }}>ACCOUNT</div>
-          {navItems.map((it) => {
-            const active = section === it.key;
-            return (
-              <button key={it.key} onClick={() => setSection(it.key)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left',
-                  padding: '12px 14px', marginTop: 6, borderRadius: 12, cursor: 'pointer', border: 'none',
-                  background: active ? TEAL : 'transparent',
-                  color: active ? '#fff' : INK, fontSize: 15, fontWeight: active ? 600 : 500,
-                }}>
-                <span>{it.icon}</span>{it.label}
-              </button>
-            );
-          })}
+        <aside className="cp-sidebar">
+          <div style={{ fontSize: 11, letterSpacing: '0.08em', color: '#94a3b8', fontWeight: 700, padding: '4px 12px 10px', textTransform: 'uppercase' }}>Navigation</div>
+          <div className="cp-nav-list">
+            {navItems.map((it) => {
+              const active = section === it.key;
+              return (
+                <button
+                  key={it.key}
+                  onClick={() => setSection(it.key)}
+                  className={`cp-nav-btn ${active ? 'active' : ''}`}
+                  style={{
+                    background: active ? TEAL : 'transparent',
+                    color: active ? '#ffffff' : '#334155',
+                    fontWeight: active ? 600 : 500,
+                  }}
+                >
+                  <span className="cp-nav-icon-wrap">{typeof it.icon === 'function' ? it.icon(active) : it.icon}</span>
+                  <span>{it.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </aside>
 
         {/* Main content */}
