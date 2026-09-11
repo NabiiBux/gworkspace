@@ -44,6 +44,16 @@ export const CardIcon = ({ size = 15, color = 'currentColor', style = {} }) => (
   </svg>
 );
 
+// High-resolution Google Workspace vector emblem
+export const GoogleWorkspaceIcon = ({ size = 18, style = {} }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0, ...style }}>
+    <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z" />
+    <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z" />
+    <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.14-1.55.38-2.27V6.58H1.25C.45 8.16 0 9.97 0 12s.45 3.84 1.25 5.42l4.03-3.15z" />
+    <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z" />
+  </svg>
+);
+
 // ====== EDIT THIS: allowed countries for the address autocomplete ======
 // Use lowercase 2-letter country codes. Examples:
 //   ['us']            -> United States only
@@ -5108,7 +5118,7 @@ const CustomerPortal = () => {
     { key: 'overview', label: 'Overview', icon: '🏠' },
     { key: 'dashboard', label: 'My subscriptions', icon: '📚' },
     { key: 'order', label: 'New subscription', icon: '✨' },
-    { key: 'addons', label: 'Google Workspace Addon', icon: '🧩' },
+    { key: 'addons', label: 'Google Workspace Subscriptions', icon: <GoogleWorkspaceIcon size={18} /> },
     { key: 'import', label: 'Import Workspace', icon: '📥' },
     { key: 'domains', label: 'Domains', icon: '🌐' },
     { key: 'ssl', label: 'SSL certificates', icon: '🔒' },
@@ -6766,8 +6776,10 @@ const CustomerAddons = () => {
   const TEAL = '#6e46eb';
   return (
     <div>
-      <h2 style={{ marginTop: 0 }}>🧩 Google Workspace Addon</h2>
-      <p style={{ color: '#6b7280' }}>Enhance your Google Workspace with add-ons like Gemini AI, AppSheet, Cloud Identity, and more. Add-ons attach to a domain that already has an active Workspace plan.</p>
+      <h2 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <GoogleWorkspaceIcon size={26} /> Google Workspace Subscriptions
+      </h2>
+      <p style={{ color: '#6b7280' }}>Enhance your Google Workspace with subscriptions like Gemini AI, AppSheet, Cloud Identity, and more. Subscriptions attach to a domain that already has an active Workspace plan.</p>
 
       {msg && <div style={{ padding: '12px 16px', borderRadius: 8, marginBottom: 16, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a' }}>{msg}</div>}
 
