@@ -9,8 +9,19 @@ FIRST_RUN="${1:-}"
 if [ "$FIRST_RUN" != "--first-run" ]; then
   echo "==> Pulling latest main…"
   git fetch origin main
+  # Safely stash local edits to tracked files (like backend/.env) before pull to prevent merge aborts
+  STASHED=0
+  if [ -n "$(git status --porcelain)" ]; then
+    echo "    (Safely stashing local VPS edits to .env and config files...)"
+    git stash --include-untracked || git stash
+    STASHED=1
+  fi
   git checkout main
-  git pull --ff-only origin main
+  git pull origin main
+  if [ "$STASHED" -eq 1 ]; then
+    echo "    (Restoring local VPS config...)"
+    git stash pop || true
+  fi
 fi
 
 echo "==> Installing dependencies…"

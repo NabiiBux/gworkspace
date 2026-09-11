@@ -29,6 +29,21 @@ function getMapsKey() {
   return _mapsKeyPromise;
 }
 
+// Crisp inline vector icons for payment methods (immune to missing system emoji fonts)
+export const CryptoIcon = ({ size = 15, color = 'currentColor', style = {} }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0, ...style }}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M10 8h4a2 2 0 0 1 0 4h-4m0 0h4.5a2 2 0 0 1 0 4H10m0-8v8m2-10v2m2-2v2m-2 16v2m2-2v2" />
+  </svg>
+);
+
+export const CardIcon = ({ size = 15, color = 'currentColor', style = {} }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0, ...style }}>
+    <rect x="2" y="5" width="20" height="14" rx="2" />
+    <line x1="2" y1="10" x2="22" y2="10" />
+  </svg>
+);
+
 // ====== EDIT THIS: allowed countries for the address autocomplete ======
 // Use lowercase 2-letter country codes. Examples:
 //   ['us']            -> United States only
@@ -4519,7 +4534,10 @@ const AdminPaymentsSection = () => {
           {/* NICKY */}
           <div style={card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0 }}>🪙 Crypto (Nicky)</h3>
+              <h3 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <CryptoIcon size={20} color={TEAL} />
+                <span>Crypto (Nicky)</span>
+              </h3>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
                 <input type="checkbox" checked={!!s.nickyEnabled} onChange={e => set('nickyEnabled', e.target.checked)} /> Enabled
               </label>
@@ -5496,12 +5514,12 @@ const CustomerPayments = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <strong style={{ fontSize: 20 }}>${Number(o.monthlyTotal || 0).toFixed(2)}</strong>
               <button onClick={() => pay(o._id, 'stripe')} disabled={!!busy}
-                style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: 'pointer' }}>
-                {busy === o._id + 'stripe' ? '…' : '💳 Pay by card'}
+                style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                {busy === o._id + 'stripe' ? '…' : <><CardIcon size={16} /><span>Pay by card</span></>}
               </button>
               <button onClick={() => pay(o._id, 'nicky')} disabled={!!busy}
-                style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: 'pointer' }}>
-                {busy === o._id + 'nicky' ? '…' : '🪙 Pay with crypto'}
+                style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                {busy === o._id + 'nicky' ? '…' : <><CryptoIcon size={16} color={TEAL} /><span>Pay with crypto</span></>}
               </button>
               {balance > 0 && (
                 <button onClick={() => pay(o._id, 'balance')} disabled={!!busy || balance + 1e-9 < Number(o.monthlyTotal || 0)}
@@ -5722,18 +5740,13 @@ const CustomerDomains = () => {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <strong style={{ fontSize: 18, color: TEAL }}>{r.price != null ? `$${Number(r.price).toFixed(2)}/yr` : ''}</strong>
                     <button onClick={() => buyDomain('stripe', r)} disabled={regBusy}
-                      style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
-                      {regBusy && buyingDomain === r.domain ? '…' : '💳 Buy'}
+                      style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {regBusy && buyingDomain === r.domain ? '…' : <><CardIcon size={14} /><span>Buy</span></>}
                     </button>
                     <button onClick={() => buyDomain('nicky', r)} disabled={regBusy}
                       title="Buy with Crypto"
-                      style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                      {regBusy && buyingDomain === r.domain ? '…' : (
-                        <>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M10 8h4a2 2 0 0 1 0 4h-4m0 0h4.5a2 2 0 0 1 0 4H10m0-8v8m2-10v2m2-2v2m-2 16v2m2-2v2"/></svg>
-                          <span>Crypto</span>
-                        </>
-                      )}
+                      style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {regBusy && buyingDomain === r.domain ? '…' : <><CryptoIcon size={14} color={TEAL} /><span>Crypto</span></>}
                     </button>
                   </div>
                 )}
@@ -5811,12 +5824,12 @@ const CustomerDomains = () => {
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button onClick={() => startTransfer('stripe')} disabled={xferBusy}
-            style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>
-            {xferBusy ? '…' : '💳 Transfer (pay by card)'}
+            style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {xferBusy ? '…' : <><CardIcon size={16} /><span>Transfer (pay by card)</span></>}
           </button>
           <button onClick={() => startTransfer('nicky')} disabled={xferBusy}
-            style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>
-            {xferBusy ? '…' : '🪙 Transfer (crypto)'}
+            style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {xferBusy ? '…' : <><CryptoIcon size={16} color={TEAL} /><span>Transfer (crypto)</span></>}
           </button>
         </div>
         {xferMsg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: xferMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: xferMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{xferMsg}</div>}
@@ -5859,8 +5872,8 @@ const CustomerDomains = () => {
               <input value={sslForDomain} onChange={e => setSslForDomain(e.target.value)} placeholder="for domain (optional)" style={{ height: 44, borderRadius: 10, border: '1px solid #d8dbe6', padding: '0 14px' }} />
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button onClick={() => buySsl('stripe')} disabled={sslBusy} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>{sslBusy ? '…' : '💳 Buy SSL (card)'}</button>
-              <button onClick={() => buySsl('nicky')} disabled={sslBusy} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>{sslBusy ? '…' : '🪙 Buy SSL (crypto)'}</button>
+              <button onClick={() => buySsl('stripe')} disabled={sslBusy} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{sslBusy ? '…' : <><CardIcon size={16} /><span>Buy SSL (card)</span></>}</button>
+              <button onClick={() => buySsl('nicky')} disabled={sslBusy} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{sslBusy ? '…' : <><CryptoIcon size={16} color={TEAL} /><span>Buy SSL (crypto)</span></>}</button>
             </div>
           </>
         )}
@@ -6554,8 +6567,8 @@ const CustomerSubscriptions = () => {
               {seatMsg && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{seatMsg}</div>}
 
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <button onClick={() => doSeatChange('stripe')} disabled={seatBusy || added < 1} style={{ background: '#6e46eb', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{seatBusy ? '…' : '💳 Pay by card'}</button>
-                <button onClick={() => doSeatChange('nicky')} disabled={seatBusy || added < 1} style={{ background: '#fff', color: '#6e46eb', border: '1px solid #6e46eb', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{seatBusy ? '…' : '🪙 Crypto'}</button>
+                <button onClick={() => doSeatChange('stripe')} disabled={seatBusy || added < 1} style={{ background: '#6e46eb', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{seatBusy ? '…' : <><CardIcon size={16} /><span>Pay by card</span></>}</button>
+                <button onClick={() => doSeatChange('nicky')} disabled={seatBusy || added < 1} style={{ background: '#fff', color: '#6e46eb', border: '1px solid #6e46eb', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{seatBusy ? '…' : <><CryptoIcon size={16} color="#6e46eb" /><span>Crypto</span></>}</button>
                 <button onClick={() => setSeatSub(null)} disabled={seatBusy} style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}>Cancel</button>
               </div>
               <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 10, marginBottom: 0 }}>After payment, the new user licenses are applied to your domain automatically. Create the users in your Google Admin console.</p>
@@ -6573,8 +6586,8 @@ const CustomerSubscriptions = () => {
             <p style={{ color: '#374151', fontSize: 14 }}>Renewing keeps your subscription active and moves your next renewal date forward by one month. Choose how to pay:</p>
             {renewMsg && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{renewMsg}</div>}
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button onClick={() => doRenew('stripe')} disabled={renewBusy} style={{ background: '#6e46eb', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{renewBusy ? '…' : '💳 Pay by card'}</button>
-              <button onClick={() => doRenew('nicky')} disabled={renewBusy} style={{ background: '#fff', color: '#6e46eb', border: '1px solid #6e46eb', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer' }}>{renewBusy ? '…' : '🪙 Pay with crypto'}</button>
+              <button onClick={() => doRenew('stripe')} disabled={renewBusy} style={{ background: '#6e46eb', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{renewBusy ? '…' : <><CardIcon size={16} /><span>Pay by card</span></>}</button>
+              <button onClick={() => doRenew('nicky')} disabled={renewBusy} style={{ background: '#fff', color: '#6e46eb', border: '1px solid #6e46eb', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{renewBusy ? '…' : <><CryptoIcon size={16} color="#6e46eb" /><span>Pay with crypto</span></>}</button>
               <button onClick={() => setRenewing(null)} disabled={renewBusy} style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}>Cancel</button>
             </div>
           </div>
@@ -6653,8 +6666,8 @@ const CustomerSsl = () => {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button onClick={() => buy('stripe')} disabled={busy} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 20px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '💳 Buy by card'}</button>
-              <button onClick={() => buy('nicky')} disabled={busy} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 20px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '🪙 Buy with crypto'}</button>
+              <button onClick={() => buy('stripe')} disabled={busy} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 20px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{busy ? '…' : <><CardIcon size={16} /><span>Buy by card</span></>}</button>
+              <button onClick={() => buy('nicky')} disabled={busy} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 20px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{busy ? '…' : <><CryptoIcon size={16} color={TEAL} /><span>Buy with crypto</span></>}</button>
             </div>
             {msg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</div>}
           </>
@@ -6836,8 +6849,8 @@ const CustomerAddons = () => {
             <p style={{ color: '#475569', fontSize: 14 }}>For <strong>{voicePick.domain}</strong>{voicePick.plan.price != null ? ` — $${Number(voicePick.plan.price).toFixed(2)}/mo` : ''}. {voicePick.mode === 'change' ? 'Your current Voice plan will be cancelled and this one started (one license). Pay the new plan price:' : 'Choose how to pay:'}</p>
             {voiceMsg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: '#fef2f2', color: '#b42318', fontSize: 13 }}>{voiceMsg}</div>}
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button onClick={() => voiceCheckout('stripe')} disabled={voiceBusy} className="btn btn-primary">{voiceBusy ? '…' : '💳 Pay by card'}</button>
-              <button onClick={() => voiceCheckout('nicky')} disabled={voiceBusy} className="btn btn-secondary">🪙 Crypto</button>
+              <button onClick={() => voiceCheckout('stripe')} disabled={voiceBusy} className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{voiceBusy ? '…' : <><CardIcon size={16} /><span>Pay by card</span></>}</button>
+              <button onClick={() => voiceCheckout('nicky')} disabled={voiceBusy} className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><CryptoIcon size={16} /><span>Crypto</span></button>
               <button onClick={() => voiceCheckout('balance')} disabled={voiceBusy} className="btn btn-secondary">💰 Balance</button>
             </div>
             <button onClick={() => setVoicePick(null)} disabled={voiceBusy} className="btn btn-secondary" style={{ width: '100%', marginTop: 14 }}>Cancel</button>
@@ -6870,8 +6883,8 @@ const CustomerAddons = () => {
                   {picking.name} — <strong style={{ color: TEAL }}>${picking.price}/user/mo</strong> <span style={{ color: '#6b7280' }}>+ tax</span>
                 </div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  <button onClick={() => checkout('stripe')} disabled={busy || !chosenDomain} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '💳 Pay by card'}</button>
-                  <button onClick={() => checkout('nicky')} disabled={busy || !chosenDomain} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '🪙 Crypto'}</button>
+                  <button onClick={() => checkout('stripe')} disabled={busy || !chosenDomain} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{busy ? '…' : <><CardIcon size={16} /><span>Pay by card</span></>}</button>
+                  <button onClick={() => checkout('nicky')} disabled={busy || !chosenDomain} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{busy ? '…' : <><CryptoIcon size={16} color={TEAL} /><span>Crypto</span></>}</button>
                   <button onClick={() => setPicking(null)} disabled={busy} style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}>Cancel</button>
                 </div>
               </>
@@ -9991,11 +10004,11 @@ function WorkspaceOrderFlow() {
             </p>
             {provisionMsg && <div className="wof-verify-msg">{provisionMsg}</div>}
             <div className="wof-actions" style={{ gap: 12 }}>
-              <button type="button" className="wof-btn primary" onClick={() => payNow('stripe')} disabled={provisioning}>
-                {provisioning ? 'Starting…' : '💳 Pay by card'}
+              <button type="button" className="wof-btn primary" onClick={() => payNow('stripe')} disabled={provisioning} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                {provisioning ? 'Starting…' : <><CardIcon size={16} /><span>Pay by card</span></>}
               </button>
-              <button type="button" className="wof-btn" onClick={() => payNow('nicky')} disabled={provisioning}>
-                {provisioning ? 'Starting…' : '🪙 Pay with crypto'}
+              <button type="button" className="wof-btn" onClick={() => payNow('nicky')} disabled={provisioning} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                {provisioning ? 'Starting…' : <><CryptoIcon size={16} /><span>Pay with crypto</span></>}
               </button>
             </div>
             <p className="wof-muted" style={{ fontSize: 13, marginTop: 12 }}>
@@ -10349,8 +10362,8 @@ const CustomerWorkspaceImport = () => {
             Monthly total: <strong style={{ color: TEAL, fontSize: 18 }}>${monthly.toFixed(2)}</strong> <span style={{ color: MUTE, fontSize: 13 }}>+ tax (for {seats} seat{seats == 1 ? '' : 's'})</span>
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button onClick={() => submit('stripe')} disabled={busy} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 22px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '💳 Pay & complete transfer'}</button>
-            <button onClick={() => submit('nicky')} disabled={busy} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '11px 22px', fontWeight: 700, cursor: 'pointer' }}>{busy ? '…' : '🪙 Pay with crypto'}</button>
+            <button onClick={() => submit('stripe')} disabled={busy} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 22px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{busy ? '…' : <><CardIcon size={16} /><span>Pay & complete transfer</span></>}</button>
+            <button onClick={() => submit('nicky')} disabled={busy} style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '11px 22px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{busy ? '…' : <><CryptoIcon size={16} color={TEAL} /><span>Pay with crypto</span></>}</button>
           </div>
           {msg && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318' }}>{msg}</div>}
         </div>
@@ -10434,13 +10447,13 @@ const CustomerHosting = () => {
                   <ul style={{ paddingLeft: 18, fontSize: 14, color: '#374151' }}>{p.features.map((f, i) => <li key={i} style={{ marginBottom: 4 }}>{f}</li>)}</ul>
                 )}
                 <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-                  <button onClick={() => buy(p, 'stripe')} disabled={busy === p.planId} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>{busy === p.planId ? '…' : 'Buy (card)'}</button>
+                  <button onClick={() => buy(p, 'stripe')} disabled={busy === p.planId} style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontWeight: 700, cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }}>{busy === p.planId ? '…' : <><CardIcon size={14} /><span>Buy (card)</span></>}</button>
                   <button onClick={() => buy(p, 'nicky')} disabled={busy === p.planId}
                     title="Buy with Crypto"
-                    style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '9px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 8, padding: '9px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     {busy === p.planId ? '…' : (
                       <>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M10 8h4a2 2 0 0 1 0 4h-4m0 0h4.5a2 2 0 0 1 0 4H10m0-8v8m2-10v2m2-2v2m-2 16v2m2-2v2"/></svg>
+                        <CryptoIcon size={14} color={TEAL} />
                         <span>Buy (crypto)</span>
                       </>
                     )}
