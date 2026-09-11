@@ -1361,34 +1361,50 @@ div:has(> .data-table),
   gap: 12px !important;
   width: 100% !important;
   text-align: left !important;
-  padding: 10px 14px !important;
-  margin-top: 4px !important;
-  border-radius: 10px !important;
+  padding: 8px 10px !important;
+  margin-top: 3px !important;
+  border-radius: 12px !important;
   cursor: pointer !important;
-  border: none !important;
+  border: 1px solid transparent !important;
   font-size: 14px !important;
   font-weight: 500 !important;
   transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
   outline: none !important;
   white-space: nowrap !important;
+  background: transparent !important;
+  color: #334155 !important;
 }
 
 .cp-nav-btn:hover:not(.active) {
   background-color: #f8fafc !important;
-  color: #1e293b !important;
+  color: #0f172a !important;
 }
 
 .cp-nav-btn.active {
-  box-shadow: 0 4px 12px rgba(110, 70, 235, 0.2) !important;
+  background: #f5f3ff !important;
+  color: #6e46eb !important;
+  font-weight: 600 !important;
+  border-color: #ede9fe !important;
+  box-shadow: 0 1px 4px rgba(110, 70, 235, 0.08) !important;
 }
 
-.cp-nav-icon-wrap {
+.cp-nav-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
   flex-shrink: 0;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.cp-nav-btn:hover .cp-nav-badge {
+  transform: scale(1.05);
+}
+
+.cp-nav-btn.active .cp-nav-badge {
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.06);
 }
 
 /* Mobile & Tablet optimizations for Customer Portal */

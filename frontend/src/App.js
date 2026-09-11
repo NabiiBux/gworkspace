@@ -54,84 +54,96 @@ export const GoogleWorkspaceIcon = ({ size = 18, style = {} }) => (
   </svg>
 );
 
-// High-fidelity Feather-style vector navigation icons for customer portal
+/// High-fidelity full-color vector navigation icons for customer portal
 export const NavIcons = {
-  Overview: ({ size = 18, color = 'currentColor' }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-      <polyline points="9 22 9 12 15 12 15 22" />
+  Overview: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M3 10.5L12 3l9 7.5V20a2 2 0 01-2 2H5a2 2 0 01-2-2v-9.5z" fill="#4f46e5" fillOpacity="0.18" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M9 22V12h6v10" fill="#818cf8" fillOpacity="0.35" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="7.5" r="1.5" fill="#f59e0b" />
     </svg>
   ),
-  Subscriptions: ({ size = 18, color = 'currentColor' }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+  Subscriptions: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <rect x="2" y="7" width="20" height="14" rx="3" fill="#7c3aed" fillOpacity="0.18" stroke="#7c3aed" strokeWidth="2" />
+      <path d="M6 3h12a2 2 0 012 2v2H4V5a2 2 0 012-2z" fill="#a78bfa" fillOpacity="0.45" stroke="#7c3aed" strokeWidth="1.8" />
+      <path d="M7 14l3 3 7-7" stroke="#7c3aed" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
-  NewSubscription: ({ size = 18, color = 'currentColor' }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="10" />
-      <line x1="12" y1="8" x2="12" y2="16" />
-      <line x1="8" y1="12" x2="16" y2="12" />
+  NewSubscription: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="10" fill="#059669" fillOpacity="0.18" stroke="#059669" strokeWidth="2" />
+      <path d="M12 7v10M7 12h10" stroke="#059669" strokeWidth="2.4" strokeLinecap="round" />
+      <circle cx="17.5" cy="6.5" r="2.2" fill="#f59e0b" />
     </svg>
   ),
-  Import: ({ size = 18, color = 'currentColor' }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="7 10 12 15 17 10" />
-      <line x1="12" y1="15" x2="12" y2="3" />
+  Import: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M4 14.899A7 7 0 1115.71 8h1.79a4.5 4.5 0 012.5 8.242" fill="#0284c7" fillOpacity="0.16" stroke="#0284c7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M12 12v9m0 0l-3-3m3 3l3-3" stroke="#0284c7" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
-  Domains: ({ size = 18, color = 'currentColor' }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="10" />
-      <line x1="2" y1="12" x2="22" y2="12" />
-      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+  Domains: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="10" fill="#0891b2" fillOpacity="0.18" stroke="#0891b2" strokeWidth="2" />
+      <path d="M2 12h20" stroke="#0891b2" strokeWidth="1.8" />
+      <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" fill="#06b6d4" fillOpacity="0.3" stroke="#0891b2" strokeWidth="1.8" />
     </svg>
   ),
-  SSL: ({ size = 18, color = 'currentColor' }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  SSL: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M12 2l8 4v6c0 5.25-3.4 10.15-8 11.5C7.4 22.15 4 17.25 4 12V6l8-4z" fill="#16a34a" fillOpacity="0.18" stroke="#16a34a" strokeWidth="2" strokeLinejoin="round" />
+      <rect x="9" y="11" width="6" height="5" rx="1.5" fill="#f59e0b" stroke="#d97706" strokeWidth="1.2" />
+      <path d="M10 11V9a2 2 0 114 0v2" stroke="#d97706" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   ),
-  Hosting: ({ size = 18, color = 'currentColor' }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-      <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-      <line x1="6" y1="6" x2="6.01" y2="6" strokeWidth="3" />
-      <line x1="6" y1="18" x2="6.01" y2="18" strokeWidth="3" />
+  Hosting: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <rect x="2" y="3" width="20" height="8" rx="2.5" fill="#2563eb" fillOpacity="0.16" stroke="#2563eb" strokeWidth="2" />
+      <rect x="2" y="13" width="20" height="8" rx="2.5" fill="#2563eb" fillOpacity="0.16" stroke="#2563eb" strokeWidth="2" />
+      <circle cx="6" cy="7" r="1.5" fill="#22c55e" />
+      <circle cx="10" cy="7" r="1.5" fill="#38bdf8" />
+      <circle cx="6" cy="17" r="1.5" fill="#22c55e" />
+      <circle cx="10" cy="17" r="1.5" fill="#38bdf8" />
+      <line x1="15" y1="7" x2="18" y2="7" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" />
+      <line x1="15" y1="17" x2="18" y2="17" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" />
     </svg>
   ),
-  Voice: ({ size = 18, color = 'currentColor' }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+  Voice: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z" fill="#0f9d58" fillOpacity="0.18" stroke="#0f9d58" strokeWidth="2" strokeLinejoin="round" />
+      <path d="M14 3.5a6 6 0 016 6M14 7a2.5 2.5 0 012.5 2.5" stroke="#34a853" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   ),
-  Payments: ({ size = 18, color = 'currentColor' }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
-      <line x1="1" y1="10" x2="23" y2="10" />
+  Payments: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <rect x="2" y="4" width="20" height="16" rx="3" fill="#6366f1" fillOpacity="0.18" stroke="#6366f1" strokeWidth="2" />
+      <path d="M2 9.5h20" stroke="#4f46e5" strokeWidth="2" />
+      <rect x="5" y="13.5" width="4.5" height="3.5" rx="1" fill="#f59e0b" stroke="#d97706" strokeWidth="1" />
+      <circle cx="16.5" cy="15" r="1.5" fill="#818cf8" />
     </svg>
   ),
-  Balance: ({ size = 18, color = 'currentColor' }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4" />
-      <path d="M4 6v12c0 1.1.9 2 2 2h14v-4" />
-      <circle cx="18" cy="12" r="2" />
+  Balance: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <rect x="2" y="6" width="20" height="14" rx="3" fill="#f59e0b" fillOpacity="0.18" stroke="#d97706" strokeWidth="2" />
+      <path d="M16 13a2 2 0 100-4 2 2 0 000 4z" fill="#f59e0b" stroke="#b45309" strokeWidth="1.5" />
+      <path d="M4 6V4a2 2 0 012-2h12a2 2 0 012 2v2" stroke="#d97706" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   ),
-  Support: ({ size = 18, color = 'currentColor' }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="10" />
-      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-      <line x1="12" y1="17" x2="12.01" y2="17" strokeWidth="3" />
+  Support: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="10" fill="#e11d48" fillOpacity="0.16" stroke="#e11d48" strokeWidth="2" />
+      <circle cx="12" cy="12" r="4" fill="#ffffff" stroke="#e11d48" strokeWidth="2" />
+      <line x1="4.93" y1="4.93" x2="9.17" y2="9.17" stroke="#e11d48" strokeWidth="2" strokeLinecap="round" />
+      <line x1="14.83" y1="14.83" x2="19.07" y2="19.07" stroke="#e11d48" strokeWidth="2" strokeLinecap="round" />
+      <line x1="14.83" y1="9.17" x2="19.07" y2="4.93" stroke="#e11d48" strokeWidth="2" strokeLinecap="round" />
+      <line x1="4.93" y1="19.07" x2="9.17" y2="14.83" stroke="#e11d48" strokeWidth="2" strokeLinecap="round" />
     </svg>
   ),
-  Settings: ({ size = 18, color = 'currentColor' }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  Settings: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="3" fill="#475569" fillOpacity="0.25" stroke="#475569" strokeWidth="2" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="#475569" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
   Menu: ({ size = 20, color = 'currentColor' }) => (
@@ -5210,19 +5222,19 @@ const CustomerPortal = () => {
   }, []);
 
   const navItems = [
-    { key: 'overview', label: 'Overview', icon: (active) => <NavIcons.Overview size={18} color={active ? '#fff' : '#64748b'} /> },
-    { key: 'dashboard', label: 'My subscriptions', icon: (active) => <NavIcons.Subscriptions size={18} color={active ? '#fff' : '#64748b'} /> },
-    { key: 'order', label: 'New subscription', icon: (active) => <NavIcons.NewSubscription size={18} color={active ? '#fff' : '#64748b'} /> },
-    { key: 'addons', label: 'Google Workspace Subscriptions', icon: () => <GoogleWorkspaceIcon size={18} /> },
-    { key: 'import', label: 'Import Workspace', icon: (active) => <NavIcons.Import size={18} color={active ? '#fff' : '#64748b'} /> },
-    { key: 'domains', label: 'Domains', icon: (active) => <NavIcons.Domains size={18} color={active ? '#fff' : '#64748b'} /> },
-    { key: 'ssl', label: 'SSL certificates', icon: (active) => <NavIcons.SSL size={18} color={active ? '#fff' : '#64748b'} /> },
-    { key: 'hosting', label: 'Hosting', icon: (active) => <NavIcons.Hosting size={18} color={active ? '#fff' : '#64748b'} /> },
-    { key: 'voice', label: 'Google Voice', icon: (active) => <NavIcons.Voice size={18} color={active ? '#fff' : '#64748b'} /> },
-    { key: 'payments', label: 'Payments', icon: (active) => <NavIcons.Payments size={18} color={active ? '#fff' : '#64748b'} /> },
-    { key: 'balance', label: 'Balance', icon: (active) => <NavIcons.Balance size={18} color={active ? '#fff' : '#64748b'} /> },
-    { key: 'support', label: 'Support', icon: (active) => <NavIcons.Support size={18} color={active ? '#fff' : '#64748b'} /> },
-    { key: 'settings', label: 'Account settings', icon: (active) => <NavIcons.Settings size={18} color={active ? '#fff' : '#64748b'} /> },
+    { key: 'overview', label: 'Overview', icon: <NavIcons.Overview size={20} />, bg: '#eef2ff', border: '#e0e7ff' },
+    { key: 'dashboard', label: 'My subscriptions', icon: <NavIcons.Subscriptions size={20} />, bg: '#f5f3ff', border: '#ede9fe' },
+    { key: 'order', label: 'New subscription', icon: <NavIcons.NewSubscription size={20} />, bg: '#ecfdf5', border: '#d1fae5' },
+    { key: 'addons', label: 'Google Workspace Subscriptions', icon: <GoogleWorkspaceIcon size={20} />, bg: '#ffffff', border: '#e2e8f0', shadow: true },
+    { key: 'import', label: 'Import Workspace', icon: <NavIcons.Import size={20} />, bg: '#f0f9ff', border: '#e0f2fe' },
+    { key: 'domains', label: 'Domains', icon: <NavIcons.Domains size={20} />, bg: '#ecfeff', border: '#cffafe' },
+    { key: 'ssl', label: 'SSL certificates', icon: <NavIcons.SSL size={20} />, bg: '#f0fdf4', border: '#dcfce7' },
+    { key: 'hosting', label: 'Hosting', icon: <NavIcons.Hosting size={20} />, bg: '#eff6ff', border: '#dbeafe' },
+    { key: 'voice', label: 'Google Voice', icon: <NavIcons.Voice size={20} />, bg: '#f0fdf4', border: '#dcfce7' },
+    { key: 'payments', label: 'Payments', icon: <NavIcons.Payments size={20} />, bg: '#faf5ff', border: '#f3e8ff' },
+    { key: 'balance', label: 'Balance', icon: <NavIcons.Balance size={20} />, bg: '#fffbeb', border: '#fef3c7' },
+    { key: 'support', label: 'Support', icon: <NavIcons.Support size={20} />, bg: '#fff1f2', border: '#ffe4e6' },
+    { key: 'settings', label: 'Account settings', icon: <NavIcons.Settings size={20} />, bg: '#f8fafc', border: '#e2e8f0' },
   ];
 
   const name = user?.username || (user?.businessEmail || '').split('@')[0];
@@ -5258,14 +5270,18 @@ const CustomerPortal = () => {
                   key={it.key}
                   onClick={() => setSection(it.key)}
                   className={`cp-nav-btn ${active ? 'active' : ''}`}
-                  style={{
-                    background: active ? TEAL : 'transparent',
-                    color: active ? '#ffffff' : '#334155',
-                    fontWeight: active ? 600 : 500,
-                  }}
                 >
-                  <span className="cp-nav-icon-wrap">{typeof it.icon === 'function' ? it.icon(active) : it.icon}</span>
-                  <span>{it.label}</span>
+                  <span
+                    className="cp-nav-badge"
+                    style={{
+                      background: it.bg,
+                      border: `1px solid ${it.border}`,
+                      boxShadow: it.shadow ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                    }}
+                  >
+                    {it.icon}
+                  </span>
+                  <span style={{ flex: 1, whiteSpace: 'nowrap' }}>{it.label}</span>
                 </button>
               );
             })}
