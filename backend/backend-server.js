@@ -124,6 +124,8 @@ const CustomerSchema = new mongoose.Schema({
   cardPmId: String,        // default Stripe PaymentMethod id used for off-session charges
   cardBrand: String,
   cardLast4: String,
+  cardExpMonth: Number,
+  cardExpYear: Number,
   cardAddedAt: Date,
   // Which method created/owns the login: 'email' | 'google' | 'microsoft' | 'facebook'.
   authProvider: { type: String, default: 'email' },
@@ -2593,16 +2595,70 @@ app.post('/api/customer/subscriptions/change-seats', authenticateCustomer, async
     const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
     const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
 
+    // 1-Click instant payment using saved card
+    if (method === 'saved_card') {
+      if (!me.stripeCustomerId || !me.cardPmId) {
+        return res.status(400).json({ error: 'No saved payment card found. Please pay by card first to save your payment information.', needCard: true });
+      }
+      let stripe; try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const sd = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (sd?.stripeMode || 'test') !== 'live';
+      payment.method = 'stripe';
+
+      try {
+        const pi = await stripe.paymentIntents.create({
+          amount: Math.round(amount * 100),
+          currency: 'usd',
+          customer: me.stripeCustomerId,
+          payment_method: me.cardPmId,
+          off_session: true,
+          confirm: true,
+          description: orderDesc,
+          metadata: { paymentId: String(payment._id), orderType: 'seat_change', portalCustomerId: String(me._id) },
+        });
+
+        if (pi.status === 'succeeded') {
+          payment.status = 'paid';
+          payment.paidAt = new Date();
+          payment.providerRef = pi.id;
+          await payment.save();
+          await markPaidAndProvision(payment);
+          return res.json({
+            paid: true,
+            instant: true,
+            addedSeats,
+            newSeats: wantSeats,
+            cardBrand: me.cardBrand,
+            cardLast4: me.cardLast4,
+            message: `Seat upgrade confirmed using your saved ${me.cardBrand ? me.cardBrand.toUpperCase() : 'Card'} (•••• ${me.cardLast4 || 'card'})!`,
+          });
+        } else {
+          payment.status = 'failed';
+          await payment.save();
+          return res.status(400).json({ error: `Payment not completed (status: ${pi.status}). Please try another payment method.` });
+        }
+      } catch (err) {
+        payment.status = 'failed';
+        await payment.save();
+        return res.status(400).json({ error: `Card charge declined: ${err.message}` });
+      }
+    }
+
     if (payment.method === 'stripe') {
       let stripe; try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
       const sd = await PaymentSettings.findOne({ singleton: 'main' });
       payment.isTest = (sd?.stripeMode || 'test') !== 'live'; await payment.save();
+      const stripeCustomerId = await getOrCreateStripeCustomer(me, stripe);
       const line_items = [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(taxed.subtotal * 100) }, quantity: 1 }];
       if (taxed.fee > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) }, quantity: 1 });
       if (taxed.tax > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) }, quantity: 1 });
       const session = await stripe.checkout.sessions.create({
-        mode: 'payment', line_items, success_url: successUrl, cancel_url: cancelUrl,
-        client_reference_id: String(payment._id), metadata: { paymentId: String(payment._id), orderType: 'seat_change' },
+        mode: 'payment',
+        customer: stripeCustomerId || undefined,
+        payment_intent_data: { setup_future_usage: 'off_session' },
+        line_items, success_url: successUrl, cancel_url: cancelUrl,
+        client_reference_id: String(payment._id),
+        metadata: { paymentId: String(payment._id), orderType: 'seat_change', portalCustomerId: String(me._id) },
       });
       payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
       return res.json({ checkoutUrl: session.url, paymentId: payment._id, addedSeats, newSeats: wantSeats });
@@ -2675,16 +2731,68 @@ app.post('/api/customer/subscriptions/renew', authenticateCustomer, async (req, 
     const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
     const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
 
+    // 1-Click instant renewal using saved card
+    if (method === 'saved_card') {
+      if (!me.stripeCustomerId || !me.cardPmId) {
+        return res.status(400).json({ error: 'No saved payment card found. Please pay with a card first to save your payment information.', needCard: true });
+      }
+      let stripe; try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const sd = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (sd?.stripeMode || 'test') !== 'live';
+      payment.method = 'stripe';
+
+      try {
+        const pi = await stripe.paymentIntents.create({
+          amount: Math.round(amount * 100),
+          currency: 'usd',
+          customer: me.stripeCustomerId,
+          payment_method: me.cardPmId,
+          off_session: true,
+          confirm: true,
+          description: orderDesc,
+          metadata: { paymentId: String(payment._id), orderType: 'workspace', renewal: 'true', portalCustomerId: String(me._id) },
+        });
+
+        if (pi.status === 'succeeded') {
+          payment.status = 'paid';
+          payment.paidAt = new Date();
+          payment.providerRef = pi.id;
+          await payment.save();
+          await markPaidAndProvision(payment);
+          return res.json({
+            paid: true,
+            instant: true,
+            cardBrand: me.cardBrand,
+            cardLast4: me.cardLast4,
+            message: `Renewed successfully using your saved ${me.cardBrand ? me.cardBrand.toUpperCase() : 'Card'} (•••• ${me.cardLast4 || 'card'})!`,
+          });
+        } else {
+          payment.status = 'failed';
+          await payment.save();
+          return res.status(400).json({ error: `Renewal payment failed (status: ${pi.status}). Please try another payment method.` });
+        }
+      } catch (err) {
+        payment.status = 'failed';
+        await payment.save();
+        return res.status(400).json({ error: `Card charge declined: ${err.message}` });
+      }
+    }
+
     if (payment.method === 'stripe') {
       let stripe; try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
       const sd = await PaymentSettings.findOne({ singleton: 'main' });
       payment.isTest = (sd?.stripeMode || 'test') !== 'live'; await payment.save();
+      const stripeCustomerId = await getOrCreateStripeCustomer(me, stripe);
       const line_items = [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(taxed.subtotal * 100) }, quantity: 1 }];
       if (taxed.fee > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) }, quantity: 1 });
       if (taxed.tax > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) }, quantity: 1 });
       const session = await stripe.checkout.sessions.create({
-        mode: 'payment', line_items, success_url: successUrl, cancel_url: cancelUrl,
-        client_reference_id: String(payment._id), metadata: { paymentId: String(payment._id), orderType: 'workspace', renewal: 'true' },
+        mode: 'payment',
+        customer: stripeCustomerId || undefined,
+        payment_intent_data: { setup_future_usage: 'off_session' },
+        line_items, success_url: successUrl, cancel_url: cancelUrl,
+        client_reference_id: String(payment._id),
+        metadata: { paymentId: String(payment._id), orderType: 'workspace', renewal: 'true', portalCustomerId: String(me._id) },
       });
       payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
       return res.json({ checkoutUrl: session.url, paymentId: payment._id });
@@ -2714,17 +2822,13 @@ app.get('/api/customer/billing/card', authenticateCustomer, async (req, res) => 
   try {
     const me = await Customer.findById(req.customerId);
     if (!me) return res.status(404).json({ error: 'Customer not found.' });
-    if (me.stripeCustomerId && !me.cardPmId) {
+    if (me.stripeCustomerId && (!me.cardPmId || !me.cardExpMonth)) {
       try {
         const stripe = await getStripeForMode();
         const pms = await stripe.paymentMethods.list({ customer: me.stripeCustomerId, type: 'card', limit: 1 });
         const pm = pms?.data?.[0];
         if (pm) {
-          me.cardPmId = pm.id;
-          me.cardBrand = pm.card?.brand || null;
-          me.cardLast4 = pm.card?.last4 || null;
-          me.cardAddedAt = new Date();
-          await me.save();
+          await saveCustomerCardFromPm(me, pm, stripe);
         }
       } catch (_) { }
     }
@@ -2732,6 +2836,8 @@ app.get('/api/customer/billing/card', authenticateCustomer, async (req, res) => 
       hasCard: !!(me.stripeCustomerId && me.cardPmId),
       brand: me.cardBrand || null,
       last4: me.cardLast4 || null,
+      expMonth: me.cardExpMonth || null,
+      expYear: me.cardExpYear || null,
       addedAt: me.cardAddedAt || null,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -2745,19 +2851,11 @@ app.post('/api/customer/billing/setup-card', authenticateCustomer, async (req, r
     let stripe;
     try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
 
-    if (!me.stripeCustomerId) {
-      const sc = await stripe.customers.create({
-        email: me.businessEmail || undefined,
-        name: [me.firstName, me.lastName].filter(Boolean).join(' ') || me.username || undefined,
-        metadata: { portalCustomerId: String(me._id) },
-      });
-      me.stripeCustomerId = sc.id;
-      await me.save();
-    }
+    const stripeCustomerId = await getOrCreateStripeCustomer(me, stripe);
 
     const session = await stripe.checkout.sessions.create({
       mode: 'setup',
-      customer: me.stripeCustomerId,
+      customer: stripeCustomerId,
       payment_method_types: ['card'],
       success_url: `${FRONTEND_URL}/?card=saved`,
       cancel_url: `${FRONTEND_URL}/?card=cancelled`,
@@ -2777,7 +2875,7 @@ app.post('/api/customer/billing/remove-card', authenticateCustomer, async (req, 
     if (me.cardPmId) {
       try { const stripe = await getStripeForMode(); await stripe.paymentMethods.detach(me.cardPmId); } catch (_) { }
     }
-    me.cardPmId = null; me.cardBrand = null; me.cardLast4 = null; me.cardAddedAt = null;
+    me.cardPmId = null; me.cardBrand = null; me.cardLast4 = null; me.cardExpMonth = null; me.cardExpYear = null; me.cardAddedAt = null;
     await me.save();
     // Without a card auto-renewal cannot charge — turn the flags off to keep the UI truthful.
     await Subscription.updateMany({ customerId: me._id }, { $set: { autoRenew: false, updatedAt: new Date() } });
@@ -2873,21 +2971,71 @@ app.post('/api/customer/domains/renew', authenticateCustomer, async (req, res) =
     const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
     const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
 
+    // 1-Click instant renewal using saved card
+    if (method === 'saved_card') {
+      if (!me.stripeCustomerId || !me.cardPmId) {
+        return res.status(400).json({ error: 'No saved payment card found. Please pay with a card first to save your payment information.', needCard: true });
+      }
+      let stripe; try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const settingsDoc = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (settingsDoc?.stripeMode || 'test') !== 'live';
+      payment.method = 'stripe';
+
+      try {
+        const pi = await stripe.paymentIntents.create({
+          amount: Math.round(amount * 100),
+          currency: 'usd',
+          customer: me.stripeCustomerId,
+          payment_method: me.cardPmId,
+          off_session: true,
+          confirm: true,
+          description: orderDesc,
+          metadata: { paymentId: String(payment._id), orderId: String(order._id), orderType: 'domain', portalCustomerId: String(me._id) },
+        });
+
+        if (pi.status === 'succeeded') {
+          payment.status = 'paid';
+          payment.paidAt = new Date();
+          payment.providerRef = pi.id;
+          await payment.save();
+          await markPaidAndProvision(payment);
+          return res.json({
+            paid: true,
+            instant: true,
+            cardBrand: me.cardBrand,
+            cardLast4: me.cardLast4,
+            message: `Domain ${dom} renewed successfully using your saved ${me.cardBrand ? me.cardBrand.toUpperCase() : 'Card'} (•••• ${me.cardLast4 || 'card'})!`,
+          });
+        } else {
+          payment.status = 'failed';
+          await payment.save();
+          return res.status(400).json({ error: `Renewal payment failed (status: ${pi.status}). Please try another payment method.` });
+        }
+      } catch (err) {
+        payment.status = 'failed';
+        await payment.save();
+        return res.status(400).json({ error: `Card charge declined: ${err.message}` });
+      }
+    }
+
     if (payment.method === 'stripe') {
       let stripe;
       try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
       const settingsDoc = await PaymentSettings.findOne({ singleton: 'main' });
       payment.isTest = (settingsDoc?.stripeMode || 'test') !== 'live';
       await payment.save();
+      const stripeCustomerId = await getOrCreateStripeCustomer(me, stripe);
       const rline = [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(taxed.subtotal * 100) }, quantity: 1 }];
       if (taxed.fee > 0) rline.push({ price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) }, quantity: 1 });
       if (taxed.tax > 0) rline.push({ price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) }, quantity: 1 });
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
+        customer: stripeCustomerId || undefined,
+        payment_intent_data: { setup_future_usage: 'off_session' },
         line_items: rline,
         success_url: successUrl, cancel_url: cancelUrl,
         client_reference_id: String(payment._id),
-        metadata: { paymentId: String(payment._id), orderId: String(order._id), orderType: 'domain' },
+        metadata: { paymentId: String(payment._id), orderId: String(order._id), orderType: 'domain', portalCustomerId: String(me._id) },
       });
       payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
       return res.json({ checkoutUrl: session.url, paymentId: payment._id });
@@ -2946,18 +3094,68 @@ app.post('/api/customer/domains/transfer', authenticateCustomer, async (req, res
     const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}&type=domain&domain=${encodeURIComponent(dom)}`;
     const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
 
+    // 1-Click instant payment using saved card
+    if (method === 'saved_card') {
+      if (!me.stripeCustomerId || !me.cardPmId) {
+        return res.status(400).json({ error: 'No saved payment card found. Please pay with a card first to save your payment information.', needCard: true });
+      }
+      let stripe; try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const settingsDoc = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (settingsDoc?.stripeMode || 'test') !== 'live';
+      payment.method = 'stripe';
+
+      try {
+        const pi = await stripe.paymentIntents.create({
+          amount: Math.round(amount * 100),
+          currency: 'usd',
+          customer: me.stripeCustomerId,
+          payment_method: me.cardPmId,
+          off_session: true,
+          confirm: true,
+          description: orderDesc,
+          metadata: { paymentId: String(payment._id), orderId: String(transfer._id), orderType: 'domain_transfer', portalCustomerId: String(me._id) },
+        });
+
+        if (pi.status === 'succeeded') {
+          payment.status = 'paid';
+          payment.paidAt = new Date();
+          payment.providerRef = pi.id;
+          await payment.save();
+          await markPaidAndProvision(payment);
+          return res.json({
+            paid: true,
+            instant: true,
+            cardBrand: me.cardBrand,
+            cardLast4: me.cardLast4,
+            message: `Transfer initiated successfully using your saved ${me.cardBrand ? me.cardBrand.toUpperCase() : 'Card'} (•••• ${me.cardLast4 || 'card'})!`,
+          });
+        } else {
+          payment.status = 'failed';
+          await payment.save();
+          return res.status(400).json({ error: `Payment failed (status: ${pi.status}). Please try another payment method.` });
+        }
+      } catch (err) {
+        payment.status = 'failed';
+        await payment.save();
+        return res.status(400).json({ error: `Card charge declined: ${err.message}` });
+      }
+    }
+
     if (payment.method === 'stripe') {
       let stripe;
       try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
       const settingsDoc = await PaymentSettings.findOne({ singleton: 'main' });
       payment.isTest = (settingsDoc?.stripeMode || 'test') !== 'live';
       await payment.save();
+      const stripeCustomerId = await getOrCreateStripeCustomer(me, stripe);
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
+        customer: stripeCustomerId || undefined,
+        payment_intent_data: { setup_future_usage: 'off_session' },
         line_items: [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(amount * 100) }, quantity: 1 }],
         success_url: successUrl, cancel_url: cancelUrl,
         client_reference_id: String(payment._id),
-        metadata: { paymentId: String(payment._id), orderId: String(transfer._id), orderType: 'domain_transfer' },
+        metadata: { paymentId: String(payment._id), orderId: String(transfer._id), orderType: 'domain_transfer', portalCustomerId: String(me._id) },
       });
       payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
       return res.json({ checkoutUrl: session.url, paymentId: payment._id });
@@ -3738,6 +3936,66 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
       return res.json({ paid: true, viaBalance: true, message: 'Paid from your account balance.' });
     }
 
+    // Human-readable description carrying the order number + what was bought
+    const orderDesc = `Order ${order.orderNumber} — ${order.plan?.name || order.type} (${order.seats || 1} seat${(order.seats || 1) === 1 ? '' : 's'}) for ${order.organization?.domain || ''}`;
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=ORDER_PID`;
+    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=ORDER_PID`;
+
+    // PAY WITH SAVED CARD (1-Click Instant Payment)
+    if (method === 'saved_card') {
+      if (!me.stripeCustomerId || !me.cardPmId) {
+        return res.status(400).json({ error: 'No saved payment card found. Please pay by card first to save your payment information.', needCard: true });
+      }
+      let stripe;
+      try { stripe = await getStripeForMode(); }
+      catch (e) { return res.status(500).json({ error: e.message }); }
+
+      const settingsDoc = await PaymentSettings.findOne({ singleton: 'main' });
+      const isTest = (settingsDoc?.stripeMode || 'test') !== 'live';
+
+      const payment = await Payment.create({
+        customerId: me._id, customerEmail: me.businessEmail, domain: order.organization?.domain,
+        orderNumber: order.orderNumber, orderId: order._id, amount, subtotal: taxed.subtotal, tax: taxed.tax, fee: taxed.fee,
+        currency: 'USD', method: 'stripe', status: 'pending', isTest,
+      });
+
+      try {
+        const pi = await stripe.paymentIntents.create({
+          amount: Math.round(amount * 100),
+          currency: 'usd',
+          customer: me.stripeCustomerId,
+          payment_method: me.cardPmId,
+          off_session: true,
+          confirm: true,
+          description: orderDesc,
+          metadata: { paymentId: String(payment._id), orderId: String(order._id), orderNumber: order.orderNumber, portalCustomerId: String(me._id) },
+        });
+
+        if (pi.status === 'succeeded') {
+          payment.status = 'paid';
+          payment.paidAt = new Date();
+          payment.providerRef = pi.id;
+          await payment.save();
+          await markPaidAndProvision(payment);
+          return res.json({
+            paid: true,
+            instant: true,
+            cardBrand: me.cardBrand,
+            cardLast4: me.cardLast4,
+            message: `Paid successfully with your saved ${me.cardBrand ? me.cardBrand.toUpperCase() : 'Card'} ending in •••• ${me.cardLast4 || 'card'}!`,
+          });
+        } else {
+          payment.status = 'failed';
+          await payment.save();
+          return res.status(400).json({ error: `Payment not completed (status: ${pi.status}). Please pay with another method.` });
+        }
+      } catch (err) {
+        payment.status = 'failed';
+        await payment.save();
+        return res.status(400).json({ error: `Card charge declined: ${err.message}` });
+      }
+    }
+
     const payment = await Payment.create({
       customerId: me._id,
       customerEmail: me.businessEmail,
@@ -3752,11 +4010,8 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
       status: 'pending',
     });
 
-    // Human-readable description carrying the order number + what was bought
-    const orderDesc = `Order ${order.orderNumber} — ${order.plan?.name || order.type} (${order.seats || 1} seat${(order.seats || 1) === 1 ? '' : 's'}) for ${order.organization?.domain || ''}`;
-
-    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
-    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
+    const realSuccessUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const realCancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
 
     if (payment.method === 'stripe') {
       let stripe;
@@ -3767,6 +4022,8 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
       const settingsDoc = await PaymentSettings.findOne({ singleton: 'main' });
       payment.isTest = (settingsDoc?.stripeMode || 'test') !== 'live';
       await payment.save();
+
+      const stripeCustomerId = await getOrCreateStripeCustomer(me, stripe);
 
       const line_items = [{
         price_data: {
@@ -3793,11 +4050,13 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
 
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
+        customer: stripeCustomerId || undefined,
+        payment_intent_data: { setup_future_usage: 'off_session' },
         line_items,
-        success_url: successUrl,
-        cancel_url: cancelUrl,
+        success_url: realSuccessUrl,
+        cancel_url: realCancelUrl,
         client_reference_id: String(payment._id),
-        metadata: { paymentId: String(payment._id), orderId: String(order._id), orderNumber: order.orderNumber },
+        metadata: { paymentId: String(payment._id), orderId: String(order._id), orderNumber: order.orderNumber, portalCustomerId: String(me._id) },
       });
       payment.providerRef = session.id;
       payment.checkoutUrl = session.url;
@@ -3816,8 +4075,8 @@ app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
         billDescription: orderDesc,
         customerEmail: me.businessEmail,
         customerName: me.username || me.companyName || me.businessEmail,
-        redirectUrl: successUrl,
-        cancelUrl: cancelUrl,
+        redirectUrl: realSuccessUrl,
+        cancelUrl: realCancelUrl,
       });
       payment.checkoutUrl = nicky.url;
       payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id);
@@ -3939,13 +4198,7 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
             const pmId = si?.payment_method;
             if (pmId) {
               const pm = await stripeApi.paymentMethods.retrieve(String(pmId));
-              me.stripeCustomerId = me.stripeCustomerId || (typeof session.customer === 'string' ? session.customer : session.customer?.id);
-              me.cardPmId = String(pmId);
-              me.cardBrand = pm?.card?.brand || null;
-              me.cardLast4 = pm?.card?.last4 || null;
-              me.cardAddedAt = new Date();
-              await me.save();
-              console.log('[card] Saved card for customer', String(me._id), `${me.cardBrand || 'card'} •••• ${me.cardLast4 || '????'}`);
+              await saveCustomerCardFromPm(me, pm, stripeApi);
             }
           }
         } catch (cardErr) {
@@ -3953,14 +4206,37 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
         }
       } else {
         const pid = session.metadata?.paymentId || session.client_reference_id;
+        let payment = null;
         if (pid) {
-          const payment = await Payment.findById(pid);
+          payment = await Payment.findById(pid);
           if (!payment) console.error(`[stripe-webhook] no local Payment for id=${pid}`);
           else if (payment.status === 'paid') console.log(`[stripe-webhook] payment ${pid} already paid — nothing to do`);
-          else console.log(`[stripe-webhook] provisioning payment ${pid} (${payment.orderType || 'order'})`);
-          await markPaidAndProvision(payment);
+          else {
+            console.log(`[stripe-webhook] provisioning payment ${pid} (${payment.orderType || 'order'})`);
+            await markPaidAndProvision(payment);
+          }
         } else {
           console.warn('[stripe-webhook] session had no paymentId/client_reference_id — cannot match an order');
+        }
+
+        // Auto-save payment card on the customer account (Wix-like saved payment experience)
+        try {
+          const custId = session.metadata?.portalCustomerId || payment?.customerId || session.client_reference_id;
+          const me = custId ? await Customer.findById(custId) : null;
+          if (me) {
+            const stripeApi = await getStripeForMode();
+            let pmId = null;
+            if (session.payment_intent) {
+              const pi = await stripeApi.paymentIntents.retrieve(String(session.payment_intent));
+              if (pi?.payment_method) pmId = pi.payment_method;
+            }
+            if (pmId) {
+              const pm = await stripeApi.paymentMethods.retrieve(String(pmId));
+              await saveCustomerCardFromPm(me, pm, stripeApi);
+            }
+          }
+        } catch (cardErr) {
+          console.warn('[card] Failed to auto-save card from checkout session webhook:', cardErr.message);
         }
       }
     }
@@ -7881,6 +8157,22 @@ app.get('/api/customer/payment-status/:paymentId', authenticateCustomer, async (
         const session = await stripe.checkout.sessions.retrieve(payment.providerRef);
         console.log('STRIPE STATUS', payment.providerRef, '→', session.payment_status);
         if (session.payment_status === 'paid') {
+          try {
+            const me = await Customer.findById(payment.customerId);
+            if (me) {
+              let pmId = null;
+              if (session.payment_intent) {
+                const pi = await stripe.paymentIntents.retrieve(String(session.payment_intent));
+                if (pi?.payment_method) pmId = pi.payment_method;
+              }
+              if (pmId) {
+                const pm = await stripe.paymentMethods.retrieve(String(pmId));
+                await saveCustomerCardFromPm(me, pm, stripe);
+              }
+            }
+          } catch (pmErr) {
+            console.warn('[card] Status check card capture:', pmErr.message);
+          }
           await markPaidAndProvision(payment);
           return res.json({ paid: true, via: 'stripe-api', orderType: payment.orderType, domain: payment.domain, orderId: payment.orderId, amount: payment.amount });
         }
@@ -8041,6 +8333,65 @@ async function getStripeForMode() {
     : (process.env.STRIPE_SECRET_KEY_TEST || process.env.STRIPE_SECRET_KEY);
   if (!key) throw new Error(`Stripe ${mode} secret key not configured.`);
   return require('stripe')(key);
+}
+
+// Helper: ensure Customer has an attached Stripe Customer account
+async function getOrCreateStripeCustomer(customerDoc, stripe) {
+  if (!customerDoc) return null;
+  try {
+    const stripeClient = stripe || await getStripeForMode();
+    if (customerDoc.stripeCustomerId) {
+      return customerDoc.stripeCustomerId;
+    }
+    const sc = await stripeClient.customers.create({
+      email: customerDoc.businessEmail || undefined,
+      name: [customerDoc.firstName, customerDoc.lastName].filter(Boolean).join(' ') || customerDoc.username || customerDoc.companyName || undefined,
+      metadata: { portalCustomerId: String(customerDoc._id) },
+    });
+    customerDoc.stripeCustomerId = sc.id;
+    await customerDoc.save();
+    return sc.id;
+  } catch (err) {
+    console.error('[stripe] Error creating Stripe customer:', err.message);
+    return null;
+  }
+}
+
+// Helper: securely persist payment method (card data) on customer account for future 1-click use & auto-renewals
+async function saveCustomerCardFromPm(customerDoc, pm, stripe) {
+  if (!customerDoc || !pm) return false;
+  try {
+    const stripeClient = stripe || await getStripeForMode();
+    const custId = customerDoc.stripeCustomerId || (typeof pm.customer === 'string' ? pm.customer : pm.customer?.id) || null;
+    if (custId && !customerDoc.stripeCustomerId) customerDoc.stripeCustomerId = custId;
+    customerDoc.cardPmId = String(pm.id);
+    customerDoc.cardBrand = pm.card?.brand || null;
+    customerDoc.cardLast4 = pm.card?.last4 || null;
+    customerDoc.cardExpMonth = pm.card?.exp_month || null;
+    customerDoc.cardExpYear = pm.card?.exp_year || null;
+    customerDoc.cardAddedAt = new Date();
+    await customerDoc.save();
+
+    // Attach to Stripe customer if not already attached
+    if (stripeClient && customerDoc.stripeCustomerId && pm.customer !== customerDoc.stripeCustomerId) {
+      try {
+        await stripeClient.paymentMethods.attach(pm.id, { customer: customerDoc.stripeCustomerId });
+      } catch (_) {}
+    }
+    // Set as default payment method for future charges
+    if (stripeClient && customerDoc.stripeCustomerId) {
+      try {
+        await stripeClient.customers.update(customerDoc.stripeCustomerId, {
+          invoice_settings: { default_payment_method: pm.id },
+        });
+      } catch (_) {}
+    }
+    console.log(`[card] Stored payment account for customer ${customerDoc._id}: ${customerDoc.cardBrand} •••• ${customerDoc.cardLast4} (exp ${customerDoc.cardExpMonth}/${customerDoc.cardExpYear})`);
+    return true;
+  } catch (err) {
+    console.error('[card] Error saving customer card:', err.message);
+    return false;
+  }
 }
 
 // Helper: compute customer-paid processing fee for a subtotal
@@ -9301,22 +9652,73 @@ app.post('/api/customer/domains/register', authenticateCustomer, async (req, res
     const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}&type=domain&domain=${encodeURIComponent(dom)}`;
     const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
 
+    // 1-Click instant payment using saved card
+    if (method === 'saved_card') {
+      if (!me.stripeCustomerId || !me.cardPmId) {
+        return res.status(400).json({ error: 'No saved payment card found. Please pay with a card first to save your payment information.', needCard: true });
+      }
+      let stripe;
+      try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const settingsDoc = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (settingsDoc?.stripeMode || 'test') !== 'live';
+      payment.method = 'stripe';
+
+      try {
+        const pi = await stripe.paymentIntents.create({
+          amount: Math.round(amount * 100),
+          currency: 'usd',
+          customer: me.stripeCustomerId,
+          payment_method: me.cardPmId,
+          off_session: true,
+          confirm: true,
+          description: orderDesc,
+          metadata: { paymentId: String(payment._id), orderId: String(order._id), orderType: 'domain', portalCustomerId: String(me._id) },
+        });
+
+        if (pi.status === 'succeeded') {
+          payment.status = 'paid';
+          payment.paidAt = new Date();
+          payment.providerRef = pi.id;
+          await payment.save();
+          await markPaidAndProvision(payment);
+          return res.json({
+            paid: true,
+            instant: true,
+            cardBrand: me.cardBrand,
+            cardLast4: me.cardLast4,
+            message: `Domain ${dom} registered successfully using your saved ${me.cardBrand ? me.cardBrand.toUpperCase() : 'Card'} (•••• ${me.cardLast4 || 'card'})!`,
+          });
+        } else {
+          payment.status = 'failed';
+          await payment.save();
+          return res.status(400).json({ error: `Payment failed (status: ${pi.status}). Please try another payment method.` });
+        }
+      } catch (err) {
+        payment.status = 'failed';
+        await payment.save();
+        return res.status(400).json({ error: `Card charge declined: ${err.message}` });
+      }
+    }
+
     if (payment.method === 'stripe') {
       let stripe;
       try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
       const settingsDoc = await PaymentSettings.findOne({ singleton: 'main' });
       payment.isTest = (settingsDoc?.stripeMode || 'test') !== 'live';
       await payment.save();
+      const stripeCustomerId = await getOrCreateStripeCustomer(me, stripe);
       // Build line items: domain price + separate tax/fee lines so the customer sees the breakdown.
       const line_items = [{ price_data: { currency: 'usd', product_data: { name: orderDesc }, unit_amount: Math.round(taxed.subtotal * 100) }, quantity: 1 }];
       if (taxed.fee > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) }, quantity: 1 });
       if (taxed.tax > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) }, quantity: 1 });
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
+        customer: stripeCustomerId || undefined,
+        payment_intent_data: { setup_future_usage: 'off_session' },
         line_items,
         success_url: successUrl, cancel_url: cancelUrl,
         client_reference_id: String(payment._id),
-        metadata: { paymentId: String(payment._id), orderId: String(order._id), orderType: 'domain' },
+        metadata: { paymentId: String(payment._id), orderId: String(order._id), orderType: 'domain', portalCustomerId: String(me._id) },
       });
       payment.providerRef = session.id; payment.checkoutUrl = session.url; await payment.save();
       return res.json({ checkoutUrl: session.url, paymentId: payment._id });
@@ -10527,35 +10929,78 @@ app.post('/api/admin/workspace-orders/provision', authenticateCustomer, requireA
 app.post('/api/workspace-orders', authenticateCustomer, async (req, res) => {
   try {
     const body = req.body || {};
-    if (!body.organization?.domain || !body.plan?.id || !body.seats) {
-      return res.status(400).json({ error: 'Missing required order fields' });
+    const me = await Customer.findById(req.customerId);
+    const domain = (body.organization?.domain || body.domain || me?.domain || '').toLowerCase().trim();
+    const planId = body.plan?.id || body.planId;
+    if (!domain || !planId) {
+      return res.status(400).json({ error: 'Missing required order fields (domain and plan are required)' });
     }
+    const seats = Number(body.seats || 1);
+
+    // Look up plan if missing name/monthlyPrice
+    let plan = body.plan;
+    if (!plan || !plan.monthlyPrice) {
+      const pDoc = await Plan.findOne({ planId });
+      if (pDoc) {
+        plan = { id: pDoc.planId, name: pDoc.name, monthlyPrice: pDoc.monthlyPrice };
+      } else {
+        const def = (DEFAULT_PRODUCTS.workspace || []).find((x) => x.id === planId);
+        plan = def ? { id: def.id, name: def.name, monthlyPrice: def.monthlyPrice } : { id: planId, name: 'Google Workspace', monthlyPrice: 7.20 };
+      }
+    }
+
+    const monthlyTotal = body.monthlyTotal != null ? Number(body.monthlyTotal) : Number(plan.monthlyPrice || 7.20) * seats;
+    const cleanOrgName = body.organization?.name || me?.companyName || (domain ? domain.split('.')[0] : 'Workspace Org');
+    const adminUser = (body.organization?.desiredAdminUsername || 'admin').toLowerCase().trim();
+    const tempPw = body.organization?.tempPassword || `Pass!${Math.random().toString(36).slice(-8)}9#`;
+
+    const organization = {
+      name: cleanOrgName,
+      domain,
+      desiredAdminUsername: adminUser,
+      tempPassword: tempPw,
+      languageCode: body.organization?.languageCode || 'en-US',
+      country: body.organization?.country || me?.country || 'United States',
+      streetAddress: body.organization?.streetAddress || me?.address || '100 Main St',
+      streetAddress2: body.organization?.streetAddress2 || '',
+      streetAddress3: body.organization?.streetAddress3 || '',
+      city: body.organization?.city || me?.city || 'New York',
+      state: body.organization?.state || me?.state || 'NY',
+      zip: body.organization?.zip || me?.postalCode || '10001',
+    };
+
+    const contact = {
+      firstName: body.contact?.firstName || me?.firstName || 'Admin',
+      lastName: body.contact?.lastName || me?.lastName || 'User',
+      email: body.contact?.email || `${adminUser}@${domain}`,
+      alternateEmail: body.contact?.alternateEmail || me?.businessEmail || '',
+      phone: body.contact?.phone || me?.phone || '5551234567',
+    };
+
     const orderNumber = `WS-${Date.now()}`;
     const order = await WorkspaceOrder.create({
       customerId: req.customerId,
       orderNumber,
       type: 'workspace',
       planType: body.planType === 'annual' ? 'annual' : 'flexible',
-      plan: body.plan,
-      seats: body.seats,
-      monthlyTotal: body.monthlyTotal,
-      organization: body.organization,
-      contact: body.contact,
+      plan,
+      seats,
+      monthlyTotal,
+      organization,
+      contact,
       status: 'pending',
     });
 
     // Link this domain to the customer's account so their "My Subscriptions" can find it
     try {
-      const dom = (body.organization.domain || '').toLowerCase().trim();
-      if (dom) {
-        await Customer.findByIdAndUpdate(req.customerId, { domain: dom });
+      if (domain) {
+        await Customer.findByIdAndUpdate(req.customerId, { domain });
       }
     } catch (_) { }
 
     // Order-placed email (non-blocking)
     try {
-      const me = await Customer.findById(req.customerId);
-      const desc = `${order.plan?.name || 'Workspace'} (${order.seats || 1} seat${order.seats === 1 ? '' : 's'}) for ${order.organization?.domain || ''}`;
+      const desc = `${order.plan?.name || 'Workspace'} (${order.seats || 1} seat${order.seats === 1 ? '' : 's'}) for ${domain}`;
       await sendOrderPlacedEmail(me?.businessEmail, me?.firstName || me?.username, desc, order.monthlyTotal);
     } catch (_) { }
 

@@ -619,6 +619,10 @@ export async function executePendingDomainCheckout(token, pendingObj) {
         localStorage.removeItem('pendingDomainPurchase');
       } catch (_) {}
 
+      if (res.data?.paid) {
+        window.location.href = `/?payment=success&domain=${encodeURIComponent(domainName)}&type=domain`;
+        return true;
+      }
       if (res.data?.checkoutUrl) {
         window.location.href = res.data.checkoutUrl;
         return true;
@@ -636,6 +640,10 @@ export async function executePendingDomainCheckout(token, pendingObj) {
         localStorage.removeItem('pendingDomainPurchase');
       } catch (_) {}
 
+      if (res.data?.paid) {
+        window.location.href = `/?payment=success&domain=${encodeURIComponent(domainName)}&type=domain`;
+        return true;
+      }
       if (res.data?.checkoutUrl) {
         window.location.href = res.data.checkoutUrl;
         return true;
@@ -646,6 +654,90 @@ export async function executePendingDomainCheckout(token, pendingObj) {
     throw err;
   }
   return false;
+}
+
+export async function executePendingWorkspaceCheckout(token, pendingObj) {
+  let pending = pendingObj;
+  if (!pending) {
+    try {
+      const raw = typeof window !== 'undefined' ? (sessionStorage.getItem('pendingWorkspacePurchase') || localStorage.getItem('pendingWorkspacePurchase')) : null;
+      if (raw) pending = JSON.parse(raw);
+    } catch (_) {}
+  }
+  if (!pending || (!pending.planId && !pending.plan?.id && !pending.id)) return false;
+
+  const planId = pending.planId || pending.plan?.id || pending.id || 'starter';
+  const planName = pending.planName || pending.plan?.name || pending.name || 'Google Workspace';
+  const monthlyPrice = Number(pending.monthlyPrice || pending.plan?.monthlyPrice || pending.price || 7.20);
+  const seats = Number(pending.seats || 1);
+  const planType = pending.planType === 'annual' ? 'annual' : 'flexible';
+  const domain = (pending.domain || '').toLowerCase().trim();
+  const method = pending.method === 'nicky' ? 'nicky' : (pending.method === 'saved_card' ? 'saved_card' : 'stripe');
+
+  const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+
+  if (domain) {
+    try { sessionStorage.setItem('justPurchasedDomain', domain); } catch (_) {}
+  }
+
+  try {
+    const orderPayload = {
+      type: 'workspace',
+      planType,
+      plan: {
+        id: planId,
+        name: planName,
+        monthlyPrice,
+      },
+      seats,
+      monthlyTotal: monthlyPrice * seats,
+      organization: {
+        domain,
+        name: pending.organization?.name || (domain ? domain.split('.')[0] : 'Workspace Org'),
+        desiredAdminUsername: pending.adminUsername || 'admin',
+      },
+      contact: pending.contact || {},
+    };
+
+    const orderRes = await axios.post(`${API_URL}/workspace-orders`, orderPayload, {
+      headers: authHeader,
+    });
+
+    const orderId = orderRes.data?.id || orderRes.data?._id;
+    if (!orderId) {
+      throw new Error(orderRes.data?.error || 'Failed to create workspace order');
+    }
+
+    try {
+      sessionStorage.removeItem('pendingWorkspacePurchase');
+      localStorage.removeItem('pendingWorkspacePurchase');
+    } catch (_) {}
+
+    const checkoutRes = await axios.post(`${API_URL}/customer/checkout`, {
+      orderId,
+      method,
+    }, {
+      headers: authHeader,
+    });
+
+    if (checkoutRes.data?.paid) {
+      try {
+        await axios.post(`${API_URL}/workspace-orders/${orderId}/provision`, {}, { headers: authHeader }).catch(() => {});
+      } catch (_) {}
+      window.location.href = `/?payment=success&order=${orderId}&domain=${encodeURIComponent(domain)}&type=workspace&paid=1`;
+      return true;
+    }
+
+    if (checkoutRes.data?.checkoutUrl) {
+      window.location.href = checkoutRes.data.checkoutUrl;
+      return true;
+    }
+
+    return true;
+  } catch (err) {
+    console.error('Error executing pending workspace checkout:', err);
+    throw err;
+  }
 }
 
 // ==================== LOGIN PAGE ====================
@@ -704,7 +796,7 @@ const AuthSocialButtons = ({ label, googleBtnRef, showGoogleFallback, onGoogleFa
 //   * Google account -> Clear notice to use Google One-Click, avoiding password confusion.
 // - Direct pending domain checkout: Immediately forwards to Stripe / payment gateway
 //   upon successful authentication.
-const CustomerAuthFlow = ({ isModal = false, onClose = null, domainInfo = null, initialTab = null }) => {
+const CustomerAuthFlow = ({ isModal = false, onClose = null, domainInfo = null, workspaceInfo = null, initialTab = null }) => {
   const { login } = useAuth();
   const brand = useBranding();
   const isRegisterInitial = typeof window !== 'undefined' && window.location.pathname.startsWith('/register');
@@ -735,8 +827,45 @@ const CustomerAuthFlow = ({ isModal = false, onClose = null, domainInfo = null, 
 
   const activeDomain = domainInfo || pendingDomain;
 
+  // Read pending workspace product from prop or storage
+  const [pendingWorkspace] = useState(() => {
+    if (workspaceInfo && (workspaceInfo.planId || workspaceInfo.plan?.id || workspaceInfo.id)) return workspaceInfo;
+    try {
+      const raw = typeof window !== 'undefined' ? (sessionStorage.getItem('pendingWorkspacePurchase') || localStorage.getItem('pendingWorkspacePurchase')) : null;
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) { return null; }
+  });
+
+  const activeWorkspace = workspaceInfo || pendingWorkspace;
+
   const handleAuthSuccess = async (tokenVal, customerVal) => {
     login(customerVal.businessEmail, tokenVal, customerVal);
+
+    // 1. Check for pending Google Workspace purchase
+    const workspaceToBuy = activeWorkspace || (() => {
+      try {
+        const raw = sessionStorage.getItem('pendingWorkspacePurchase') || localStorage.getItem('pendingWorkspacePurchase');
+        return raw ? JSON.parse(raw) : null;
+      } catch (_) { return null; }
+    })();
+
+    if (workspaceToBuy && (workspaceToBuy.planId || workspaceToBuy.plan?.id || workspaceToBuy.id)) {
+      setRedirectingToCheckout(true);
+      setLoading(true);
+      setInfo(`Preparing ${workspaceToBuy.planName || 'Google Workspace'} for ${workspaceToBuy.domain || 'your domain'}… Redirecting you directly to checkout…`);
+      try {
+        const ok = await executePendingWorkspaceCheckout(tokenVal, workspaceToBuy);
+        if (ok) return;
+      } catch (err) {
+        console.error('Pending workspace checkout redirect error:', err);
+        setError(err?.response?.data?.error || 'Could not start workspace checkout automatically. You can complete it from your portal.');
+        setRedirectingToCheckout(false);
+        setLoading(false);
+        return;
+      }
+    }
+
+    // 2. Check for pending domain purchase
     const domainToBuy = activeDomain || (() => {
       try {
         const raw = sessionStorage.getItem('pendingDomainPurchase') || localStorage.getItem('pendingDomainPurchase');
@@ -1045,6 +1174,37 @@ const CustomerAuthFlow = ({ isModal = false, onClose = null, domainInfo = null, 
             </div>
           )}
 
+          {/* Active Workspace / Product Purchase Banner */}
+          {activeWorkspace && (
+            <div style={{
+              background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
+              border: '1px solid #bbf7d0',
+              borderRadius: 14,
+              padding: '12px 14px',
+              marginBottom: 16,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              textAlign: 'left',
+              boxShadow: '0 2px 6px rgba(22, 101, 52, 0.06)'
+            }}>
+              <div style={{ fontSize: 24, flexShrink: 0 }}>💼</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 800, color: '#166534', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <span>{activeWorkspace.planName || 'Google Workspace'}</span>
+                  {activeWorkspace.domain && (
+                    <span style={{ fontSize: 11.5, background: '#bbf7d0', color: '#14532d', padding: '1px 8px', borderRadius: 6, fontWeight: 700 }}>
+                      {activeWorkspace.domain}
+                    </span>
+                  )}
+                </div>
+                <div style={{ color: '#15803d', fontSize: 12.5, marginTop: 2 }}>
+                  ${(Number(activeWorkspace.monthlyPrice || 7.20) * Number(activeWorkspace.seats || 1)).toFixed(2)}/mo ({activeWorkspace.seats || 1} seat{(activeWorkspace.seats || 1) === 1 ? '' : 's'}) • One click sign in or sign up to proceed to checkout
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* STEP 1: Email + Social */}
           {step === 'email' && (
             <>
@@ -1070,8 +1230,8 @@ const CustomerAuthFlow = ({ isModal = false, onClose = null, domainInfo = null, 
               </h1>
               <p style={{ textAlign: 'center', color: '#64748b', margin: '0 0 18px', fontSize: 13.5, lineHeight: 1.5 }}>
                 {tabIntent === 'login'
-                  ? (activeDomain ? 'Sign in to complete your domain purchase.' : 'Sign in to access your Workspace console and services.')
-                  : (activeDomain ? 'Sign up with one click to lock in your domain and checkout.' : 'Enter your business email to set up your account.')}
+                  ? (activeDomain || activeWorkspace ? 'Sign in to complete your checkout in one click.' : 'Sign in to access your Workspace console and services.')
+                  : (activeDomain || activeWorkspace ? 'Sign up in seconds to finalize your order and proceed to checkout.' : 'Enter your business email to set up your account.')}
               </p>
 
               {error && <div className="errbox">{error}</div>}
@@ -6270,8 +6430,17 @@ const CustomerPayments = () => {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
+  const [savedCard, setSavedCard] = useState({ hasCard: false });
+  const [cardBusy, setCardBusy] = useState(false);
 
   const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
+
+  const loadCard = async () => {
+    try {
+      const c = await axios.get(`${API_URL}/customer/billing/card`);
+      setSavedCard(c.data || { hasCard: false });
+    } catch (_) {}
+  };
 
   const load = async () => {
     setLoading(true);
@@ -6286,9 +6455,20 @@ const CustomerPayments = () => {
   };
   useEffect(() => {
     load();
+    loadCard();
     // Payment-return verification is handled globally in CustomerPortal now,
     // so it works regardless of which page the customer lands on after checkout.
   }, []);
+
+  const setupNewCard = async () => {
+    setCardBusy(true); setMsg('');
+    try {
+      const r = await axios.post(`${API_URL}/customer/billing/setup-card`);
+      if (r.data.checkoutUrl) { window.location.href = r.data.checkoutUrl; return; }
+      setMsg('Could not start card setup.');
+    } catch (e) { setMsg(e?.response?.data?.error || 'Could not start card setup.'); }
+    finally { setCardBusy(false); }
+  };
 
   // Poll the backend, which checks Nicky's real status API. Marks paid only when Nicky says "Finished".
   const verifyPayment = async (pid, attempt) => {
@@ -6297,6 +6477,7 @@ const CustomerPayments = () => {
       if (r.data.paid) {
         setMsg('✓ Payment confirmed — your order is being set up. Thank you!');
         load();
+        loadCard();
         return;
       }
       if (r.data.cancelled) {
@@ -6323,9 +6504,10 @@ const CustomerPayments = () => {
       if (res.data.checkoutUrl) {
         window.location.href = res.data.checkoutUrl; // redirect to Stripe or Nicky hosted checkout
       } else if (res.data.paid) {
-        setMsg('✓ ' + (res.data.message || 'Paid from your balance.'));
+        setMsg('✓ ' + (res.data.message || 'Paid successfully.'));
         loadBalance();
         load();
+        loadCard();
       } else {
         setMsg('Could not start checkout.');
       }
@@ -6356,7 +6538,50 @@ const CustomerPayments = () => {
   return (
     <div>
       <h1 style={{ fontSize: 28, margin: '0 0 6px' }}>💳 Payments</h1>
-      <p style={{ color: MUTE, margin: '0 0 20px' }}>Pay for your orders by card or crypto.</p>
+      <p style={{ color: MUTE, margin: '0 0 20px' }}>Pay for your orders and manage your saved payment methods.</p>
+
+      {/* Wix-Style Customer Payment Account & Saved Card Banner */}
+      <div style={{ background: '#fff', borderRadius: 16, padding: '20px 24px', marginBottom: 22, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: savedCard.hasCard ? '#f0fdf4' : '#f8fafc', border: `1px solid ${savedCard.hasCard ? '#bbf7d0' : '#e2e8f0'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: savedCard.hasCard ? '#166534' : '#64748b' }}>
+              <CardIcon size={22} />
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <strong style={{ fontSize: 16 }}>
+                  {savedCard.hasCard ? `${(savedCard.brand || 'Card').toUpperCase()} ending in •••• ${savedCard.last4}` : 'No Saved Card Yet'}
+                </strong>
+                {savedCard.hasCard ? (
+                  <span style={{ background: '#dcfce7', color: '#166534', fontSize: 12, fontWeight: 700, padding: '2px 8px', borderRadius: 999 }}>
+                    ✓ 1-Click Checkout Enabled
+                  </span>
+                ) : (
+                  <span style={{ background: '#f1f5f9', color: '#64748b', fontSize: 12, fontWeight: 600, padding: '2px 8px', borderRadius: 999 }}>
+                    Auto-saved on first card payment
+                  </span>
+                )}
+              </div>
+              <p style={{ margin: '4px 0 0', fontSize: 13, color: '#64748b' }}>
+                {savedCard.hasCard ? (
+                  <>
+                    {savedCard.expMonth && savedCard.expYear ? `Expires ${String(savedCard.expMonth).padStart(2, '0')}/${savedCard.expYear} · ` : ''}
+                    Stored securely. Subscriptions and domains renew instantly without re-entering details.
+                  </>
+                ) : (
+                  'Whenever you pay by card, your payment information is stored securely like Wix so you never need to refill card forms again.'
+                )}
+              </p>
+            </div>
+          </div>
+          <div>
+            <button onClick={setupNewCard} disabled={cardBusy}
+              style={{ background: '#fff', border: '1px solid #d1d5db', borderRadius: 10, padding: '9px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {cardBusy ? 'Opening…' : (savedCard.hasCard ? 'Replace card' : '+ Add payment card')}
+            </button>
+          </div>
+        </div>
+      </div>
 
       {msg && <div style={{ background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a', padding: '12px 16px', borderRadius: 10, marginBottom: 20 }}>{msg}</div>}
 
@@ -6370,20 +6595,30 @@ const CustomerPayments = () => {
               <div style={{ fontWeight: 700 }}>{o.organization?.domain}</div>
               <div style={{ color: MUTE, fontSize: 14 }}>Order {o.orderNumber} · {o.plan?.name} · {o.seats} seat{o.seats === 1 ? '' : 's'}</div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <strong style={{ fontSize: 20 }}>${Number(o.monthlyTotal || 0).toFixed(2)}</strong>
+
+              {/* 1-Click Pay with Saved Card */}
+              {savedCard.hasCard && (
+                <button onClick={() => pay(o._id, 'saved_card')} disabled={!!busy}
+                  title={`Charge saved ${savedCard.brand || 'card'} (•••• ${savedCard.last4}) instantly`}
+                  style={{ background: '#059669', color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, boxShadow: '0 1px 2px rgba(5,150,105,0.2)' }}>
+                  {busy === o._id + 'saved_card' ? 'Processing…' : <><span>⚡ 1-Click Pay (•••• {savedCard.last4})</span></>}
+                </button>
+              )}
+
               <button onClick={() => pay(o._id, 'stripe')} disabled={!!busy}
-                style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                {busy === o._id + 'stripe' ? '…' : <><CardIcon size={16} /><span>Pay by card</span></>}
+                style={{ background: savedCard.hasCard ? '#fff' : TEAL, color: savedCard.hasCard ? '#374151' : '#fff', border: savedCard.hasCard ? '1px solid #d1d5db' : 'none', borderRadius: 10, padding: '10px 16px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                {busy === o._id + 'stripe' ? '…' : <><CardIcon size={16} /><span>{savedCard.hasCard ? 'Use another card' : 'Pay by card'}</span></>}
               </button>
               <button onClick={() => pay(o._id, 'nicky')} disabled={!!busy}
-                style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                style={{ background: '#fff', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 10, padding: '10px 16px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 {busy === o._id + 'nicky' ? '…' : <><CryptoIcon size={16} color={TEAL} /><span>Pay with crypto</span></>}
               </button>
               {balance > 0 && (
                 <button onClick={() => pay(o._id, 'balance')} disabled={!!busy || balance + 1e-9 < Number(o.monthlyTotal || 0)}
                   title={balance + 1e-9 < Number(o.monthlyTotal || 0) ? `Balance ($${balance.toFixed(2)}) doesn't cover this order` : `Pay $${Number(o.monthlyTotal || 0).toFixed(2)} from your $${balance.toFixed(2)} balance`}
-                  style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px 18px', fontWeight: 600, cursor: (busy || balance + 1e-9 < Number(o.monthlyTotal || 0)) ? 'not-allowed' : 'pointer', opacity: balance + 1e-9 < Number(o.monthlyTotal || 0) ? 0.5 : 1 }}>
+                  style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px 16px', fontWeight: 600, cursor: (busy || balance + 1e-9 < Number(o.monthlyTotal || 0)) ? 'not-allowed' : 'pointer', opacity: balance + 1e-9 < Number(o.monthlyTotal || 0) ? 0.5 : 1 }}>
                   {busy === o._id + 'balance' ? '…' : `💰 Pay from balance ($${balance.toFixed(2)})`}
                 </button>
               )}
@@ -6949,6 +7184,13 @@ const CustomerDomains = ({ onSetupWorkspace = null }) => {
   const [myDomains, setMyDomains] = useState([]);
   const [renewBusy, setRenewBusy] = useState('');
   const [manageDomain, setManageDomain] = useState(null);
+  const [savedCard, setSavedCard] = useState({ hasCard: false });
+
+  useEffect(() => {
+    axios.get(`${API_URL}/customer/billing/card`)
+      .then(res => setSavedCard(res.data || { hasCard: false }))
+      .catch(() => {});
+  }, []);
 
   // Transfer in
   const [xferDomain, setXferDomain] = useState('');
@@ -7020,8 +7262,17 @@ const CustomerDomains = ({ onSetupWorkspace = null }) => {
     setRenewBusy(d.id); setRegMsg('');
     try {
       const res = await axios.post(`${API_URL}/customer/domains/renew`, { domainName: d.domainName, period: 1, method });
-      if (res.data.checkoutUrl) window.location.href = res.data.checkoutUrl;
-      else setRegMsg('Could not start renewal checkout.');
+      if (res.data.checkoutUrl) {
+        window.location.href = res.data.checkoutUrl;
+      } else if (res.data.paid) {
+        setRegMsg('✓ ' + (res.data.message || `Renewed ${d.domainName} successfully!`));
+        try {
+          const r = await axios.get(`${API_URL}/customer/my-domains`);
+          setMyDomains(r.data.domains || []);
+        } catch (_) {}
+      } else {
+        setRegMsg('Could not start renewal checkout.');
+      }
     } catch (e) { setRegMsg(e?.response?.data?.error || 'Could not start renewal.'); }
     finally { setRenewBusy(''); }
   };
@@ -7040,6 +7291,12 @@ const CustomerDomains = ({ onSetupWorkspace = null }) => {
       });
       if (res.data.checkoutUrl) {
         window.location.href = res.data.checkoutUrl; // pay first; domain registers on payment
+      } else if (res.data.paid) {
+        setRegMsg('✓ ' + (res.data.message || `Domain ${domainName} registered successfully!`));
+        try {
+          const r = await axios.get(`${API_URL}/customer/my-domains`);
+          setMyDomains(r.data.domains || []);
+        } catch (_) {}
       } else {
         setRegMsg('Could not start checkout.');
       }
@@ -7110,9 +7367,16 @@ const CustomerDomains = ({ onSetupWorkspace = null }) => {
                 {r.available && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <strong style={{ fontSize: 18, color: TEAL }}>{r.price != null ? `$${Number(r.price).toFixed(2)}/yr` : ''}</strong>
+                    {savedCard?.hasCard && (
+                      <button onClick={() => buyDomain('saved_card', r)} disabled={regBusy}
+                        title={`1-Click Buy with saved ${savedCard.brand || 'card'} (•••• ${savedCard.last4})`}
+                        style={{ background: '#059669', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6, boxShadow: '0 1px 2px rgba(5,150,105,0.2)' }}>
+                        {regBusy && buyingDomain === r.domain ? '…' : <><span>⚡ 1-Click Buy</span></>}
+                      </button>
+                    )}
                     <button onClick={() => buyDomain('stripe', r)} disabled={regBusy}
-                      style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      {regBusy && buyingDomain === r.domain ? '…' : <><CardIcon size={14} /><span>Buy</span></>}
+                      style={{ background: savedCard?.hasCard ? '#fff' : TEAL, color: savedCard?.hasCard ? '#374151' : '#fff', border: savedCard?.hasCard ? '1px solid #d1d5db' : 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {regBusy && buyingDomain === r.domain ? '…' : <><CardIcon size={14} /><span>{savedCard?.hasCard ? 'Card' : 'Buy'}</span></>}
                     </button>
                     <button onClick={() => buyDomain('nicky', r)} disabled={regBusy}
                       title="Buy with Crypto"
@@ -7166,9 +7430,16 @@ const CustomerDomains = ({ onSetupWorkspace = null }) => {
                           style={{ background: '#fff', color: INK, border: '1px solid #d8dbe6', borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
                           ⚙ Manage
                         </button>
+                        {savedCard?.hasCard && (
+                          <button onClick={() => renewDomain(d, 'saved_card')} disabled={renewBusy === d.id}
+                            title={`1-Click renew using saved ${savedCard.brand || 'card'} (•••• ${savedCard.last4})`}
+                            style={{ background: '#059669', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', fontWeight: 700, cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 4, boxShadow: '0 1px 2px rgba(5,150,105,0.2)' }}>
+                            {renewBusy === d.id ? '…' : <><span>⚡ 1-Click Renew</span></>}
+                          </button>
+                        )}
                         <button onClick={() => renewDomain(d, 'stripe')} disabled={renewBusy === d.id}
-                          style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
-                          {renewBusy === d.id ? '…' : 'Renew (card)'}
+                          style={{ background: savedCard?.hasCard ? '#fff' : TEAL, color: savedCard?.hasCard ? '#374151' : '#fff', border: savedCard?.hasCard ? '1px solid #d1d5db' : 'none', borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+                          {renewBusy === d.id ? '…' : (savedCard?.hasCard ? 'Card' : 'Renew (card)')}
                         </button>
                         <button onClick={() => renewDomain(d, 'nicky')} disabled={renewBusy === d.id}
                           title="Renew with Crypto"
@@ -7606,8 +7877,20 @@ const CustomerSubscriptions = () => {
     setSeatBusy(true); setSeatMsg('');
     try {
       const r = await axios.post(`${API_URL}/customer/subscriptions/change-seats`, { skuId: seatSub.skuId, domain: seatSub.domain, newSeats: seatCount, method });
-      if (r.data.checkoutUrl) window.location.href = r.data.checkoutUrl;
-      else setSeatMsg('Could not start checkout.');
+      if (r.data.checkoutUrl) {
+        window.location.href = r.data.checkoutUrl;
+      } else if (r.data.paid) {
+        setSeatMsg('✓ ' + (r.data.message || 'Seat update applied successfully with your saved card!'));
+        setTimeout(async () => {
+          setSeatSub(null);
+          try {
+            const subRes = await axios.get(`${API_URL}/customer/my-subscriptions`);
+            if (subRes && subRes.data) setData(subRes.data);
+          } catch (_) {}
+        }, 1500);
+      } else {
+        setSeatMsg('Could not start checkout.');
+      }
     } catch (e) { setSeatMsg(e?.response?.data?.error || 'Could not start checkout.'); }
     finally { setSeatBusy(false); }
   };
@@ -7615,8 +7898,20 @@ const CustomerSubscriptions = () => {
     setRenewBusy(true); setRenewMsg('');
     try {
       const r = await axios.post(`${API_URL}/customer/subscriptions/renew`, { skuId: renewing.skuId, domain: renewing.domain, method });
-      if (r.data.checkoutUrl) window.location.href = r.data.checkoutUrl;
-      else setRenewMsg('No checkout URL returned. Response: ' + JSON.stringify(r.data));
+      if (r.data.checkoutUrl) {
+        window.location.href = r.data.checkoutUrl;
+      } else if (r.data.paid) {
+        setRenewMsg('✓ ' + (r.data.message || 'Subscription renewed successfully with your saved card!'));
+        setTimeout(async () => {
+          setRenewing(null);
+          try {
+            const subRes = await axios.get(`${API_URL}/customer/my-subscriptions`);
+            if (subRes && subRes.data) setData(subRes.data);
+          } catch (_) {}
+        }, 1500);
+      } else {
+        setRenewMsg('No checkout URL returned. Response: ' + JSON.stringify(r.data));
+      }
     } catch (e) {
       const status = e?.response?.status;
       const serverMsg = e?.response?.data?.error || e?.response?.data?.message;
@@ -7946,7 +8241,13 @@ const CustomerSubscriptions = () => {
               {seatMsg && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{seatMsg}</div>}
 
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <button onClick={() => doSeatChange('stripe')} disabled={seatBusy || added < 1} style={{ background: '#6e46eb', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{seatBusy ? '…' : <><CardIcon size={16} /><span>Pay by card</span></>}</button>
+                {card?.hasCard && (
+                  <button onClick={() => doSeatChange('saved_card')} disabled={seatBusy || added < 1}
+                    style={{ background: '#059669', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, boxShadow: '0 1px 2px rgba(5,150,105,0.2)' }}>
+                    {seatBusy ? '…' : <><span>⚡ 1-Click Pay (•••• {card.last4})</span></>}
+                  </button>
+                )}
+                <button onClick={() => doSeatChange('stripe')} disabled={seatBusy || added < 1} style={{ background: card?.hasCard ? '#fff' : '#6e46eb', color: card?.hasCard ? '#374151' : '#fff', border: card?.hasCard ? '1px solid #d1d5db' : 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{seatBusy ? '…' : <><CardIcon size={16} /><span>{card?.hasCard ? 'Use another card' : 'Pay by card'}</span></>}</button>
                 <button onClick={() => doSeatChange('nicky')} disabled={seatBusy || added < 1} style={{ background: '#fff', color: '#6e46eb', border: '1px solid #6e46eb', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{seatBusy ? '…' : <><CryptoIcon size={16} color="#6e46eb" /><span>Crypto</span></>}</button>
                 <button onClick={() => setSeatSub(null)} disabled={seatBusy} style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}>Cancel</button>
               </div>
@@ -7965,7 +8266,13 @@ const CustomerSubscriptions = () => {
             <p style={{ color: '#374151', fontSize: 14 }}>Renewing keeps your subscription active and moves your next renewal date forward by one month. Choose how to pay:</p>
             {renewMsg && <div style={{ background: '#fde8e8', color: '#b42318', padding: '10px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{renewMsg}</div>}
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button onClick={() => doRenew('stripe')} disabled={renewBusy} style={{ background: '#6e46eb', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{renewBusy ? '…' : <><CardIcon size={16} /><span>Pay by card</span></>}</button>
+              {card?.hasCard && (
+                <button onClick={() => doRenew('saved_card')} disabled={renewBusy}
+                  style={{ background: '#059669', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, boxShadow: '0 1px 2px rgba(5,150,105,0.2)' }}>
+                  {renewBusy ? '…' : <><span>⚡ 1-Click Renew (•••• {card.last4})</span></>}
+                </button>
+              )}
+              <button onClick={() => doRenew('stripe')} disabled={renewBusy} style={{ background: card?.hasCard ? '#fff' : '#6e46eb', color: card?.hasCard ? '#374151' : '#fff', border: card?.hasCard ? '1px solid #d1d5db' : 'none', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{renewBusy ? '…' : <><CardIcon size={16} /><span>{card?.hasCard ? 'Use another card' : 'Pay by card'}</span></>}</button>
               <button onClick={() => doRenew('nicky')} disabled={renewBusy} style={{ background: '#fff', color: '#6e46eb', border: '1px solid #6e46eb', borderRadius: 10, padding: '11px 20px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{renewBusy ? '…' : <><CryptoIcon size={16} color="#6e46eb" /><span>Pay with crypto</span></>}</button>
               <button onClick={() => setRenewing(null)} disabled={renewBusy} style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}>Cancel</button>
             </div>
@@ -8739,20 +9046,44 @@ const CustomerSettings = () => {
           <span style={{ width: 32, height: 32, borderRadius: 8, background: '#faf5ff', border: '1px solid #f3e8ff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
             <NavIcons.Payments size={17} />
           </span>
-          <h3 style={{ margin: 0 }}>Payment methods</h3>
+          <h3 style={{ margin: 0 }}>Payment Account & Saved Cards</h3>
         </div>
         {card.hasCard ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 16px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 15 }}>💳 <strong style={{ textTransform: 'capitalize' }}>{card.brand || 'Card'}</strong> ending in •••• {card.last4}</span>
-            <button className="btn btn-secondary" onClick={removeCard} disabled={cardBusy}>Remove</button>
+          <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, padding: '18px 20px', background: '#fafafa' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 22 }}>💳</span>
+                  <strong style={{ fontSize: 16, textTransform: 'capitalize' }}>{card.brand || 'Credit/Debit Card'}</strong>
+                  <span style={{ fontSize: 15, color: '#334155' }}>ending in •••• <strong>{card.last4}</strong></span>
+                  <span style={{ background: '#dcfce7', color: '#166534', fontSize: 12, fontWeight: 700, padding: '2px 8px', borderRadius: 999 }}>
+                    ✓ Default for 1-Click
+                  </span>
+                </div>
+                <div style={{ marginTop: 6, fontSize: 13, color: '#64748b' }}>
+                  {card.expMonth && card.expYear ? `Expires: ${String(card.expMonth).padStart(2, '0')}/${card.expYear} · ` : ''}
+                  {card.addedAt ? `Saved on: ${new Date(card.addedAt).toLocaleDateString()}` : 'Payment method on file'}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="btn btn-secondary" onClick={addCard} disabled={cardBusy}>{cardBusy ? 'Starting…' : 'Replace card'}</button>
+                <button className="btn btn-secondary" style={{ color: '#dc2626', borderColor: '#fecaca' }} onClick={removeCard} disabled={cardBusy}>Remove</button>
+              </div>
+            </div>
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid #f1f5f9', fontSize: 13, color: '#059669', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>✓</span>
+              <span><strong>Wix-style 1-Click checkout active:</strong> Returning orders, user seat updates, and domain/subscription renewals automatically use this saved card without requiring you to refill forms.</span>
+            </div>
           </div>
         ) : (
           <div>
-            <p style={{ color: '#6b7280', marginTop: 0 }}>No card saved. Add one to enable automatic renewals.</p>
-            <button className="btn btn-primary" onClick={addCard} disabled={cardBusy}>{cardBusy ? 'Starting…' : '+ Add card'}</button>
+            <p style={{ color: '#6b7280', marginTop: 0, fontSize: 14 }}>
+              No card saved yet. Whenever you pay for any order or subscription with a card, your payment information is stored securely in your Payment Account (like Wix) so you never need to re-enter payment details again.
+            </p>
+            <button className="btn btn-primary" onClick={addCard} disabled={cardBusy}>{cardBusy ? 'Starting…' : '+ Add payment card'}</button>
           </div>
         )}
-        {cardMsg && <div style={{ marginTop: 10, fontSize: 14, color: cardMsg.startsWith('Card removed') ? '#166534' : '#b42318' }}>{cardMsg}</div>}
+        {cardMsg && <div style={{ marginTop: 10, fontSize: 14, color: cardMsg.startsWith('Card removed') || cardMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{cardMsg}</div>}
       </div>
 
       {/* Two-step verification */}
@@ -11084,6 +11415,16 @@ function WorkspaceOrderFlow({ initialDomain = '', initialStep = 1, onBackToDomai
   const [loginInfo, setLoginInfo] = useState(null);
   const [domainStatus, setDomainStatus] = useState(initialDomain ? { state: 'available', message: `✓ Domain ${initialDomain} is registered & ready.` } : { state: 'idle', message: '' }); // idle|checking|available|taken|invalid
   const [draftLoaded, setDraftLoaded] = useState(false);
+  const [savedCard, setSavedCard] = useState({ hasCard: false });
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      axios.get(`${API_URL}/customer/billing/card`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => setSavedCard(r.data || { hasCard: false }))
+        .catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     if (initialDomain) {
@@ -11306,6 +11647,11 @@ function WorkspaceOrderFlow({ initialDomain = '', initialStep = 1, onBackToDomai
         { headers: token ? { Authorization: `Bearer ${token}` } : {} });
       if (res.data.checkoutUrl) {
         window.location.href = res.data.checkoutUrl; // Stripe or Nicky hosted checkout
+      } else if (res.data.paid) {
+        setProvisionMsg('✓ ' + (res.data.message || 'Payment confirmed with your saved card! Setting up your workspace…'));
+        setTimeout(() => {
+          provisionOrder();
+        }, 1200);
       } else {
         setProvisionMsg('Could not start checkout.');
       }
@@ -11623,9 +11969,16 @@ function WorkspaceOrderFlow({ initialDomain = '', initialStep = 1, onBackToDomai
               admin sign-in details.
             </p>
             {provisionMsg && <div className="wof-verify-msg">{provisionMsg}</div>}
-            <div className="wof-actions" style={{ gap: 12 }}>
-              <button type="button" className="wof-btn primary" onClick={() => payNow('stripe')} disabled={provisioning} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                {provisioning ? 'Starting…' : <><CardIcon size={16} /><span>Pay by card</span></>}
+            <div className="wof-actions" style={{ gap: 12, flexWrap: 'wrap' }}>
+              {savedCard?.hasCard && (
+                <button type="button" className="wof-btn" onClick={() => payNow('saved_card')} disabled={provisioning}
+                  style={{ background: '#059669', color: '#fff', border: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontWeight: 700, boxShadow: '0 1px 2px rgba(5,150,105,0.2)' }}>
+                  {provisioning ? 'Processing…' : <><span>⚡ 1-Click Pay (•••• {savedCard.last4})</span></>}
+                </button>
+              )}
+              <button type="button" className="wof-btn primary" onClick={() => payNow('stripe')} disabled={provisioning}
+                style={{ background: savedCard?.hasCard ? '#fff' : '#2563eb', color: savedCard?.hasCard ? '#374151' : '#fff', border: savedCard?.hasCard ? '1px solid #d1d5db' : 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                {provisioning ? 'Starting…' : <><CardIcon size={16} /><span>{savedCard?.hasCard ? 'Use another card' : 'Pay by card'}</span></>}
               </button>
               <button type="button" className="wof-btn" onClick={() => payNow('nicky')} disabled={provisioning} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                 {provisioning ? 'Starting…' : <><CryptoIcon size={16} /><span>Pay with crypto</span></>}
