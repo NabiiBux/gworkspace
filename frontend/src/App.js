@@ -152,10 +152,30 @@ export const NavIcons = {
       <path d="M12 7v10M8.5 9.5c0-1.5 1.5-2 3.5-2s3.5.7 3.5 2c0 2.5-7 1.5-7 4 0 1.3 1.5 2 3.5 2s3.5-.5 3.5-2" stroke="#9333ea" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   ),
+  GsuiteAddon: ({ size = 20 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M4 11V6a2 2 0 0 1 2-2h4.5a1.5 1.5 0 0 1 1.5 1.5v5.5H4z" fill="#4285F4" />
+      <path d="M12 4h4.5a2 2 0 0 1 2 2v4.5a1.5 1.5 0 0 1-1.5 1.5H12V4z" fill="#EA4335" />
+      <path d="M4 12h5v5.5a1.5 1.5 0 0 1-1.5 1.5H6a2 2 0 0 1-2-2V12z" fill="#FBBC05" />
+      <path d="M12 12h6.5a1.5 1.5 0 0 1 1.5 1.5V18a2 2 0 0 1-2 2h-4.5a1.5 1.5 0 0 1-1.5-1.5V12z" fill="#34A853" />
+      <circle cx="12" cy="12" r="4.8" fill="#ffffff" stroke="#e2e8f0" strokeWidth="0.8" />
+      <circle cx="12" cy="12" r="3.8" fill="#ecfdf5" />
+      <path d="M12 9.6v4.8M10.6 10.6c0-.7.6-1 1.4-1s1.4.3 1.4.9c0 1.2-2.8.6-2.8 1.9 0 .6.6 1 1.4 1s1.4-.3 1.4-.9" stroke="#059669" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  ),
   Settings: ({ size = 20 }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="3" fill="#475569" fillOpacity="0.25" stroke="#475569" strokeWidth="2" />
-      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="#475569" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"
+        fill="#6366f1"
+        fillOpacity="0.18"
+        stroke="#4f46e5"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3.2" fill="#ffffff" stroke="#4f46e5" strokeWidth="1.8" />
+      <circle cx="12" cy="12" r="1.5" fill="#f59e0b" />
     </svg>
   ),
   AdminProducts: ({ size = 20 }) => (
@@ -1285,10 +1305,10 @@ const Dashboard = () => {
 
   const sectionLabels = {
     'overview': '📊 Overview & Analytics',
-    'order-workspace': '✨ Order Workspace',
+    'order-workspace': 'Setup Google Workspace',
     'domain-orders': '🌐 Domain Orders',
     'products': '📦 Products',
-    'addon-pricing': '🧩 Add-on Pricing',
+    'addon-pricing': 'Gsuite Addon Prices',
     'subs-pk': '🇵🇰 Pakistan Workspace',
     'subs-usa': '🇺🇸 USA Voice',
     'customers': '👥 Customers',
@@ -1317,10 +1337,10 @@ const Dashboard = () => {
 
   const adminNavItems = [
     { key: 'overview', label: 'Overview', icon: <NavIcons.Overview size={18} />, bg: '#eef2ff', border: '#e0e7ff' },
-    { key: 'order-workspace', label: 'Order Workspace', icon: <GoogleWorkspaceIcon size={18} />, bg: '#ffffff', border: '#e2e8f0', shadow: true },
+    { key: 'order-workspace', label: 'Setup Google Workspace', icon: <GoogleWorkspaceIcon size={18} />, bg: '#ffffff', border: '#e2e8f0', shadow: true },
     { key: 'domain-orders', label: 'Domain Orders', icon: <NavIcons.Domains size={18} />, bg: '#ecfeff', border: '#cffafe' },
     { key: 'products', label: 'Products', icon: <NavIcons.AdminProducts size={18} />, bg: '#fef3c7', border: '#fde68a' },
-    { key: 'addon-pricing', label: 'Add-on Pricing', icon: <NavIcons.Pricing size={18} />, bg: '#f5f3ff', border: '#ede9fe' },
+    { key: 'addon-pricing', label: 'Gsuite Addon Prices', icon: <NavIcons.GsuiteAddon size={18} />, bg: '#ffffff', border: '#e2e8f0', shadow: true },
     { key: 'subs-pk', label: 'Pakistan Workspace', icon: <NavIcons.PkFlag size={18} />, bg: '#01411c', border: '#065f46' },
     { key: 'subs-usa', label: 'USA Voice', icon: <NavIcons.UsaFlag size={18} />, bg: '#ffffff', border: '#e2e8f0' },
     { key: 'customers', label: 'Customers', icon: <NavIcons.AdminCustomers size={18} />, bg: '#e0f2fe', border: '#bae6fd' },
@@ -1435,7 +1455,7 @@ const Dashboard = () => {
           className={`bottom-nav-item ${activeSection === 'overview' ? 'active' : ''}`}
           onClick={() => setActiveSection('overview')}
         >
-          <span className="bottom-nav-icon">📊</span>
+          <span className="bottom-nav-icon"><NavIcons.Overview size={18} /></span>
           <span className="bottom-nav-label">Dashboard</span>
         </button>
         <button
@@ -1443,7 +1463,7 @@ const Dashboard = () => {
           className={`bottom-nav-item ${(activeSection === 'subs-pk' || activeSection === 'subs-usa') ? 'active' : ''}`}
           onClick={() => setActiveSection('subs-pk')}
         >
-          <span className="bottom-nav-icon">📋</span>
+          <span className="bottom-nav-icon"><NavIcons.Subscriptions size={18} /></span>
           <span className="bottom-nav-label">Subscriptions</span>
         </button>
         <button
@@ -1451,7 +1471,7 @@ const Dashboard = () => {
           className={`bottom-nav-item ${activeSection === 'payments' ? 'active' : ''}`}
           onClick={() => setActiveSection('payments')}
         >
-          <span className="bottom-nav-icon">⚙️</span>
+          <span className="bottom-nav-icon"><NavIcons.Settings size={18} /></span>
           <span className="bottom-nav-label">Settings</span>
         </button>
       </div>
@@ -1812,7 +1832,10 @@ const AdminAddonPricing = () => {
 
   return (
     <div className="section">
-      <h2 style={{ marginTop: 0 }}>🧩 Add-on & SKU Pricing</h2>
+      <h2 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <NavIcons.GsuiteAddon size={24} />
+        <span>Gsuite Addon Prices</span>
+      </h2>
       <p style={{ color: '#6b7280' }}>Set your selling price (per user / month) for each plan and add-on. <strong>Add-ons with no price set cannot be purchased by customers</strong> — they'll see "Contact support" instead.</p>
 
       {msg && <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 16, background: msg.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: msg.startsWith('✓') ? '#166534' : '#92600a' }}>{msg}</div>}
@@ -5213,8 +5236,8 @@ const CustomerPortal = () => {
   const navItems = [
     { key: 'overview', label: 'Overview', icon: <NavIcons.Overview size={20} />, bg: '#eef2ff', border: '#e0e7ff' },
     { key: 'dashboard', label: 'My subscriptions', icon: <NavIcons.Subscriptions size={20} />, bg: '#f5f3ff', border: '#ede9fe' },
-    { key: 'order', label: 'New subscription', icon: <NavIcons.NewSubscription size={20} />, bg: '#ecfdf5', border: '#d1fae5' },
-    { key: 'addons', label: 'Google Workspace Subscriptions', icon: <GoogleWorkspaceIcon size={20} />, bg: '#ffffff', border: '#e2e8f0', shadow: true },
+    { key: 'order', label: 'Setup Google Workspace', icon: <GoogleWorkspaceIcon size={20} />, bg: '#ffffff', border: '#e2e8f0', shadow: true },
+    { key: 'addons', label: 'Google Workspace Subscriptions', icon: <NavIcons.GsuiteAddon size={20} />, bg: '#ffffff', border: '#e2e8f0', shadow: true },
     { key: 'import', label: 'Import Workspace', icon: <NavIcons.Import size={20} />, bg: '#f0f9ff', border: '#e0f2fe' },
     { key: 'domains', label: 'Domains', icon: <NavIcons.Domains size={20} />, bg: '#ecfeff', border: '#cffafe' },
     { key: 'ssl', label: 'SSL certificates', icon: <NavIcons.SSL size={20} />, bg: '#f0fdf4', border: '#dcfce7' },
@@ -5223,7 +5246,7 @@ const CustomerPortal = () => {
     { key: 'payments', label: 'Payments', icon: <NavIcons.Payments size={20} />, bg: '#faf5ff', border: '#f3e8ff' },
     { key: 'balance', label: 'Balance', icon: <NavIcons.Balance size={20} />, bg: '#fffbeb', border: '#fef3c7' },
     { key: 'support', label: 'Support', icon: <NavIcons.Support size={20} />, bg: '#fff1f2', border: '#ffe4e6' },
-    { key: 'settings', label: 'Account settings', icon: <NavIcons.Settings size={20} />, bg: '#f8fafc', border: '#e2e8f0' },
+    { key: 'settings', label: 'Account settings', icon: <NavIcons.Settings size={20} />, bg: '#eef2ff', border: '#e0e7ff' },
   ];
 
   const name = user?.username || (user?.businessEmail || '').split('@')[0];
@@ -5393,11 +5416,11 @@ const CustomerOverview = ({ onNavigate }) => {
           <h3 style={{ margin: 0 }}>Recent subscriptions</h3>
           <div style={{ display: 'flex', gap: 10 }}>
             <button onClick={() => onNavigate('payments')} style={{ border: '1px solid #e5e7eb', background: '#fff', borderRadius: 999, padding: '8px 18px', cursor: 'pointer', color: INK }}>Payments</button>
-            <button onClick={() => onNavigate('order')} style={{ border: 'none', background: TEAL, color: '#fff', borderRadius: 999, padding: '8px 18px', cursor: 'pointer', fontWeight: 600 }}>New subscription</button>
+            <button onClick={() => onNavigate('order')} style={{ border: 'none', background: TEAL, color: '#fff', borderRadius: 999, padding: '8px 18px', cursor: 'pointer', fontWeight: 600 }}>Setup Google Workspace</button>
           </div>
         </div>
         {loading ? <div style={{ padding: 24 }}>Loading…</div> : subs.length === 0 ? (
-          <div style={{ padding: 24, color: MUTE }}>No subscriptions yet. Click <strong>New subscription</strong> to order Workspace.</div>
+          <div style={{ padding: 24, color: MUTE }}>No subscriptions yet. Click <strong>Setup Google Workspace</strong> to order Workspace.</div>
         ) : subs.map((s, i) => (
           <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', borderBottom: i < subs.length - 1 ? '1px solid #f5f5f5' : 'none' }}>
             <div>
@@ -6503,7 +6526,7 @@ const CustomerSubscriptions = () => {
       <p style={{ color: '#6b7280', fontSize: 13, marginTop: 0 }}>Each subscription is billed and renewed <strong>separately</strong>. Paying one (e.g. Google Workspace) does not renew the others (e.g. Google Voice or add-ons) — pay each one to keep it active.</p>
       {!hasSubs ? (
         <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 18, marginBottom: 24 }}>
-          <p style={{ margin: 0 }}>{data?.note || "No Workspace subscription yet."} Use <strong>New subscription</strong> to get started or <strong>Import Workspace</strong> to transfer an existing one.</p>
+          <p style={{ margin: 0 }}>{data?.note || "No Workspace subscription yet."} Use <strong>Setup Google Workspace</strong> to get started or <strong>Import Workspace</strong> to transfer an existing one.</p>
         </div>
       ) : (
         <table className="data-table" style={{ marginBottom: 24 }}>
@@ -7230,7 +7253,12 @@ const TwoFactorCard = ({ cardStyle, inputStyle }) => {
 
   return (
     <div style={cardStyle}>
-      <h3 style={{ marginTop: 0 }}>Two-step verification</h3>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+        <span style={{ width: 32, height: 32, borderRadius: 8, background: '#f0fdf4', border: '1px solid #dcfce7', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <NavIcons.SSL size={17} />
+        </span>
+        <h3 style={{ margin: 0 }}>Two-step verification</h3>
+      </div>
       {enabled && phase !== 'disabling' && (
         <div>
           <span style={{ background: '#dcfce7', color: '#166534', padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600 }}>✓ Enabled</span>
@@ -7392,11 +7420,19 @@ const CustomerSettings = () => {
 
   return (
     <div className="section">
-      <h2>⚙ Account Settings</h2>
+      <h2 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <NavIcons.Settings size={24} />
+        <span>Account Settings</span>
+      </h2>
 
       {/* Account info */}
       <div style={cardStyle}>
-        <h3 style={{ marginTop: 0 }}>Account info</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <span style={{ width: 32, height: 32, borderRadius: 8, background: '#eff6ff', border: '1px solid #dbeafe', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <NavIcons.AdminCustomers size={18} />
+          </span>
+          <h3 style={{ margin: 0 }}>Account info</h3>
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div><Label>First name</Label><input style={inputStyle} value={profile.firstName} onChange={set('firstName')} /></div>
           <div><Label>Last name</Label><input style={inputStyle} value={profile.lastName} onChange={set('lastName')} /></div>
@@ -7420,7 +7456,12 @@ const CustomerSettings = () => {
 
       {/* Login & security */}
       <div style={cardStyle}>
-        <h3 style={{ marginTop: 0 }}>Login &amp; security</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <span style={{ width: 32, height: 32, borderRadius: 8, background: '#ecfeff', border: '1px solid #cffafe', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <NavIcons.SSL size={17} />
+          </span>
+          <h3 style={{ margin: 0 }}>Login &amp; security</h3>
+        </div>
         <Label>Email</Label>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <input style={{ ...inputStyle, flex: 1, minWidth: 220 }} value={profile.businessEmail} onChange={set('businessEmail')} />
@@ -7450,7 +7491,12 @@ const CustomerSettings = () => {
 
       {/* Payment methods */}
       <div style={cardStyle}>
-        <h3 style={{ marginTop: 0 }}>Payment methods</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <span style={{ width: 32, height: 32, borderRadius: 8, background: '#faf5ff', border: '1px solid #f3e8ff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <NavIcons.Payments size={17} />
+          </span>
+          <h3 style={{ margin: 0 }}>Payment methods</h3>
+        </div>
         {card.hasCard ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 16px', flexWrap: 'wrap' }}>
             <span style={{ fontSize: 15 }}>💳 <strong style={{ textTransform: 'capitalize' }}>{card.brand || 'Card'}</strong> ending in •••• {card.last4}</span>
