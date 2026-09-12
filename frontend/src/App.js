@@ -632,6 +632,8 @@ const AuthSocialButtons = ({ label, googleBtnRef, showGoogleFallback, onGoogleFa
 const CustomerAuthFlow = () => {
   const { login } = useAuth();
   const brand = useBranding();
+  const isRegisterInitial = typeof window !== 'undefined' && window.location.pathname.startsWith('/register');
+  const [tabIntent, setTabIntent] = useState(isRegisterInitial ? 'signup' : 'login');
   const [step, setStep] = useState('email'); // 'email' | 'login' | 'signup' | '2fa'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -796,113 +798,155 @@ const CustomerAuthFlow = () => {
   });
 
   return (
-    <div className="auth-container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: 'linear-gradient(135deg,#6e46eb 0%,#5433bd 45%,#3f2590 100%)' }}>
-      <style>{`
-        .cauth, .cauth * { box-sizing: border-box; }
-        .cauth .field { width: 100%; height: 46px; border-radius: 8px; border: 1px solid #d8dbe6; padding: 0 12px; font-size: 15px; }
-        .cauth .field:focus { outline: none; border-color: #6e46eb; }
-        .cauth .btn-primary { width: 100%; height: 48px; border-radius: 8px; font-weight: 700; cursor: pointer; border: none; background: #3b5cff; color: #fff; font-size: 15px; }
-        .cauth .btn-primary:disabled { opacity: 0.6; cursor: default; }
-        .cauth .btn-social { width: 100%; height: 46px; border-radius: 8px; font-weight: 600; cursor: pointer; border: 1px solid #d8dbe6; background: #fff; color: #111827; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15px; }
-        .cauth .btn-social:hover { background: #f8fafc; }
-        .cauth .divider { display: flex; align-items: center; gap: 10px; color: #9ca3af; font-size: 13px; margin: 16px 0; }
-        .cauth .divider::before, .cauth .divider::after { content: ''; flex: 1; height: 1px; background: #e5e7eb; }
-        .cauth .linkbtn { background: transparent; border: none; color: #3b5cff; font-weight: 600; cursor: pointer; padding: 0; font-size: 14px; }
-        .cauth .emailchip { display: flex; align-items: center; justify-content: space-between; border: 1px solid #d8dbe6; border-radius: 8px; padding: 8px 12px; font-size: 14px; color: #374151; }
-        .cauth .errbox { background: #fde8e8; color: #b42318; padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 12px; }
-        .cauth .infobox { background: #eef2ff; color: #3730a3; padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 12px; }
-      `}</style>
-      <div className="cauth" style={{ background: '#fff', borderRadius: 16, padding: '28px 28px 22px', width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
-        <div style={{ textAlign: 'center', marginBottom: 18 }}>
-          {brand.logoDataUrl
-            ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 46, maxWidth: 180, marginBottom: 6 }} />
-            : <div style={{ width: 48, height: 48, borderRadius: 12, background: '#6e46eb', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 22, marginBottom: 8 }}>{(brand.brandName || 'G')[0]}</div>}
+    <div className="auth-page-wrapper">
+      <div className="auth-top-nav">
+        <a href="/" className="auth-back-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          <span>Back to website</span>
+        </a>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#475569', background: '#ffffff', padding: '5px 12px', borderRadius: 999, border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+            🔒 Official Workspace Partner Portal
+          </span>
         </div>
+      </div>
 
-        {step === 'email' && (
-          <>
-            <h1 style={{ fontSize: 26, textAlign: 'center', margin: '0 0 4px', color: '#111827' }}>Sign up</h1>
-            <p style={{ textAlign: 'center', color: '#6b7280', margin: '0 0 20px', fontSize: 14 }}>
-              Already have an account? Just enter your email to log in.
-            </p>
-            {error && <div className="errbox">{error}</div>}
-            {info && <div className="infobox">{info}</div>}
-            <AuthSocialButtons {...socialProps('Continue')} />
-            <div className="divider">or</div>
-            <form onSubmit={continueWithEmail} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <input className="field" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
-              <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Please wait…' : 'Continue with Email'}</button>
-            </form>
-          </>
-        )}
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 16px' }}>
+        <style>{`
+          .cauth, .cauth * { box-sizing: border-box; }
+          .cauth .field { width: 100%; height: 46px; border-radius: 10px; border: 1px solid #cbd5e1; padding: 0 14px; font-size: 15px; transition: border-color 0.15s, box-shadow 0.15s; }
+          .cauth .field:focus { outline: none; border-color: #6e46eb; box-shadow: 0 0 0 3px rgba(110, 70, 235, 0.12); }
+          .cauth .btn-primary { width: 100%; height: 48px; border-radius: 10px; font-weight: 700; cursor: pointer; border: none; background: #6e46eb; color: #fff; font-size: 15px; transition: background 0.15s, transform 0.1s; }
+          .cauth .btn-primary:hover:not(:disabled) { background: #5b35d5; }
+          .cauth .btn-primary:disabled { opacity: 0.6; cursor: default; }
+          .cauth .btn-social { width: 100%; height: 46px; border-radius: 10px; font-weight: 600; cursor: pointer; border: 1px solid #e2e8f0; background: #fff; color: #1e293b; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 14.5px; transition: background 0.15s; }
+          .cauth .btn-social:hover { background: #f8fafc; border-color: #cbd5e1; }
+          .cauth .divider { display: flex; align-items: center; gap: 10px; color: #94a3b8; font-size: 13px; margin: 18px 0; }
+          .cauth .divider::before, .cauth .divider::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+          .cauth .linkbtn { background: transparent; border: none; color: #6e46eb; font-weight: 600; cursor: pointer; padding: 0; font-size: 14px; }
+          .cauth .linkbtn:hover { text-decoration: underline; }
+          .cauth .emailchip { display: flex; align-items: center; justify-content: space-between; border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 10px; padding: 10px 14px; font-size: 14px; color: #1e293b; font-weight: 600; }
+          .cauth .errbox { background: #fef2f2; color: #b91c1c; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; margin-bottom: 14px; border: 1px solid #fecaca; }
+          .cauth .infobox { background: #eff6ff; color: #1d4ed8; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; margin-bottom: 14px; border: 1px solid #bfdbfe; }
+        `}</style>
 
-        {step === 'login' && (
-          <>
-            <button className="linkbtn" onClick={goBackToEmail} style={{ marginBottom: 12 }}>← Back</button>
-            <h1 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 6px', color: '#111827' }}>You already have an account</h1>
-            <p style={{ textAlign: 'center', color: '#6b7280', margin: '0 0 18px', fontSize: 14 }}>
-              There's already an account with this email. {googleOnly ? 'Continue with Google to log in.' : 'Enter your password to log in.'}
-            </p>
-            {error && <div className="errbox">{error}</div>}
-            {info && <div className="infobox">{info}</div>}
-            <div className="emailchip" style={{ marginBottom: 12 }}>
-              <span>{email}</span>
-              <button className="linkbtn" onClick={goBackToEmail} title="Use a different email">✕</button>
-            </div>
-            {!googleOnly && (
-              <form onSubmit={doLogin} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ position: 'relative' }}>
-                  <input className="field" type={showPw ? 'text' : 'password'} placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ paddingRight: 60 }} autoFocus />
-                  <button type="button" onClick={() => setShowPw((v) => !v)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{showPw ? 'Hide' : 'Show'}</button>
-                </div>
-                <button type="button" className="linkbtn" onClick={() => setInfo('To reset your password, please contact support and we\'ll help you back in.')} style={{ alignSelf: 'flex-start' }}>Forgot Password?</button>
-                <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Logging in…' : 'Continue with Email'}</button>
-              </form>
-            )}
-            <div className="divider">or</div>
-            <AuthSocialButtons {...socialProps('Continue')} />
-          </>
-        )}
+        <div className="cauth auth-card-modern">
+          <div style={{ textAlign: 'center', marginBottom: 20 }}>
+            {brand.logoDataUrl
+              ? <a href="/"><img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 44, maxWidth: 180, marginBottom: 8 }} /></a>
+              : <a href="/" style={{ textDecoration: 'none', display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div style={{ width: 44, height: 44, borderRadius: 12, background: '#6e46eb', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 20, marginBottom: 6, boxShadow: '0 4px 12px rgba(110,70,235,0.25)' }}>{(brand.brandName || 'G')[0]}</div>
+                  <strong style={{ fontSize: 17, color: '#0f172a', letterSpacing: '-0.02em', fontWeight: 700 }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
+                </a>
+            }
+          </div>
 
-        {step === '2fa' && (
-          <>
-            <button className="linkbtn" onClick={() => { setStep('login'); setOtp(''); setError(''); }} style={{ marginBottom: 12 }}>← Back</button>
-            <h1 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 6px', color: '#111827' }}>Two-step verification</h1>
-            <p style={{ textAlign: 'center', color: '#6b7280', margin: '0 0 18px', fontSize: 14 }}>Enter the 6-digit code from your authenticator app.</p>
-            {error && <div className="errbox">{error}</div>}
-            <form onSubmit={doLoginOtp} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <input className="field" style={{ textAlign: 'center', letterSpacing: 6, fontSize: 20 }} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="123456" inputMode="numeric" autoFocus />
-              <button type="submit" className="btn-primary" disabled={loading || otp.length < 6}>{loading ? 'Verifying…' : 'Verify & log in'}</button>
-            </form>
-          </>
-        )}
-
-        {step === 'signup' && (
-          <>
-            <button className="linkbtn" onClick={goBackToEmail} style={{ marginBottom: 12 }}>← Back</button>
-            <h1 style={{ fontSize: 26, textAlign: 'center', margin: '0 0 6px', color: '#111827' }}>Sign up</h1>
-            <p style={{ textAlign: 'center', color: '#6b7280', margin: '0 0 18px', fontSize: 14 }}>Create your account to get started.</p>
-            {error && <div className="errbox">{error}</div>}
-            {info && <div className="infobox">{info}</div>}
-            <div className="emailchip" style={{ marginBottom: 12 }}>
-              <span>{email}</span>
-              <button className="linkbtn" onClick={goBackToEmail} title="Use a different email">✕</button>
-            </div>
-            <form onSubmit={doSignup} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ position: 'relative' }}>
-                <input className="field" type={showPw ? 'text' : 'password'} placeholder="Choose a password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ paddingRight: 60 }} autoFocus />
-                <button type="button" onClick={() => setShowPw((v) => !v)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{showPw ? 'Hide' : 'Show'}</button>
+          {step === 'email' && (
+            <>
+              <div className="auth-segmented-pill">
+                <button
+                  type="button"
+                  className={`auth-segmented-tab ${tabIntent === 'login' ? 'active' : ''}`}
+                  onClick={() => { setTabIntent('login'); setError(''); setInfo(''); }}
+                >
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  className={`auth-segmented-tab ${tabIntent === 'signup' ? 'active' : ''}`}
+                  onClick={() => { setTabIntent('signup'); setError(''); setInfo(''); }}
+                >
+                  Create Account
+                </button>
               </div>
-              <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Creating account…' : 'Sign Up'}</button>
-            </form>
-            <div className="divider">or sign up with</div>
-            <AuthSocialButtons {...socialProps('Sign up')} />
-          </>
-        )}
 
-        <p style={{ textAlign: 'center', color: '#9ca3af', fontSize: 12, margin: '18px 0 0' }}>
-          By continuing, you agree to our <a href="/voice-aup" target="_blank" rel="noreferrer" style={{ color: '#6b7280' }}>Terms</a> and Privacy Policy.
-        </p>
+              <h1 style={{ fontSize: 22, textAlign: 'center', margin: '0 0 6px', color: '#0f172a', fontWeight: 800, letterSpacing: '-0.02em' }}>
+                {tabIntent === 'login' ? 'Welcome back' : 'Get started'}
+              </h1>
+              <p style={{ textAlign: 'center', color: '#64748b', margin: '0 0 20px', fontSize: 14, lineHeight: 1.5 }}>
+                {tabIntent === 'login'
+                  ? 'Sign in to access your Workspace console and services.'
+                  : 'Enter your business email to set up your account.'}
+              </p>
+              {error && <div className="errbox">{error}</div>}
+              {info && <div className="infobox">{info}</div>}
+              <AuthSocialButtons {...socialProps(tabIntent === 'signup' ? 'Sign up' : 'Continue')} />
+              <div className="divider">or continue with email</div>
+              <form onSubmit={continueWithEmail} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <input className="field" type="email" placeholder="name@company.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
+                <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Please wait…' : 'Continue with Email'}</button>
+              </form>
+            </>
+          )}
+
+          {step === 'login' && (
+            <>
+              <button className="linkbtn" onClick={goBackToEmail} style={{ marginBottom: 14, display: 'inline-flex', alignItems: 'center', gap: 4 }}>← Use different email</button>
+              <h1 style={{ fontSize: 22, textAlign: 'center', margin: '0 0 6px', color: '#0f172a', fontWeight: 800 }}>Account found</h1>
+              <p style={{ textAlign: 'center', color: '#64748b', margin: '0 0 18px', fontSize: 14 }}>
+                {googleOnly ? 'Continue with Google to access your portal.' : 'Enter your password to sign in.'}
+              </p>
+              {error && <div className="errbox">{error}</div>}
+              {info && <div className="infobox">{info}</div>}
+              <div className="emailchip" style={{ marginBottom: 14 }}>
+                <span>{email}</span>
+                <button className="linkbtn" onClick={goBackToEmail} title="Change email">✕</button>
+              </div>
+              {!googleOnly && (
+                <form onSubmit={doLogin} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ position: 'relative' }}>
+                    <input className="field" type={showPw ? 'text' : 'password'} placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ paddingRight: 60 }} autoFocus />
+                    <button type="button" onClick={() => setShowPw((v) => !v)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{showPw ? 'Hide' : 'Show'}</button>
+                  </div>
+                  <button type="button" className="linkbtn" onClick={() => setInfo('To reset your password, please contact support and we\'ll assist you.')} style={{ alignSelf: 'flex-start', fontSize: 13 }}>Forgot Password?</button>
+                  <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Logging in…' : 'Sign in to Portal'}</button>
+                </form>
+              )}
+              <div className="divider">or continue with</div>
+              <AuthSocialButtons {...socialProps('Continue')} />
+            </>
+          )}
+
+          {step === '2fa' && (
+            <>
+              <button className="linkbtn" onClick={() => { setStep('login'); setOtp(''); setError(''); }} style={{ marginBottom: 14, display: 'inline-flex', alignItems: 'center', gap: 4 }}>← Back</button>
+              <h1 style={{ fontSize: 22, textAlign: 'center', margin: '0 0 6px', color: '#0f172a', fontWeight: 800 }}>Two-step verification</h1>
+              <p style={{ textAlign: 'center', color: '#64748b', margin: '0 0 18px', fontSize: 14 }}>Enter the 6-digit code from your authenticator app.</p>
+              {error && <div className="errbox">{error}</div>}
+              <form onSubmit={doLoginOtp} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <input className="field" style={{ textAlign: 'center', letterSpacing: 6, fontSize: 20, fontWeight: 700 }} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="123456" inputMode="numeric" autoFocus />
+                <button type="submit" className="btn-primary" disabled={loading || otp.length < 6}>{loading ? 'Verifying…' : 'Verify & Sign In'}</button>
+              </form>
+            </>
+          )}
+
+          {step === 'signup' && (
+            <>
+              <button className="linkbtn" onClick={goBackToEmail} style={{ marginBottom: 14, display: 'inline-flex', alignItems: 'center', gap: 4 }}>← Use different email</button>
+              <h1 style={{ fontSize: 22, textAlign: 'center', margin: '0 0 6px', color: '#0f172a', fontWeight: 800 }}>Create your account</h1>
+              <p style={{ textAlign: 'center', color: '#64748b', margin: '0 0 18px', fontSize: 14 }}>Set up a password for your account.</p>
+              {error && <div className="errbox">{error}</div>}
+              {info && <div className="infobox">{info}</div>}
+              <div className="emailchip" style={{ marginBottom: 14 }}>
+                <span>{email}</span>
+                <button className="linkbtn" onClick={goBackToEmail} title="Change email">✕</button>
+              </div>
+              <form onSubmit={doSignup} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ position: 'relative' }}>
+                  <input className="field" type={showPw ? 'text' : 'password'} placeholder="Choose a secure password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ paddingRight: 60 }} autoFocus />
+                  <button type="button" onClick={() => setShowPw((v) => !v)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{showPw ? 'Hide' : 'Show'}</button>
+                </div>
+                <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Creating account…' : 'Complete Registration'}</button>
+              </form>
+              <div className="divider">or sign up with</div>
+              <AuthSocialButtons {...socialProps('Sign up')} />
+            </>
+          )}
+
+          <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: 12, margin: '20px 0 0' }}>
+            By continuing, you agree to our <a href="/voice-aup" target="_blank" rel="noreferrer" style={{ color: '#64748b', textDecoration: 'underline' }}>Terms</a> and Privacy Policy.
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -1057,7 +1101,19 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
   };
 
   return (
-    <div className="auth-container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: 'linear-gradient(135deg,#6e46eb 0%,#5433bd 45%,#3f2590 100%)' }}>
+    <div className="auth-page-wrapper">
+      <div className="auth-top-nav">
+        <a href="/" className="auth-back-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          <span>Back to website</span>
+        </a>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#475569', background: '#ffffff', padding: '5px 12px', borderRadius: 999, border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+            {adminMode ? '⚙ Admin Console' : '🔒 Secure Portal Login'}
+          </span>
+        </div>
+      </div>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 16px' }}>
       <style>{`
         .auth-card, .auth-card * { box-sizing: border-box; }
         .auth-card .auth-form { display: flex; flex-direction: column; gap: 14px; width: 100%; }
@@ -1090,7 +1146,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
         .auth-card .error-message { background: #fde8e8; color: #b42318; padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 8px; word-break: break-word; }
         @media (max-width: 460px) { .auth-card .form-row { flex-direction: column; gap: 14px; } }
       `}</style>
-      <div className="auth-card" style={{ background: '#fff', borderRadius: 20, padding: '32px', width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
+      <div className="auth-card auth-card-modern" style={{ maxWidth: activeTab === 'register' ? 560 : 440 }}>
         <div className="auth-header" style={{ textAlign: 'center', marginBottom: 8 }}>
           {brand.logoDataUrl
             ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 54, maxWidth: 200, marginBottom: 8 }} />
@@ -1279,6 +1335,7 @@ const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
             </button>
           </form>
         )}
+        </div>
       </div>
     </div>
   );
@@ -5167,7 +5224,7 @@ const TEAL_DARK = '#5a37c4';
 const INK = '#1f2937';
 const MUTE = '#6b7280';
 
-const CustomerPortal = () => {
+const CustomerPortal = ({ onViewStorefront }) => {
   const { user, logout } = useAuth();
   const brand = useBranding();
   // Restore the section from the URL hash so a refresh keeps you on the same page.
@@ -5176,10 +5233,13 @@ const CustomerPortal = () => {
   const [section, setSectionState] = useState(initialSection || 'overview');
   const [payBanner, setPayBanner] = useState('');
 
-  // Wrap setSection so changing pages also updates the URL hash.
+  // Wrap setSection so changing pages also updates the URL hash and scrolls to top.
   const setSection = (s) => {
     setSectionState(s);
-    if (typeof window !== 'undefined') window.location.hash = s;
+    if (typeof window !== 'undefined') {
+      window.location.hash = s;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   // Keep section in sync if the user uses browser back/forward.
@@ -5254,18 +5314,36 @@ const CustomerPortal = () => {
   return (
     <div style={{ minHeight: '100vh', background: '#f8fafc', color: INK, fontFamily: "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>
       {/* Top bar */}
-      <header className="cp-header" style={{ background: '#fff', borderBottom: '1px solid #e2e8f0', padding: '14px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(8px)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <header className="cp-header" style={{ background: '#fff', borderBottom: '1px solid #e2e8f0', padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(8px)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           {brand.logoDataUrl
             ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 38, maxWidth: 180 }} />
             : <>
               <div style={{ width: 36, height: 36, borderRadius: 10, background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 16, boxShadow: '0 2px 6px rgba(110,70,235,0.3)' }}>{(brand.brandName || 'G')[0]}</div>
               <strong style={{ fontSize: 18, color: '#0f172a', letterSpacing: '-0.02em', fontWeight: 700 }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
             </>}
+          <span style={{ background: '#f5f3ff', color: '#6e46eb', padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700, border: '1px solid #ede9fe' }}>Customer Portal</span>
         </div>
-        <div className="cp-header-right" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <span className="cp-header-welcome" style={{ color: MUTE, fontSize: 14 }}>Welcome, <strong style={{ color: INK }}>{name}</strong></span>
-          <span style={{ background: '#f1f5f9', color: '#475569', padding: '4px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600, border: '1px solid #e2e8f0' }}>Customer</span>
+        <div className="cp-header-right" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {onViewStorefront && (
+            <button
+              type="button"
+              onClick={onViewStorefront}
+              className="btn btn-outline"
+              style={{ padding: '6px 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              title="View Public Website / Plans"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+              <span>View Website</span>
+            </button>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 6, borderLeft: '1px solid #e2e8f0' }}>
+            <div className="cp-user-avatar">{(name || 'U')[0].toUpperCase()}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+              <span style={{ color: '#0f172a', fontWeight: 700, fontSize: 13.5 }}>{name}</span>
+              <span style={{ color: '#64748b', fontSize: 11 }}>Active Client</span>
+            </div>
+          </div>
           <button onClick={logout} style={{ border: '1px solid #e2e8f0', background: '#fff', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', color: '#475569', fontSize: 13, fontWeight: 600, transition: 'all 0.15s ease' }}>Logout</button>
         </div>
       </header>
@@ -5297,11 +5375,44 @@ const CustomerPortal = () => {
                 </button>
               );
             })}
+            {onViewStorefront && (
+              <button
+                type="button"
+                onClick={onViewStorefront}
+                className="cp-nav-btn"
+                style={{ marginTop: 12, borderTop: '1px solid #f1f5f9', paddingTop: 12, color: '#64748b' }}
+              >
+                <span className="cp-nav-badge" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                </span>
+                <span style={{ flex: 1, whiteSpace: 'nowrap' }}>Public Website</span>
+              </button>
+            )}
           </div>
         </aside>
 
         {/* Main content */}
         <main style={{ flex: 1, minWidth: 0 }}>
+          <div className="cp-breadcrumb-bar">
+            <div className="cp-breadcrumb">
+              <button onClick={() => setSection('overview')} className="cp-breadcrumb-root">Customer Portal</button>
+              <span className="cp-breadcrumb-sep">/</span>
+              <span className="cp-breadcrumb-current">{navItems.find(it => it.key === section)?.label || 'Overview'}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {section !== 'order' && (
+                <button onClick={() => setSection('order')} className="btn btn-primary" style={{ padding: '6px 14px', fontSize: 12.5, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <GoogleWorkspaceIcon size={14} />
+                  <span>+ Setup Workspace</span>
+                </button>
+              )}
+              {section !== 'support' && (
+                <button onClick={() => setSection('support')} className="btn btn-outline" style={{ padding: '6px 12px', fontSize: 12.5 }}>
+                  Help &amp; Tickets
+                </button>
+              )}
+            </div>
+          </div>
           {payBanner && (
             <div style={{ background: payBanner.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: payBanner.startsWith('✓') ? '#166534' : '#92600a', borderRadius: 12, padding: '14px 18px', marginBottom: 18, fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
               <span>{payBanner}</span>
@@ -5370,70 +5481,152 @@ const CustomerOverview = ({ onNavigate }) => {
 
   return (
     <div>
-      <h1 style={{ fontSize: 32, margin: '0 0 6px', color: INK }}>Welcome back, {name}</h1>
-      <p style={{ color: MUTE, margin: '0 0 24px' }}>Your Workspace orders, payments, and mailboxes in one place.</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
+        <div>
+          <h1 style={{ fontSize: 'clamp(1.5rem, 3vw, 2rem)', margin: '0 0 6px', color: INK, fontWeight: 800, letterSpacing: '-0.025em' }}>
+            Welcome back, {name}
+          </h1>
+          <p style={{ color: MUTE, margin: 0, fontSize: 14 }}>
+            Your Workspace subscriptions, domains, and mailboxes in one place.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => onNavigate('order')}
+            className="btn btn-primary"
+            style={{ padding: '10px 20px', fontSize: 14, fontWeight: 700 }}
+          >
+            <GoogleWorkspaceIcon size={18} />
+            Setup Google Workspace
+          </button>
+        </div>
+      </div>
 
       {draft && (
-        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 14, padding: 20, marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 14, padding: 18, marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
           <div>
-            <div style={{ fontWeight: 700, color: '#92600a', marginBottom: 4 }}>⏳ You have an unfinished order</div>
-            <div style={{ color: '#92600a', fontSize: 14 }}>
+            <div style={{ fontWeight: 700, color: '#92600a', marginBottom: 3, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>⏳</span> You have an unfinished order
+            </div>
+            <div style={{ color: '#92600a', fontSize: 13.5 }}>
               {draft.draftData?.form?.domain ? `For ${draft.draftData.form.domain}. ` : ''}Pick up right where you left off — your details are saved.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
-            <button onClick={() => onNavigate('order')} style={{ border: 'none', background: TEAL, color: '#fff', borderRadius: 999, padding: '10px 22px', cursor: 'pointer', fontWeight: 700 }}>Resume order</button>
-            <button onClick={discardDraft} style={{ border: '1px solid #e5e7eb', background: '#fff', borderRadius: 999, padding: '10px 18px', cursor: 'pointer', color: '#92600a' }}>Discard</button>
+            <button onClick={() => onNavigate('order')} className="btn btn-primary" style={{ padding: '8px 18px', fontSize: 13, background: '#d97706' }}>Resume order</button>
+            <button onClick={discardDraft} className="btn btn-outline" style={{ padding: '8px 16px', fontSize: 13, color: '#92600a' }}>Discard</button>
           </div>
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }} className="grid-2">
-        <div style={card}>
-          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>WORKSPACE</div>
-          <div style={{ fontSize: 40, fontWeight: 800, color: INK, margin: '6px 0' }}>{loading ? '…' : active}</div>
-          <div style={{ color: MUTE, fontSize: 14 }}>Active subscriptions</div>
+      {/* Quick Action Cards Bar */}
+      <div className="quick-action-bar">
+        <button onClick={() => onNavigate('order')} className="quick-action-btn">
+          <span style={{ width: 34, height: 34, borderRadius: 10, background: '#f5f3ff', border: '1px solid #ede9fe', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <GoogleWorkspaceIcon size={18} />
+          </span>
+          <span>Setup Workspace</span>
+        </button>
+        <button onClick={() => onNavigate('domains')} className="quick-action-btn">
+          <span style={{ width: 34, height: 34, borderRadius: 10, background: '#ecfeff', border: '1px solid #cffafe', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <NavIcons.Domains size={18} />
+          </span>
+          <span>Register Domain</span>
+        </button>
+        <button onClick={() => onNavigate('ssl')} className="quick-action-btn">
+          <span style={{ width: 34, height: 34, borderRadius: 10, background: '#f0fdf4', border: '1px solid #dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <NavIcons.SSL size={18} />
+          </span>
+          <span>SSL Security</span>
+        </button>
+        <button onClick={() => onNavigate('support')} className="quick-action-btn">
+          <span style={{ width: 34, height: 34, borderRadius: 10, background: '#fff1f2', border: '1px solid #ffe4e6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <NavIcons.Support size={18} />
+          </span>
+          <span>Priority Support</span>
+        </button>
+      </div>
+
+      {/* Responsive Stat Grid */}
+      <div className="cp-stat-grid">
+        <div className="cp-stat-card">
+          <div className="cp-stat-card-accent purple" />
+          <div style={{ fontSize: 11, letterSpacing: '0.08em', color: MUTE, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Workspace</div>
+          <div style={{ fontSize: 'clamp(28px, 4vw, 36px)', fontWeight: 800, color: INK, margin: '4px 0', letterSpacing: '-0.03em' }}>{loading ? '…' : active}</div>
+          <div style={{ color: MUTE, fontSize: 13, fontWeight: 500 }}>Active subscriptions</div>
         </div>
-        <div style={card}>
-          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>HOSTING</div>
-          <div style={{ fontSize: 40, fontWeight: 800, color: TEAL, margin: '6px 0' }}>{loading ? '…' : activeHosting.length}</div>
-          <div style={{ color: MUTE, fontSize: 14 }}>Active plans</div>
+        <div className="cp-stat-card">
+          <div className="cp-stat-card-accent teal" />
+          <div style={{ fontSize: 11, letterSpacing: '0.08em', color: MUTE, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Hosting</div>
+          <div style={{ fontSize: 'clamp(28px, 4vw, 36px)', fontWeight: 800, color: TEAL, margin: '4px 0', letterSpacing: '-0.03em' }}>{loading ? '…' : activeHosting.length}</div>
+          <div style={{ color: MUTE, fontSize: 13, fontWeight: 500 }}>Active cloud plans</div>
         </div>
-        <div style={card}>
-          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>DOMAINS</div>
-          <div style={{ fontSize: 40, fontWeight: 800, color: INK, margin: '6px 0' }}>{loading ? '…' : activeDomains.length}</div>
-          <div style={{ color: MUTE, fontSize: 14 }}>Registered</div>
+        <div className="cp-stat-card">
+          <div className="cp-stat-card-accent blue" />
+          <div style={{ fontSize: 11, letterSpacing: '0.08em', color: MUTE, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Domains</div>
+          <div style={{ fontSize: 'clamp(28px, 4vw, 36px)', fontWeight: 800, color: INK, margin: '4px 0', letterSpacing: '-0.03em' }}>{loading ? '…' : activeDomains.length}</div>
+          <div style={{ color: MUTE, fontSize: 13, fontWeight: 500 }}>Secured domains</div>
         </div>
-        <div style={card}>
-          <div style={{ fontSize: 12, letterSpacing: 1, color: MUTE, fontWeight: 700 }}>SUSPENDED</div>
-          <div style={{ fontSize: 40, fontWeight: 800, color: suspended ? '#b42318' : MUTE, margin: '6px 0' }}>{loading ? '…' : suspended}</div>
-          <div style={{ color: MUTE, fontSize: 14 }}>Need attention</div>
+        <div className="cp-stat-card">
+          <div className="cp-stat-card-accent amber" />
+          <div style={{ fontSize: 11, letterSpacing: '0.08em', color: MUTE, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Attention</div>
+          <div style={{ fontSize: 'clamp(28px, 4vw, 36px)', fontWeight: 800, color: suspended ? '#b42318' : '#10b981', margin: '4px 0', letterSpacing: '-0.03em' }}>{loading ? '…' : suspended || '0'}</div>
+          <div style={{ color: MUTE, fontSize: 13, fontWeight: 500 }}>{suspended ? 'Action required' : 'All systems healthy'}</div>
         </div>
       </div>
 
-      <div style={{ ...card, padding: 0 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid #f0f0f0' }}>
-          <h3 style={{ margin: 0 }}>Recent subscriptions</h3>
+      {/* Subscriptions Card */}
+      <div className="cp-card-elevated">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', borderBottom: '1px solid #f1f5f9', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: INK }}>Recent subscriptions</h3>
+            <span style={{ fontSize: 12, background: '#f1f5f9', color: '#475569', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>{subs.length}</span>
+          </div>
           <div style={{ display: 'flex', gap: 10 }}>
-            <button onClick={() => onNavigate('payments')} style={{ border: '1px solid #e5e7eb', background: '#fff', borderRadius: 999, padding: '8px 18px', cursor: 'pointer', color: INK }}>Payments</button>
-            <button onClick={() => onNavigate('order')} style={{ border: 'none', background: TEAL, color: '#fff', borderRadius: 999, padding: '8px 18px', cursor: 'pointer', fontWeight: 600 }}>Setup Google Workspace</button>
+            <button onClick={() => onNavigate('payments')} className="btn btn-outline" style={{ padding: '6px 14px', fontSize: 13 }}>Billing & Invoices</button>
+            <button onClick={() => onNavigate('dashboard')} className="btn btn-outline" style={{ padding: '6px 14px', fontSize: 13 }}>View All</button>
           </div>
         </div>
-        {loading ? <div style={{ padding: 24 }}>Loading…</div> : subs.length === 0 ? (
-          <div style={{ padding: 24, color: MUTE }}>No subscriptions yet. Click <strong>Setup Google Workspace</strong> to order Workspace.</div>
-        ) : subs.map((s, i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', borderBottom: i < subs.length - 1 ? '1px solid #f5f5f5' : 'none' }}>
-            <div>
-              <div style={{ fontWeight: 700, color: INK }}>{s.domain}</div>
-              <div style={{ color: MUTE, fontSize: 14 }}>{s.skuName} · {s.seats ?? 1} seat{(s.seats ?? 1) === 1 ? '' : 's'}</div>
+        {loading ? (
+          <div style={{ padding: '32px 24px', textAlign: 'center', color: MUTE }}>Loading subscriptions…</div>
+        ) : subs.length === 0 ? (
+          <div style={{ padding: '40px 24px', textAlign: 'center' }}>
+            <div style={{ width: 48, height: 48, borderRadius: 14, background: '#f5f3ff', color: '#6e46eb', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', fontSize: 22 }}>
+              <GoogleWorkspaceIcon size={24} />
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <span style={(s.status === 'ACTIVE') ? pill('#166534', '#dcfce7') : (s.status === 'SUSPENDED') ? pill('#b42318', '#fde8e8') : pill('#92600a', '#fef3c7')}>
-                {s.status === 'ACTIVE' ? 'Active' : s.status === 'SUSPENDED' ? 'Suspended' : (s.status || 'Pending')}
-              </span>
-            </div>
+            <div style={{ fontWeight: 700, color: INK, marginBottom: 4 }}>No subscriptions yet</div>
+            <p style={{ color: MUTE, fontSize: 14, margin: '0 0 16px', maxWidth: 360, marginInline: 'auto' }}>
+              Order your custom domain Google Workspace with automated setup and reseller discounts.
+            </p>
+            <button onClick={() => onNavigate('order')} className="btn btn-primary" style={{ padding: '10px 22px', fontSize: 14 }}>
+              Setup Google Workspace
+            </button>
           </div>
-        ))}
+        ) : (
+          <div className="table-responsive">
+            {subs.map((s, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderBottom: i < subs.length - 1 ? '1px solid #f8fafc' : 'none', transition: 'background 0.15s ease' }} className="hover:bg-[#fcfdff]">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{ width: 38, height: 38, borderRadius: 10, background: '#f5f3ff', border: '1px solid #ede9fe', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <GoogleWorkspaceIcon size={18} />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, color: INK, fontSize: 14.5 }}>{s.domain}</div>
+                    <div style={{ color: MUTE, fontSize: 13 }}>{s.skuName} · {s.seats ?? 1} seat{(s.seats ?? 1) === 1 ? '' : 's'}</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <span style={(s.status === 'ACTIVE') ? pill('#166534', '#dcfce7') : (s.status === 'SUSPENDED') ? pill('#b42318', '#fde8e8') : pill('#92600a', '#fef3c7')}>
+                    {s.status === 'ACTIVE' ? '✓ Active' : s.status === 'SUSPENDED' ? '⚠️ Suspended' : (s.status || 'Pending')}
+                  </span>
+                  <button onClick={() => onNavigate('dashboard')} className="btn btn-outline" style={{ padding: '5px 12px', fontSize: 12.5 }}>
+                    Manage
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -8756,7 +8949,7 @@ const SuccessStoriesSection = ({ brand, T, INKL, MUTEL }) => {
 
 
 // ==================== PUBLIC LANDING PAGE ====================
-const LandingPage = () => {
+const LandingPage = ({ onOpenPortal }) => {
   const brand = useBranding();
   const [plans, setPlans] = useState([]);
   const [dq, setDq] = useState('');
@@ -8868,81 +9061,93 @@ const LandingPage = () => {
   return (
     <div style={{ minHeight: '100vh', background: '#ffffff', fontFamily: 'Geist, sans-serif', color: INKL }}>
       {/* Persistent Sticky Navigation Bar */}
-      <header style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 1000,
-        background: 'rgba(255, 255, 255, 0.96)',
-        backdropFilter: 'blur(8px)',
-        borderBottom: '1px solid rgba(17, 24, 39, 0.06)',
-        width: '100%',
-      }}>
-        <div className="landing-nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem 4rem', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
+      <header className="landing-nav-wrapper">
+        <div className="landing-nav-inner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {brand.logoDataUrl
               ? <img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 40, maxWidth: 200 }} />
               : <>
-                <div style={{ width: 40, height: 40, borderRadius: 10, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>{(brand.brandName || 'G')[0]}</div>
-                <strong style={{ fontSize: 22, color: INKL, fontWeight: 800 }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
+                <div style={{ width: 40, height: 40, borderRadius: 12, background: T, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18, boxShadow: '0 2px 8px rgba(110, 70, 235, 0.25)' }}>{(brand.brandName || 'G')[0]}</div>
+                <strong style={{ fontSize: 20, color: INKL, fontWeight: 800, letterSpacing: '-0.02em' }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
               </>}
           </div>
-          <div style={{ display: 'flex', gap: 24, alignItems: 'center' }} className="nav-links-desktop">
-            <a href="#workspace-calculator-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">Workspace Configurator</a>
-            <a href="#setup-services-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">Services</a>
-            <a href="#faq-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">FAQ</a>
-            <a href="#success-stories-section" style={{ textDecoration: 'none', color: MUTEL, fontSize: '0.9rem', fontWeight: 500, transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">Success Stories</a>
-            <div style={{ display: 'flex', gap: 12, marginLeft: 16 }}>
-              <button onClick={() => go('/login')} className="btn btn-outline" style={{ padding: '0.75rem 1.5rem', borderRadius: 12, fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', border: '1px solid rgba(17, 24, 39, 0.08)', background: '#fff', color: INKL, transition: 'all 0.2s' }}>↪ Login</button>
-              <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '0.75rem 1.5rem', borderRadius: 12, fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', background: T, color: '#fff', transition: 'all 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', border: 'none' }}>+ Sign Up</button>
+          <div className="landing-nav-links">
+            <a href="#workspace-calculator-section" className="landing-nav-link">Workspace Configurator</a>
+            <a href="#setup-services-section" className="landing-nav-link">Services</a>
+            <a href="#faq-section" className="landing-nav-link">FAQ</a>
+            <a href="#success-stories-section" className="landing-nav-link">Success Stories</a>
+            <div style={{ display: 'flex', gap: 10, marginLeft: 12 }}>
+              {onOpenPortal ? (
+                <button
+                  onClick={onOpenPortal}
+                  className="btn btn-primary"
+                  style={{ padding: '0.65rem 1.4rem', fontSize: '0.88rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                >
+                  <span>Customer Portal</span>
+                  <span>→</span>
+                </button>
+              ) : (
+                <>
+                  <button onClick={() => go('/login')} className="btn btn-outline" style={{ padding: '0.65rem 1.25rem', fontSize: '0.88rem' }}>↪ Login</button>
+                  <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '0.65rem 1.4rem', fontSize: '0.88rem' }}>+ Sign Up</button>
+                </>
+              )}
             </div>
           </div>
         </div>
       </header>
 
       {/* Hero */}
-      <section className="landing-hero" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '4rem', maxWidth: 1400, margin: '0 auto', padding: '4rem', alignItems: 'center' }}>
+      <section className="landing-hero-container">
         <ScrollReveal duration={1000}>
-          <div style={{ minWidth: 320 }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: '#f0fdfa', color: '#6e46eb', borderRadius: 99, padding: '0.4rem 1rem', fontSize: '0.8rem', fontWeight: 600, marginBottom: '1.5rem' }}>
+          <div style={{ minWidth: 280 }}>
+            <div className="hero-pill-badge">
               <span style={{ display: 'flex', gap: 4 }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6' }} />
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444' }} />
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b' }} />
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e' }} />
               </span>
-              Business email & apps in one place
+              Official Google Workspace Reseller &amp; Setup
             </div>
-            <h1 className="hero-title" style={{ fontSize: 'clamp(3rem, 5vw, 4.5rem)', lineHeight: 0.95, letterSpacing: '-0.04em', margin: '0 0 1.5rem 0', fontWeight: 800 }}>
+            <h1 className="hero-title">
               Get <span style={{ color: T }}>professional email</span> for your team
             </h1>
-            <p style={{ fontSize: '1.2rem', color: MUTEL, lineHeight: 1.6, margin: '0 0 2.5rem 0', maxWidth: 540 }}>
+            <p className="hero-subtitle">
               The same Gmail, Meet, and Drive you love, optimized for your domain. 
-              Scale your business infrastructure with enterprise-grade reliability and reseller support.
+              Scale your business infrastructure with enterprise-grade reliability and 24/7 dedicated support.
             </p>
             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
               <button onClick={() => {
                 const el = document.getElementById('workspace-calculator-section');
                 if (el) el.scrollIntoView({ behavior: 'smooth' });
-              }} className="btn btn-primary" style={{ padding: '1.1rem 2.2rem', fontSize: '1rem', borderRadius: 12, fontWeight: 600, cursor: 'pointer', background: T, color: '#fff', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.05)' }}>See plans & prices</button>
-              <button onClick={() => go('/register')} className="btn btn-outline" style={{ padding: '1.1rem 2.2rem', fontSize: '1rem', borderRadius: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid rgba(17, 24, 39, 0.08)', background: '#fff', color: INKL }}>Create free account</button>
+              }} className="btn btn-primary" style={{ padding: '1rem 2rem', fontSize: '0.98rem' }}>
+                See plans &amp; calculator
+              </button>
+              <button onClick={() => go('/register')} className="btn btn-outline" style={{ padding: '1rem 2rem', fontSize: '0.98rem' }}>
+                Create free account
+              </button>
             </div>
           </div>
         </ScrollReveal>
 
         {/* Card Preview */}
         <ScrollReveal delay={150} duration={1000}>
-          <div className="card-preview" style={{ background: '#fff', border: '1px solid rgba(17, 24, 39, 0.08)', borderRadius: 24, padding: '2.5rem', boxShadow: '0 20px 50px rgba(0,0,0,0.05)', position: 'relative' }}>
-            <h3 style={{ fontSize: '1.4rem', marginTop: 0, marginBottom: '1.5rem', fontWeight: 800 }}>What's Included</h3>
+          <div className="hero-showcase-card">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+              <h3 style={{ fontSize: '1.3rem', margin: 0, fontWeight: 800, color: INKL, letterSpacing: '-0.02em' }}>What's Included</h3>
+              <span style={{ background: '#f0fdf4', color: '#166534', padding: '4px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700 }}>Active Benefits</span>
+            </div>
             {[
               ['📧', 'Custom Business Email', 'Build instant trust with address@yourcompany.com'],
               ['🎥', 'Enterprise Meetings', 'Google Meet for high-def team & client collaboration'],
-              ['📁', 'Cloud Ecosystem', 'Drive, Docs, Sheets, and Calendar synced across devices'],
+              ['📁', 'Cloud Ecosystem', 'Drive, Docs, Sheets, and Calendar synced across all devices'],
             ].map(([ic, t, d], i) => (
-              <div key={i} className="benefit-item" style={{ display: 'flex', gap: '1.2rem', marginBottom: i === 2 ? 0 : '1.5rem' }}>
-                <div className="benefit-icon" style={{ width: 48, height: 48, background: '#f9fafb', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0 }}>{ic}</div>
+              <div key={i} className="benefit-item">
+                <div className="benefit-icon">{ic}</div>
                 <div className="benefit-text">
-                  <h4 style={{ margin: '0 0 0.2rem 0', fontSize: '1.1rem', fontWeight: 700, color: INKL }}>{t}</h4>
-                  <p style={{ margin: 0, color: MUTEL, fontSize: '0.95rem', lineHeight: 1.4 }}>{d}</p>
+                  <h4 style={{ margin: '0 0 0.2rem 0', fontSize: '1.05rem', fontWeight: 700, color: INKL }}>{t}</h4>
+                  <p style={{ margin: 0, color: MUTEL, fontSize: '0.9rem', lineHeight: 1.45 }}>{d}</p>
                 </div>
               </div>
             ))}
@@ -8952,57 +9157,43 @@ const LandingPage = () => {
 
       {/* Trusted By / Integration Partners */}
       <ScrollReveal delay={100} duration={800}>
-        <section className="trusted-by-section" style={{ 
-          padding: '2.5rem 4rem', 
-          maxWidth: 1400, 
-          margin: '0 auto', 
-          width: '100%', 
-          borderTop: '1px solid rgba(17, 24, 39, 0.05)', 
-          background: '#ffffff'
-        }}>
+        <section className="trusted-by-wrapper">
           <div style={{ textAlign: 'center' }}>
             <p style={{ 
-              fontSize: '0.7rem', 
+              fontSize: '0.72rem', 
               fontFamily: 'Geist Mono, monospace', 
               textTransform: 'uppercase', 
               letterSpacing: '0.12em', 
               color: MUTEL, 
               marginBottom: '1.5rem',
-              opacity: 0.85
+              fontWeight: 600
             }}>
-              Integrated with standard-setting platforms & payment providers
+              Integrated with standard-setting platforms &amp; payment providers
             </p>
-            <div className="logos-grid" style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
-              gap: '3.5rem', 
-              flexWrap: 'wrap',
-              color: 'rgba(17, 24, 39, 0.35)'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">
-                <svg viewBox="0 0 60 25" fill="currentColor" style={{ height: 18, pointerEvents: 'none' }}><path d="M54.12 11.23c0-3.32-1.63-5.32-4.63-5.32-3.1 0-5.11 2.37-5.11 5.48 0 3.86 2.5 5.34 5.38 5.34 1.48 0 2.82-.36 3.69-.87v-2.31c-.82.4-1.92.68-2.97.68-1.57 0-2.61-.59-2.73-1.85h8.33c.02-.32.04-.71.04-1.15zm-6.38-1.58c0-1.11.75-1.74 1.73-1.74 1.01 0 1.63.63 1.63 1.74h-3.36zm-8.23-3.65c-1.34 0-2.29.61-2.72 1.15l-.16-.95h-2.9v15.2h3.33v-3.41c.45.38 1.25.83 2.45.83 2.52 0 4.41-1.91 4.41-5.06-.01-4.04-2.1-7.76-4.41-7.76zm-.97 10.15c-1.28 0-1.85-.68-1.85-1.9v-2.73c0-1.11.57-1.85 1.85-1.85 1.15 0 1.82.83 1.82 2.05v2.54c0 1.23-.67 1.89-1.82 1.89zm-10.22-4.14c0-1.56-.91-2.11-2.45-2.11-1.3 0-2.53.4-3.33.87v-2.65c.99-.41 2.42-.71 3.55-.71 3.32 0 5.56 1.44 5.56 4.67v8.52h-2.94l-.16-.95c-.53.67-1.5 1.15-2.82 1.15-2.27 0-3.9-1.34-3.9-3.43 0-3.21 2.8-3.9 6.27-3.9l.22.51zm-.24 1.78c-1.5 0-2.42.22-2.42 1.15 0 .69.51 1.05 1.34 1.05 1.23 0 1.89-.79 1.89-1.93l-.81-.27zm-11.45-7.79h3.33v11.4h-3.33zm0-4.02h3.33v2.85h-3.33zm-2.8 5.76c-.53-.59-1.42-1.03-2.63-1.03-2.6 0-4.51 2.13-4.51 5.34 0 3.75 2.11 5.36 4.7 5.36 1.03 0 1.95-.36 2.41-.83v3.13l-3.23.68v2.57l3.23-.68h3.36V6.15H7.07zm-.26 7.42c-.41.4-1.05.67-1.74.67-1.25 0-1.97-.83-1.97-2.11v-2.31c0-1.25.75-2.09 1.97-2.09.73 0 1.3.26 1.74.75v5.09z" /></svg>
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Stripe</span>
+            <div className="logos-grid">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <svg viewBox="0 0 60 25" fill="currentColor" style={{ height: 20, pointerEvents: 'none' }}><path d="M54.12 11.23c0-3.32-1.63-5.32-4.63-5.32-3.1 0-5.11 2.37-5.11 5.48 0 3.86 2.5 5.34 5.38 5.34 1.48 0 2.82-.36 3.69-.87v-2.31c-.82.4-1.92.68-2.97.68-1.57 0-2.61-.59-2.73-1.85h8.33c.02-.32.04-.71.04-1.15zm-6.38-1.58c0-1.11.75-1.74 1.73-1.74 1.01 0 1.63.63 1.63 1.74h-3.36zm-8.23-3.65c-1.34 0-2.29.61-2.72 1.15l-.16-.95h-2.9v15.2h3.33v-3.41c.45.38 1.25.83 2.45.83 2.52 0 4.41-1.91 4.41-5.06-.01-4.04-2.1-7.76-4.41-7.76zm-.97 10.15c-1.28 0-1.85-.68-1.85-1.9v-2.73c0-1.11.57-1.85 1.85-1.85 1.15 0 1.82.83 1.82 2.05v2.54c0 1.23-.67 1.89-1.82 1.89zm-10.22-4.14c0-1.56-.91-2.11-2.45-2.11-1.3 0-2.53.4-3.33.87v-2.65c.99-.41 2.42-.71 3.55-.71 3.32 0 5.56 1.44 5.56 4.67v8.52h-2.94l-.16-.95c-.53.67-1.5 1.15-2.82 1.15-2.27 0-3.9-1.34-3.9-3.43 0-3.21 2.8-3.9 6.27-3.9l.22.51zm-.24 1.78c-1.5 0-2.42.22-2.42 1.15 0 .69.51 1.05 1.34 1.05 1.23 0 1.89-.79 1.89-1.93l-.81-.27zm-11.45-7.79h3.33v11.4h-3.33zm0-4.02h3.33v2.85h-3.33zm-2.8 5.76c-.53-.59-1.42-1.03-2.63-1.03-2.6 0-4.51 2.13-4.51 5.34 0 3.75 2.11 5.36 4.7 5.36 1.03 0 1.95-.36 2.41-.83v3.13l-3.23.68v2.57l3.23-.68h3.36V6.15H7.07zm-.26 7.42c-.41.4-1.05.67-1.74.67-1.25 0-1.97-.83-1.97-2.11v-2.31c0-1.25.75-2.09 1.97-2.09.73 0 1.3.26 1.74.75v5.09z" /></svg>
+                <span style={{ fontSize: '0.9rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Stripe</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">
-                <svg viewBox="0 0 60 25" fill="currentColor" style={{ height: 18, pointerEvents: 'none' }}><path d="M51.8 7.3h-7.1c-.5 0-.9.3-1 .8L40 20.8c-.1.3.1.6.4.6h3.4c.4 0 .8-.3.9-.8l.8-5c.1-.4.4-.7.9-.7h2.2c3.5 0 5.8-1.7 6.5-5.5.3-1.7.1-3-.9-3.8-.8-.7-2-1.2-3.4-1.2zm.4 4.5c-.3 2-1.7 2.8-3.7 2.8h-1.5l.8-4.8c0-.2.2-.4.4-.4h1c1.2 0 2 .2 2.5.6.5.4.7 1 .5 1.8zM24.8 7.3h-7.1c-.5 0-.9.3-1 .8l-3.7 12.7c-.1.3.1.6.4.6h3.4c.4 0 .8-.3.9-.8l.8-5c.1-.4.4-.7.9-.7h2.2c3.5 0 5.8-1.7 6.5-5.5.3-1.7.1-3-.9-3.8-.8-.7-2-1.2-3.4-1.2zm.4 4.5c-.3 2-1.7 2.8-3.7 2.8h-1.5l.8-4.8c0-.2.2-.4.4-.4h1c1.2 0 2 .2 2.5.6.5.4.7 1 .5 1.8zm11.2-4.5h-3.3c-.3 0-.6.2-.7.5l-5.3 7.7-2.3-7.5c-.1-.3-.4-.5-.7-.5h-3.3c-.4 0-.6.4-.4.7l4.3 12.3-3.6 5.1c-.2.3 0 .8.4.8h3.3c.3 0 .6-.2.7-.5l11.3-16.1c.3-.4 0-.9-.4-.9z" /></svg>
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>PayPal</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <svg viewBox="0 0 60 25" fill="currentColor" style={{ height: 20, pointerEvents: 'none' }}><path d="M51.8 7.3h-7.1c-.5 0-.9.3-1 .8L40 20.8c-.1.3.1.6.4.6h3.4c.4 0 .8-.3.9-.8l.8-5c.1-.4.4-.7.9-.7h2.2c3.5 0 5.8-1.7 6.5-5.5.3-1.7.1-3-.9-3.8-.8-.7-2-1.2-3.4-1.2zm.4 4.5c-.3 2-1.7 2.8-3.7 2.8h-1.5l.8-4.8c0-.2.2-.4.4-.4h1c1.2 0 2 .2 2.5.6.5.4.7 1 .5 1.8zM24.8 7.3h-7.1c-.5 0-.9.3-1 .8l-3.7 12.7c-.1.3.1.6.4.6h3.4c.4 0 .8-.3.9-.8l.8-5c.1-.4.4-.7.9-.7h2.2c3.5 0 5.8-1.7 6.5-5.5.3-1.7.1-3-.9-3.8-.8-.7-2-1.2-3.4-1.2zm.4 4.5c-.3 2-1.7 2.8-3.7 2.8h-1.5l.8-4.8c0-.2.2-.4.4-.4h1c1.2 0 2 .2 2.5.6.5.4.7 1 .5 1.8zm11.2-4.5h-3.3c-.3 0-.6.2-.7.5l-5.3 7.7-2.3-7.5c-.1-.3-.4-.5-.7-.5h-3.3c-.4 0-.6.4-.4.7l4.3 12.3-3.6 5.1c-.2.3 0 .8.4.8h3.3c.3 0 .6-.2.7-.5l11.3-16.1c.3-.4 0-.9-.4-.9z" /></svg>
+                <span style={{ fontSize: '0.9rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>PayPal</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">
-                <svg viewBox="0 0 100 25" fill="currentColor" style={{ height: 16, pointerEvents: 'none' }}><path d="M12.5 10c0-1.4-1.1-2.5-2.5-2.5S7.5 8.6 7.5 10v2.5H10c1.4 0 2.5-1.1 2.5-2.5zm-5 0V5c0-1.4-1.1-2.5-2.5-2.5S2.5 3.6 2.5 5v5c0 1.4 1.1 2.5 2.5 2.5h2.5V10zM10 12.5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5H7.5V15c0-1.4 1.1-2.5 2.5-2.5zm0 5h5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5h-5c-1.4 0-2.5-1.1-2.5-2.5s1.1-2.5 2.5-2.5zm5-5c0 1.4 1.1 2.5 2.5 2.5s2.5-1.1 2.5-2.5V10H15v2.5zm5 0V5c0-1.4-1.1-2.5-2.5-2.5S15 3.6 15 5v5c0 1.4 1.1 2.5 2.5 2.5H20V12.5zm-2.5 2.5c-1.4 0-2.5-1.1-2.5-2.5V10H15v2.5c0 1.4 1.1 2.5 2.5 2.5h2.5V15c0-1.4-1.1-2.5-2.5-2.5zm0-5h-5c-1.4 0-2.5-1.1-2.5-2.5S11.1 2.5 12.5 2.5h5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5zM29 7.5c-2.3 0-4.1 1.2-5 3V3H21v14.5h3v-6c0-2.2 1.8-4 4-4s4 1.8 4 4v6h3V11.5c0-2.2-1.8-4-4-4zm15.5 0c-3 0-5.5 2.5-5.5 5.5s2.5 5.5 5.5 5.5 5.5-2.5 5.5-5.5-2.5-5.5-5.5-5.5zm0 8c-1.4 0-2.5-1.1-2.5-2.5s1.1-2.5 2.5-2.5 2.5 1.1 2.5 2.5-1.1 2.5-2.5 2.5zm16-8c-2.2 0-4.1 1.2-5 3v-2.5h-3v11h3v-6c0-2.2 1.8-4 4-4s4 1.8 4 4v6h3V11.5c0-2.2-1.8-4-4-4z" /></svg>
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Slack</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <svg viewBox="0 0 100 25" fill="currentColor" style={{ height: 18, pointerEvents: 'none' }}><path d="M12.5 10c0-1.4-1.1-2.5-2.5-2.5S7.5 8.6 7.5 10v2.5H10c1.4 0 2.5-1.1 2.5-2.5zm-5 0V5c0-1.4-1.1-2.5-2.5-2.5S2.5 3.6 2.5 5v5c0 1.4 1.1 2.5 2.5 2.5h2.5V10zM10 12.5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5H7.5V15c0-1.4 1.1-2.5 2.5-2.5zm0 5h5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5h-5c-1.4 0-2.5-1.1-2.5-2.5s1.1-2.5 2.5-2.5zm5-5c0 1.4 1.1 2.5 2.5 2.5s2.5-1.1 2.5-2.5V10H15v2.5zm5 0V5c0-1.4-1.1-2.5-2.5-2.5S15 3.6 15 5v5c0 1.4 1.1 2.5 2.5 2.5H20V12.5zm-2.5 2.5c-1.4 0-2.5-1.1-2.5-2.5V10H15v2.5c0 1.4 1.1 2.5 2.5 2.5h2.5V15c0-1.4-1.1-2.5-2.5-2.5zm0-5h-5c-1.4 0-2.5-1.1-2.5-2.5S11.1 2.5 12.5 2.5h5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5zM29 7.5c-2.3 0-4.1 1.2-5 3V3H21v14.5h3v-6c0-2.2 1.8-4 4-4s4 1.8 4 4v6h3V11.5c0-2.2-1.8-4-4-4zm15.5 0c-3 0-5.5 2.5-5.5 5.5s2.5 5.5 5.5 5.5 5.5-2.5 5.5-5.5-2.5-5.5-5.5-5.5zm0 8c-1.4 0-2.5-1.1-2.5-2.5s1.1-2.5 2.5-2.5 2.5 1.1 2.5 2.5-1.1 2.5-2.5 2.5zm16-8c-2.2 0-4.1 1.2-5 3v-2.5h-3v11h3v-6c0-2.2 1.8-4 4-4s4 1.8 4 4v6h3V11.5c0-2.2-1.8-4-4-4z" /></svg>
+                <span style={{ fontSize: '0.9rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Slack</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                 <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>💬</span>
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Workspace</span>
+                <span style={{ fontSize: '0.9rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Workspace</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                 <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>🛍️</span>
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Shopify</span>
+                <span style={{ fontSize: '0.9rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Shopify</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', transition: 'color 0.2s' }} className="hover:text-[#6e46eb]">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                 <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>📦</span>
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Salesforce</span>
+                <span style={{ fontSize: '0.9rem', fontWeight: 700, letterSpacing: '-0.02em', color: INKL }}>Salesforce</span>
               </div>
             </div>
           </div>
@@ -9011,17 +9202,17 @@ const LandingPage = () => {
 
       {/* Business email + domain search */}
       <ScrollReveal duration={850}>
-        <section className="search-strip" style={{ background: '#f9fafb', borderTop: '1px solid rgba(17, 24, 39, 0.08)', borderBottom: '1px solid rgba(17, 24, 39, 0.08)', padding: '3rem 4rem' }}>
-          <div className="search-container" style={{ maxWidth: 800, margin: '0 auto', textAlign: 'center' }}>
-            <label className="search-label" style={{ fontSize: '0.7rem', fontFamily: 'Geist Mono, monospace', textTransform: 'uppercase', letterSpacing: '0.1em', color: MUTEL, marginBottom: '1rem', display: 'block' }}>Step 1: Secure your identity</label>
-            <h2 style={{ fontSize: '2.2rem', margin: '0 0 1.25rem 0', fontWeight: 800, color: INKL }}>Find your perfect domain</h2>
+        <section className="search-strip-section">
+          <div style={{ maxWidth: 840, margin: '0 auto', textAlign: 'center' }}>
+            <label style={{ fontSize: '0.75rem', fontFamily: 'Geist Mono, monospace', textTransform: 'uppercase', letterSpacing: '0.1em', color: MUTEL, marginBottom: '0.75rem', display: 'block', fontWeight: 600 }}>Step 1: Secure your identity</label>
+            <h2 style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.5rem)', margin: '0 0 1.25rem 0', fontWeight: 800, color: INKL, letterSpacing: '-0.03em' }}>Find your perfect domain</h2>
 
             {/* Register / Transfer toggle */}
-            <div style={{ display: 'inline-flex', background: '#eef2f1', borderRadius: 999, padding: 4, marginBottom: '1.25rem' }}>
-              {[['register', 'Register'], ['transfer', 'Transfer']].map(([mode, lbl]) => (
+            <div style={{ display: 'inline-flex', background: '#e2e8f0', borderRadius: 999, padding: 4, marginBottom: '1.5rem' }}>
+              {[['register', 'Register Domain'], ['transfer', 'Transfer Domain']].map(([mode, lbl]) => (
                 <button key={mode} type="button" onClick={() => { setSearchMode(mode); setDResult(null); setDError(''); }}
                   style={{
-                    border: 'none', cursor: 'pointer', padding: '9px 28px', borderRadius: 999, fontSize: 15, fontWeight: 700,
+                    border: 'none', cursor: 'pointer', padding: '8px 24px', borderRadius: 999, fontSize: 14, fontWeight: 700,
                     background: searchMode === mode ? T : 'transparent',
                     color: searchMode === mode ? '#fff' : MUTEL, transition: 'all .15s ease',
                   }}>
@@ -9030,48 +9221,88 @@ const LandingPage = () => {
               ))}
             </div>
 
-            <div className="search-box" style={{ display: 'flex', gap: 0, background: '#fff', padding: 6, borderRadius: 14, border: '1px solid rgba(17, 24, 39, 0.12)', boxShadow: '0 6px 18px rgba(0,0,0,0.06)' }}>
+            <div className="search-box-container">
               <input
                 value={dq}
                 onChange={e => setDq(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') searchDomain(); }}
-                placeholder={searchMode === 'transfer' ? 'Enter the domain you want to transfer' : 'Register a domain name to start'}
-                style={{ flex: 1, border: 'none', padding: '0 1.1rem', fontSize: '1.05rem', outline: 'none', background: 'transparent', color: INKL }}
+                placeholder={searchMode === 'transfer' ? 'Enter the domain you want to transfer (e.g. mycompany.com)' : 'Register a domain name (e.g. yourbusiness.com)'}
+                style={{ flex: 1, border: 'none', padding: '0 1.1rem', fontSize: '1rem', outline: 'none', background: 'transparent', color: INKL, height: 48 }}
               />
-              <button onClick={searchDomain} disabled={dLoading} style={{ padding: '0 2.2rem', height: 52, borderRadius: 10, fontWeight: 700, fontSize: 15, cursor: 'pointer', background: T, color: '#fff', border: 'none', whiteSpace: 'nowrap' }}>
-                {dLoading ? 'Searching…' : 'Search'}
+              <button onClick={searchDomain} disabled={dLoading} className="btn btn-primary" style={{ padding: '0 2rem', height: 48, borderRadius: 12, fontWeight: 700, fontSize: 15 }}>
+                {dLoading ? 'Searching…' : 'Search Domain'}
               </button>
             </div>
+
+            {/* Popular TLD chips */}
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+              {[
+                ['.com', '$12.99/yr'],
+                ['.net', '$14.99/yr'],
+                ['.org', '$13.99/yr'],
+                ['.io', '$39.99/yr'],
+                ['.co', '$24.99/yr'],
+              ].map(([tld, price]) => (
+                <button
+                  key={tld}
+                  type="button"
+                  onClick={() => {
+                    const base = dq.replace(/\.[a-zA-Z.]+$/, '');
+                    if (base) {
+                      setDq(base + tld);
+                    }
+                  }}
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 999,
+                    padding: '4px 12px',
+                    fontSize: 12.5,
+                    color: '#334155',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
+                  }}
+                >
+                  <strong style={{ color: INKL }}>{tld}</strong>
+                  <span style={{ color: MUTEL }}>{price}</span>
+                </button>
+              ))}
+            </div>
+
             <div style={{ marginTop: 10, fontSize: 13, color: MUTEL }}>
               {searchMode === 'transfer'
-                ? 'Move a domain you already own to us.'
-                : 'Type a name or a full domain like yourbusiness.com.'}
+                ? 'Move a domain you already own to us with seamless DNS preservation.'
+                : 'Type a name or a full domain to check availability instantly.'}
             </div>
             {dError && <div style={{ color: '#ef4444', marginTop: 14, fontWeight: 600, fontSize: 14 }}>{dError}</div>}
             {dResult && dResult.results && (
-              <div style={{ marginTop: 20, maxWidth: 560, margin: '20px auto 0' }}>
+              <div style={{ marginTop: 20, maxWidth: 580, margin: '20px auto 0' }}>
                 {dResult.results.map((r, i) => {
-                  // In transfer mode a registered ("taken") domain is the good one.
                   const good = searchMode === 'transfer' ? !r.available : r.available;
                   return (
-                  <div key={i} style={{ background: good ? '#f5f2fe' : '#fafafa', borderRadius: 12, padding: '14px 18px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, opacity: good ? 1 : 0.65 }}>
+                  <div key={i} style={{ background: good ? '#f5f2fe' : '#ffffff', border: good ? '1px solid #ddd6fe' : '1px solid #e2e8f0', borderRadius: 14, padding: '16px 20px', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
                     <div style={{ textAlign: 'left' }}>
-                      <span style={{ fontSize: 16, fontWeight: 700, color: INKL }}>{r.domain}</span>
-                      {r.isPremium && <span style={{ marginLeft: 8, fontSize: 11, background: '#fde68a', color: '#92600a', padding: '2px 8px', borderRadius: 999 }}>Premium</span>}
-                      <div style={{ color: good ? '#166534' : '#b45309', fontWeight: 600, fontSize: 13 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 16, fontWeight: 700, color: INKL }}>{r.domain}</span>
+                        {r.isPremium && <span style={{ fontSize: 11, background: '#fde68a', color: '#92600a', padding: '2px 8px', borderRadius: 999, fontWeight: 700 }}>Premium</span>}
+                      </div>
+                      <div style={{ color: good ? '#166534' : '#b45309', fontWeight: 600, fontSize: 13, marginTop: 2 }}>
                         {searchMode === 'transfer'
                           ? (r.available ? 'Not registered — register it instead' : '✓ Eligible to transfer')
-                          : (r.available ? '✓ Available' : '✗ Taken')}
+                          : (r.available ? '✓ Available for registration' : '✗ Already taken')}
                       </div>
                     </div>
                     {searchMode === 'transfer' ? (
-                      <button onClick={() => go('/register')} style={{ padding: '10px 18px', borderRadius: 10, fontWeight: 700, cursor: 'pointer', background: T, color: '#fff', border: 'none' }}>
+                      <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '8px 18px', fontSize: 13.5 }}>
                         {r.available ? 'Register instead' : 'Transfer to us'}
                       </button>
                     ) : (r.available && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <strong style={{ fontSize: 18, color: T }}>{r.price != null ? `$${Number(r.price).toFixed(2)}/yr` : ''}</strong>
-                        <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '10px 18px', borderRadius: 10, fontWeight: 700, cursor: 'pointer', background: T, color: '#fff', border: 'none' }}>
+                        <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '8px 18px', fontSize: 13.5 }}>
                           Get started
                         </button>
                       </div>
@@ -9087,51 +9318,46 @@ const LandingPage = () => {
 
       {/* Plans */}
       <ScrollReveal duration={900}>
-        <section className="pricing-section" style={{ padding: '5rem 4rem', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
-          <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
-            <h2 style={{ fontSize: '2.8rem', fontWeight: 800, margin: '0 0 1rem 0', color: INKL }}>Ready to scale?</h2>
-            <p style={{ color: MUTEL, fontSize: '1.1rem' }}>Choose the workspace tier that fits your team's current needs.</p>
+        <section className="pricing-section-container">
+          <div style={{ textAlign: 'center', marginBottom: '3.5rem' }}>
+            <h2 style={{ fontSize: 'clamp(2.2rem, 4vw, 3rem)', fontWeight: 800, margin: '0 0 1rem 0', color: INKL, letterSpacing: '-0.03em' }}>Ready to scale?</h2>
+            <p style={{ color: MUTEL, fontSize: '1.1rem', margin: 0 }}>Choose the workspace tier that fits your team's current needs.</p>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
+          <div className="pricing-grid-container">
             {plans.length === 0 ? (
               <p style={{ textAlign: 'center', color: MUTEL, gridColumn: '1/-1' }}>Loading plans…</p>
             ) : plans.map((p) => {
               const isStandard = p.id === 'standard' || p.name.toLowerCase().includes('standard');
               return (
-                <div key={p.id} className="price-card" style={{
-                  background: isStandard ? '#f0fdfa' : '#fff',
-                  border: isStandard ? `1.5px solid ${T}` : '1px solid rgba(17, 24, 39, 0.08)',
-                  padding: '2rem',
-                  borderRadius: 12,
-                  transition: 'border-color 0.3s, transform 0.3s',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  boxShadow: isStandard ? '0 10px 25px rgba(110, 70, 235,0.06)' : 'none'
-                }}>
-                  <h3 style={{ fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: MUTEL, margin: '0 0 1rem 0', fontWeight: 700 }}>{p.name.replace('Google Workspace ', '')}</h3>
-                  <div style={{ fontSize: '2.5rem', fontWeight: 800, marginBottom: '1.5rem', color: INKL }}>
-                    ${p.monthlyPrice}<span style={{ fontSize: '1rem', fontWeight: 400, color: MUTEL }}>/mo</span>
+                <div key={p.id} className={`modern-price-card ${isStandard ? 'featured' : ''}`}>
+                  {isStandard && <span className="popular-badge">Most Popular</span>}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                    <h3 style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: MUTEL, margin: 0, fontWeight: 700 }}>
+                      {p.name.replace('Google Workspace ', '')}
+                    </h3>
+                    {isStandard && <span style={{ fontSize: 11, fontWeight: 700, color: T, background: '#f5f3ff', padding: '2px 8px', borderRadius: 99 }}>Recommended</span>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: '1.25rem' }}>
+                    <span style={{ fontSize: 'clamp(2.2rem, 4vw, 2.8rem)', fontWeight: 800, color: INKL, letterSpacing: '-0.03em' }}>
+                      ${p.monthlyPrice}
+                    </span>
+                    <span style={{ fontSize: '0.95rem', fontWeight: 500, color: MUTEL }}>/user/mo</span>
                   </div>
                   {p.features && (
-                    <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 2rem 0', fontSize: '0.9rem', flexGrow: 1, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 2rem 0', fontSize: '0.9rem', flexGrow: 1, display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                       {p.features.slice(0, 5).map((f, i) => (
-                        <li key={i} style={{ color: MUTEL, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <span style={{ color: T, fontWeight: 800 }}>✓</span> {f}
+                        <li key={i} style={{ color: '#334155', display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                          <span style={{ width: 20, height: 20, borderRadius: '50%', background: isStandard ? '#ede9fe' : '#f1f5f9', color: isStandard ? T : '#0F766E', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, flexShrink: 0 }}>✓</span>
+                          <span>{f}</span>
                         </li>
                       ))}
                     </ul>
                   )}
                   <button onClick={() => go('/register')} className={isStandard ? 'btn btn-primary' : 'btn btn-outline'} style={{
-                    padding: '0.75rem 1.5rem',
-                    borderRadius: 12,
-                    fontWeight: 600,
-                    fontSize: '0.9rem',
-                    cursor: 'pointer',
-                    border: isStandard ? 'none' : '1px solid rgba(17, 24, 39, 0.08)',
-                    background: isStandard ? T : '#fff',
-                    color: isStandard ? '#fff' : INKL,
+                    padding: '0.85rem 1.5rem',
                     width: '100%',
-                    transition: 'all 0.2s'
+                    fontSize: '0.95rem',
+                    fontWeight: 700
                   }}>
                     Choose {p.name.replace('Google Workspace ', '')}
                   </button>
@@ -9389,19 +9615,19 @@ const LandingPage = () => {
 
       {/* CTA band */}
       <ScrollReveal duration={900}>
-        <section className="landing-band" style={{ background: T, color: '#fff', padding: '64px 40px', textAlign: 'center' }}>
-          <h2 style={{ fontSize: 44, margin: '0 0 12px', fontWeight: 800 }}>Ready when you are</h2>
-          <p style={{ fontSize: 18, opacity: 0.95, margin: '0 0 32px' }}>Sign up to save your orders, or browse plans first — whatever is easier for you.</p>
-          <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button onClick={() => go('/register')} style={{ background: '#fff', color: T, border: 'none', borderRadius: 12, padding: '16px 32px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Compare plans</button>
-            <button onClick={() => go('/login')} style={{ background: 'transparent', color: '#fff', border: '2px solid rgba(255,255,255,0.7)', borderRadius: 12, padding: '16px 32px', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Sign in</button>
+        <section className="landing-band" style={{ background: T, color: '#fff', padding: 'clamp(3rem, 6vw, 4.5rem) 1.5rem', textAlign: 'center' }}>
+          <h2 style={{ fontSize: 'clamp(1.8rem, 4vw, 2.75rem)', margin: '0 0 12px', fontWeight: 800, letterSpacing: '-0.02em' }}>Ready when you are</h2>
+          <p style={{ fontSize: 'clamp(1rem, 2vw, 1.15rem)', opacity: 0.95, margin: '0 0 32px', maxWidth: 640, marginLeft: 'auto', marginRight: 'auto' }}>Sign up to save your orders, or browse plans first — whatever is easier for you.</p>
+          <div style={{ display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button onClick={() => go('/register')} className="btn" style={{ background: '#fff', color: T, padding: '14px 32px', fontSize: 15, fontWeight: 700 }}>Compare plans</button>
+            <button onClick={() => go('/login')} className="btn" style={{ background: 'transparent', color: '#fff', border: '2px solid rgba(255,255,255,0.7)', padding: '14px 32px', fontSize: 15, fontWeight: 700 }}>Sign in</button>
           </div>
         </section>
       </ScrollReveal>
 
       {/* Footer */}
-      <footer style={{ background: '#000000', color: 'rgba(255,255,255,0.6)', padding: '4rem' }}>
-        <div style={{ maxWidth: 1400, margin: '0 auto', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '4rem', flexWrap: 'wrap' }}>
+      <footer style={{ background: '#0a0f1d', color: 'rgba(255,255,255,0.65)', padding: 'clamp(2.5rem, 5vw, 4.5rem) clamp(1.5rem, 4vw, 3rem)' }}>
+        <div className="landing-footer-grid" style={{ maxWidth: 1400, margin: '0 auto' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '1.5rem' }}>
               {brand.logoDataUrl
@@ -9478,6 +9704,7 @@ const LandingPage = () => {
               alignItems: 'flex-start',
               gap: 12,
               width: '360px',
+              maxWidth: 'calc(100vw - 32px)',
               animation: 'slideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards',
               position: 'relative',
               overflow: 'hidden'
@@ -9569,6 +9796,7 @@ const useNoIndexOnPrivatePages = (isPrivate) => {
 
 function App() {
   const { token, user, loading } = useAuth();
+  const [viewStorefront, setViewStorefront] = useState(false);
 
   // Private = signed in (portal, account, cart, checkout, admin) or on an auth page.
   const p = typeof window !== 'undefined' ? window.location.pathname : '/';
@@ -9619,7 +9847,24 @@ function App() {
     );
   }
 
-  return <CustomerPortal />;
+  if (viewStorefront) {
+    return (
+      <div style={{ position: 'relative' }}>
+        <div className="storefront-floating-banner">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 8px #22c55e' }} />
+            <span>Logged in as <strong>{user?.businessEmail || user?.username}</strong></span>
+          </div>
+          <button onClick={() => setViewStorefront(false)} className="storefront-return-btn">
+            Return to Customer Portal →
+          </button>
+        </div>
+        <LandingPage onOpenPortal={() => setViewStorefront(false)} />
+      </div>
+    );
+  }
+
+  return <CustomerPortal onViewStorefront={() => setViewStorefront(true)} />;
 }
 
 // ==================== STAGE 1: WORKSPACE ORDER FLOW ====================
