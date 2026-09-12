@@ -2763,7 +2763,7 @@ app.post('/api/customer/domains/transfer', authenticateCustomer, async (req, res
     });
 
     const orderDesc = `Transfer ${dom} to Namecheap (incl. 1 year)`;
-    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}&type=domain&domain=${encodeURIComponent(dom)}`;
     const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
 
     if (payment.method === 'stripe') {
@@ -7148,7 +7148,7 @@ app.get('/api/customer/payment-status/:paymentId', authenticateCustomer, async (
   try {
     const payment = await Payment.findById(req.params.paymentId);
     if (!payment) return res.status(404).json({ error: 'Payment not found.' });
-    if (payment.status === 'paid') return res.json({ paid: true, alreadyPaid: true });
+    if (payment.status === 'paid') return res.json({ paid: true, alreadyPaid: true, orderType: payment.orderType, domain: payment.domain, orderId: payment.orderId, amount: payment.amount });
 
     // Security: only the owner can check their own payment
     if (String(payment.customerId) !== String(req.customerId)) {
@@ -7158,9 +7158,9 @@ app.get('/api/customer/payment-status/:paymentId', authenticateCustomer, async (
     if (payment.method === 'nicky') {
       // Ask Nicky directly. Only "Finished" marks the order paid (+ provisions).
       const result = await checkNickyPaymentStatus(payment);
-      if (result.paid) return res.json({ paid: true, via: 'api', status: result.status });
+      if (result.paid) return res.json({ paid: true, via: 'api', status: result.status, orderType: payment.orderType, domain: payment.domain, orderId: payment.orderId, amount: payment.amount });
       if (result.cancelled) return res.json({ paid: false, cancelled: true, status: result.status });
-      return res.json({ paid: false, status: result.status || 'pending' });
+      return res.json({ paid: false, status: result.status || 'pending', orderType: payment.orderType, domain: payment.domain });
     }
 
     if (payment.method === 'stripe' && payment.providerRef) {
@@ -7171,16 +7171,16 @@ app.get('/api/customer/payment-status/:paymentId', authenticateCustomer, async (
         console.log('STRIPE STATUS', payment.providerRef, '→', session.payment_status);
         if (session.payment_status === 'paid') {
           await markPaidAndProvision(payment);
-          return res.json({ paid: true, via: 'stripe-api' });
+          return res.json({ paid: true, via: 'stripe-api', orderType: payment.orderType, domain: payment.domain, orderId: payment.orderId, amount: payment.amount });
         }
-        return res.json({ paid: false, status: session.payment_status || 'pending' });
+        return res.json({ paid: false, status: session.payment_status || 'pending', orderType: payment.orderType, domain: payment.domain });
       } catch (e) {
         console.error('STRIPE STATUS check failed:', e.message);
-        return res.json({ paid: false, status: 'pending' });
+        return res.json({ paid: false, status: 'pending', orderType: payment.orderType, domain: payment.domain });
       }
     }
 
-    res.json({ paid: payment.status === 'paid', status: payment.status });
+    res.json({ paid: payment.status === 'paid', status: payment.status, orderType: payment.orderType, domain: payment.domain, orderId: payment.orderId, amount: payment.amount });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -8587,7 +8587,7 @@ app.post('/api/customer/domains/register', authenticateCustomer, async (req, res
     });
 
     const orderDesc = `Domain ${dom} (${order.period} year${order.period === 1 ? '' : 's'})`;
-    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}`;
+    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}&type=domain&domain=${encodeURIComponent(dom)}`;
     const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}`;
 
     if (payment.method === 'stripe') {
@@ -8629,6 +8629,74 @@ app.post('/api/customer/domains/register', authenticateCustomer, async (req, res
     }
   } catch (e) {
     res.status(500).json({ error: 'Domain order error: ' + e.message });
+  }
+});
+
+// Customer: Wix-style post-domain purchase data (Google Workspace setup info, addon subscriptions, hosting plans)
+app.get('/api/customer/domain-post-purchase/:domain', authenticateCustomer, async (req, res) => {
+  try {
+    const rawDom = (req.params.domain || '').toLowerCase().trim();
+    const dom = rawDom.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+
+    const domainOrder = await DomainOrder.findOne({
+      customerId: req.customerId,
+      domainName: dom,
+    }).sort({ createdAt: -1 });
+
+    let workspacePlans = [];
+    const dbPlans = await Plan.find({ category: 'workspace', active: true }).sort({ sortOrder: 1 });
+    if (dbPlans && dbPlans.length > 0) {
+      workspacePlans = dbPlans.map(p => ({
+        id: p.planId,
+        name: p.name,
+        monthlyPrice: p.monthlyPrice,
+        features: p.features || [],
+      }));
+    } else {
+      workspacePlans = (DEFAULT_PRODUCTS.workspace || []).map(p => ({
+        id: p.id,
+        name: p.name,
+        monthlyPrice: p.monthlyPrice,
+        features: p.features || [],
+      }));
+    }
+
+    const addonPlans = await Plan.find({ category: 'addon', active: true });
+    const priceBySku = {};
+    for (const p of addonPlans) if (p.skuId) priceBySku[String(p.skuId)] = p.monthlyPrice;
+    const addons = Object.entries(SKU_CATALOG)
+      .filter(([, v]) => v.category === 'addon')
+      .map(([skuId, v]) => ({
+        skuId,
+        name: v.name,
+        price: priceBySku[skuId] != null ? priceBySku[skuId] : null,
+        purchasable: priceBySku[skuId] != null && priceBySku[skuId] > 0,
+      }));
+
+    const hostingPlans = await HostingPlan.find({ active: true }).sort({ sortOrder: 1 });
+
+    res.json({
+      domain: dom,
+      order: domainOrder ? {
+        orderNumber: domainOrder.orderNumber,
+        status: domainOrder.status,
+        period: domainOrder.period,
+        price: domainOrder.price,
+        createdAt: domainOrder.createdAt,
+      } : null,
+      workspacePlans,
+      addons,
+      hostingPlans: (hostingPlans || []).map(p => ({
+        planId: p.planId,
+        name: p.name,
+        description: p.description,
+        price: p.price,
+        billingCycle: p.billingCycle,
+        features: p.features,
+      })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

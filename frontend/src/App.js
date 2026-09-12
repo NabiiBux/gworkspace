@@ -580,6 +580,74 @@ const AuthProvider = ({ children }) => {
 
 const useAuth = () => useContext(AuthContext);
 
+// Executes direct checkout for a pending or passed domain registration/transfer.
+// Redirects the browser directly to the Stripe or Crypto checkout URL.
+export async function executePendingDomainCheckout(token, pendingObj) {
+  let pending = pendingObj;
+  if (!pending) {
+    try {
+      const raw = typeof window !== 'undefined' ? (sessionStorage.getItem('pendingDomainPurchase') || localStorage.getItem('pendingDomainPurchase')) : null;
+      if (raw) pending = JSON.parse(raw);
+    } catch (_) {}
+  }
+  if (!pending || !pending.domainName) return false;
+
+  const domainName = (pending.domainName || '').toLowerCase().trim();
+  const price = Number(pending.price || 12.99);
+  const period = Number(pending.period || 1);
+  const method = pending.method === 'nicky' ? 'nicky' : 'stripe';
+  const mode = pending.mode || 'register';
+  const eppCode = pending.eppCode || '';
+
+  const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+
+  // Store for the post-checkout Wix-style Google Workspace setup screen
+  try {
+    sessionStorage.setItem('justPurchasedDomain', domainName);
+  } catch (_) {}
+
+  try {
+    if (mode === 'transfer') {
+      const res = await axios.post(`${API_URL}/customer/domains/transfer`, {
+        domainName,
+        eppCode: eppCode || '',
+        method,
+      }, { headers: authHeader });
+
+      try {
+        sessionStorage.removeItem('pendingDomainPurchase');
+        localStorage.removeItem('pendingDomainPurchase');
+      } catch (_) {}
+
+      if (res.data?.checkoutUrl) {
+        window.location.href = res.data.checkoutUrl;
+        return true;
+      }
+    } else {
+      const res = await axios.post(`${API_URL}/customer/domains/register`, {
+        domainName,
+        period,
+        price,
+        method,
+      }, { headers: authHeader });
+
+      try {
+        sessionStorage.removeItem('pendingDomainPurchase');
+        localStorage.removeItem('pendingDomainPurchase');
+      } catch (_) {}
+
+      if (res.data?.checkoutUrl) {
+        window.location.href = res.data.checkoutUrl;
+        return true;
+      }
+    }
+  } catch (err) {
+    console.error('Error executing pending domain checkout:', err);
+    throw err;
+  }
+  return false;
+}
+
 // ==================== LOGIN PAGE ====================
 // Brand logos as inline SVG (crisp, no external requests).
 const GoogleLogo = () => (
@@ -624,6 +692,418 @@ const AuthSocialButtons = ({ label, googleBtnRef, showGoogleFallback, onGoogleFa
   </div>
 );
 
+// ==================== INLINE DOMAIN AUTH MODAL ====================
+// When a customer searches a domain on the home page and clicks to buy,
+// if they are not logged in, this modal asks them to sign up or sign in.
+// Right after authentication completes, it immediately initiates the domain
+// registration and takes them directly to checkout!
+const DomainAuthModal = ({ domainInfo, onClose }) => {
+  const { login } = useAuth();
+  const [tab, setTab] = useState('signup'); // 'signup' | 'login'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [otp, setOtp] = useState('');
+  const [showOtp, setShowOtp] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [statusMsg, setStatusMsg] = useState('');
+  const [googleClientId, setGoogleClientId] = useState(GOOGLE_SIGNIN_CLIENT_ID);
+  const googleBtnRef = useRef(null);
+
+  const domainName = (domainInfo?.domainName || '').toLowerCase().trim();
+  const price = domainInfo?.price != null ? `$${Number(domainInfo.price).toFixed(2)}/yr` : '';
+
+  useEffect(() => {
+    if (googleClientId) return;
+    let active = true;
+    axios.get(`${API_URL}/auth/google-client-id`)
+      .then((res) => { if (active && res.data?.clientId) setGoogleClientId(res.data.clientId); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [googleClientId]);
+
+  useEffect(() => {
+    if (!googleClientId) return;
+    let cancelled = false;
+    let tries = 0;
+    const handleGoogleCredential = async (response) => {
+      setError(''); setBusy(true);
+      setStatusMsg('Signing in and taking you directly to checkout…');
+      try {
+        const r = await axios.post(`${API_URL}/auth/google`, { credential: response.credential });
+        login(r.data.customer.businessEmail, r.data.token, r.data.customer);
+        setStatusMsg(`Securing ${domainName}… Redirecting to checkout…`);
+        await executePendingDomainCheckout(r.data.token, domainInfo);
+      } catch (err) {
+        setError(err?.response?.data?.error || 'Google sign-in failed. Please try email/password.');
+        setBusy(false);
+      }
+    };
+
+    const render = () => {
+      if (cancelled || !googleBtnRef.current) return;
+      if (!window.google?.accounts?.id) {
+        if (tries++ < 30) setTimeout(render, 100);
+        return;
+      }
+      try {
+        window.google.accounts.id.initialize({ client_id: googleClientId, callback: handleGoogleCredential });
+        googleBtnRef.current.innerHTML = '';
+        window.google.accounts.id.renderButton(googleBtnRef.current, {
+          theme: 'outline',
+          size: 'large',
+          width: 340,
+          text: tab === 'signup' ? 'signup_with' : 'continue_with',
+        });
+      } catch (_) {}
+    };
+
+    if (window.google?.accounts?.id) {
+      render();
+      return () => { cancelled = true; };
+    }
+    const script = document.getElementById('google-gsi-script');
+    if (script) {
+      script.addEventListener('load', render);
+      return () => { cancelled = true; script.removeEventListener('load', render); };
+    }
+  }, [googleClientId, tab, domainInfo, domainName, login]);
+
+  const handleSubmit = async (e) => {
+    e?.preventDefault?.();
+    setError('');
+    const em = (email || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    if (!password || password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+
+    setBusy(true);
+    if (tab === 'signup') {
+      setStatusMsg('Creating your account…');
+      try {
+        const res = await axios.post(`${API_URL}/auth/signup-quick`, {
+          businessEmail: em,
+          password,
+        });
+        const { token, customer } = res.data;
+        login(customer.businessEmail, token, customer);
+        setStatusMsg(`Securing ${domainName}… Taking you directly to checkout…`);
+        await executePendingDomainCheckout(token, domainInfo);
+      } catch (err) {
+        const errMsg = err?.response?.data?.error || 'Sign up failed.';
+        if (errMsg.toLowerCase().includes('already exists')) {
+          setTab('login');
+          setError('An account with this email already exists. Please enter your password to sign in.');
+        } else {
+          setError(errMsg);
+        }
+        setBusy(false);
+      }
+    } else {
+      setStatusMsg('Signing in…');
+      try {
+        const body = { businessEmail: em, password, portal: 'customer' };
+        if (otp) body.otp = otp;
+        const res = await axios.post(`${API_URL}/auth/login`, body);
+        if (res.data.twoFactorRequired) {
+          setShowOtp(true);
+          setBusy(false);
+          setStatusMsg('');
+          return;
+        }
+        const { token, customer } = res.data;
+        login(customer.businessEmail, token, customer);
+        setStatusMsg(`Securing ${domainName}… Taking you directly to checkout…`);
+        await executePendingDomainCheckout(token, domainInfo);
+      } catch (err) {
+        setError(err?.response?.data?.error || 'Sign in failed. Please check your credentials.');
+        setBusy(false);
+      }
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'rgba(15, 23, 42, 0.72)',
+        backdropFilter: 'blur(5px)',
+        zIndex: 99999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
+    >
+      <div
+        style={{
+          background: '#ffffff',
+          borderRadius: 22,
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
+          maxWidth: 460,
+          width: '100%',
+          padding: '28px 28px 24px',
+          position: 'relative',
+          fontFamily: 'Geist, -apple-system, BlinkMacSystemFont, sans-serif',
+          color: '#111827',
+          maxHeight: '92vh',
+          overflowY: 'auto',
+          border: '1px solid #e2e8f0',
+        }}
+      >
+        {!busy && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              position: 'absolute',
+              top: 18,
+              right: 18,
+              background: '#f1f5f9',
+              border: 'none',
+              borderRadius: '50%',
+              width: 32,
+              height: 32,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 16,
+              color: '#64748b',
+              cursor: 'pointer',
+              fontWeight: 700,
+            }}
+          >
+            ✕
+          </button>
+        )}
+
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 999, padding: '5px 14px', marginBottom: 14 }}>
+          <span style={{ fontSize: 14 }}>🌐</span>
+          <strong style={{ color: '#4c1d95', fontSize: 13.5 }}>{domainName}</strong>
+          {price && <span style={{ color: '#7c3aed', fontSize: 13, fontWeight: 700 }}>• {price}</span>}
+        </div>
+
+        <h3 style={{ margin: '0 0 6px', fontSize: 21, fontWeight: 800, color: '#111827', letterSpacing: '-0.02em' }}>
+          {tab === 'signup' ? 'Create account to buy domain' : 'Sign in to buy domain'}
+        </h3>
+        <p style={{ margin: '0 0 18px', color: '#64748b', fontSize: 13.5, lineHeight: 1.45 }}>
+          You will be taken directly to checkout as soon as you sign in.
+        </p>
+
+        <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: 10, padding: 4, marginBottom: 18 }}>
+          <button
+            type="button"
+            onClick={() => { setTab('signup'); setError(''); }}
+            disabled={busy}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: 'none',
+              background: tab === 'signup' ? '#ffffff' : 'transparent',
+              color: tab === 'signup' ? '#6e46eb' : '#64748b',
+              fontWeight: tab === 'signup' ? 700 : 600,
+              fontSize: 13.5,
+              cursor: 'pointer',
+              boxShadow: tab === 'signup' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+              transition: 'all .15s ease',
+            }}
+          >
+            Create Account
+          </button>
+          <button
+            type="button"
+            onClick={() => { setTab('login'); setError(''); }}
+            disabled={busy}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: 'none',
+              background: tab === 'login' ? '#ffffff' : 'transparent',
+              color: tab === 'login' ? '#6e46eb' : '#64748b',
+              fontWeight: tab === 'login' ? 700 : 600,
+              fontSize: 13.5,
+              cursor: 'pointer',
+              boxShadow: tab === 'login' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+              transition: 'all .15s ease',
+            }}
+          >
+            Sign In
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
+          <div ref={googleBtnRef} style={{ minHeight: 40 }} />
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '12px 0 16px', color: '#94a3b8', fontSize: 12 }}>
+          <div style={{ flex: 1, height: 1, background: '#e2e8f0' }} />
+          <span>or continue with email</span>
+          <div style={{ flex: 1, height: 1, background: '#e2e8f0' }} />
+        </div>
+
+        {error && (
+          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontSize: 13, fontWeight: 500 }}>
+            {error}
+          </div>
+        )}
+
+        {statusMsg && (
+          <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', color: '#6d28d9', borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid #6d28d9', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+            <span>{statusMsg}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 5 }}>
+              Business Email
+            </label>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={busy}
+              placeholder="name@company.com"
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                borderRadius: 10,
+                border: '1px solid #cbd5e1',
+                fontSize: 14,
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 5 }}>
+              <span>Password</span>
+              {tab === 'login' && (
+                <a href="/login" style={{ color: '#6e46eb', textDecoration: 'none', fontWeight: 600, fontSize: 12 }}>
+                  Forgot?
+                </a>
+              )}
+            </label>
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={busy}
+                placeholder={tab === 'signup' ? 'At least 6 characters' : 'Enter your password'}
+                style={{
+                  width: '100%',
+                  padding: '10px 42px 10px 14px',
+                  borderRadius: 10,
+                  border: '1px solid #cbd5e1',
+                  fontSize: 14,
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                tabIndex={-1}
+                style={{
+                  position: 'absolute',
+                  right: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#94a3b8',
+                  fontSize: 14,
+                  padding: 4,
+                }}
+              >
+                {showPassword ? '🙈' : '👁️'}
+              </button>
+            </div>
+          </div>
+
+          {showOtp && (
+            <div>
+              <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 5 }}>
+                Two-Factor Code (2FA)
+              </label>
+              <input
+                type="text"
+                required
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                disabled={busy}
+                placeholder="6-digit code"
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: 10,
+                  border: '1px solid #cbd5e1',
+                  fontSize: 14,
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={busy}
+            className="btn btn-primary"
+            style={{
+              width: '100%',
+              padding: '12px 18px',
+              fontSize: 14.5,
+              fontWeight: 700,
+              borderRadius: 10,
+              marginTop: 6,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+            }}
+          >
+            {busy ? (
+              <span>Taking you to checkout…</span>
+            ) : (
+              <>
+                <span>{tab === 'signup' ? 'Create Account & Continue to Checkout' : 'Sign In & Continue to Checkout'}</span>
+                <span>→</span>
+              </>
+            )}
+          </button>
+        </form>
+
+        <div style={{ marginTop: 16, textAlign: 'center' }}>
+          <a
+            href={tab === 'signup' ? '/register' : '/login'}
+            style={{ color: '#64748b', fontSize: 12.5, textDecoration: 'underline' }}
+          >
+            Prefer full-screen page? Open sign in page →
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ==================== EMAIL-FIRST CUSTOMER AUTH (Wix-style) ====================
 // Screen 1: enter email + social. On "Continue with Email" we ask the backend
 // whether the account exists, then branch: existing -> password login screen;
@@ -647,6 +1127,33 @@ const CustomerAuthFlow = () => {
   const [msConfigured, setMsConfigured] = useState(false);
   const [fbConfigured, setFbConfigured] = useState(false);
   const googleBtnRef = useRef(null);
+
+  const [pendingDomain] = useState(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? (sessionStorage.getItem('pendingDomainPurchase') || localStorage.getItem('pendingDomainPurchase')) : null;
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) { return null; }
+  });
+
+  const handleAuthSuccess = async (tokenVal, customerVal) => {
+    login(customerVal.businessEmail, tokenVal, customerVal);
+    try {
+      const raw = sessionStorage.getItem('pendingDomainPurchase') || localStorage.getItem('pendingDomainPurchase');
+      if (raw) {
+        const pending = JSON.parse(raw);
+        if (pending && pending.domainName) {
+          setLoading(true);
+          setInfo(`Taking you directly to checkout for ${pending.domainName}…`);
+          const ok = await executePendingDomainCheckout(tokenVal, pending);
+          if (ok) return;
+        }
+      }
+    } catch (err) {
+      console.error('Pending checkout redirect error:', err);
+      setError(err?.response?.data?.error || 'Could not start checkout automatically. You can register it in your portal.');
+      setLoading(false);
+    }
+  };
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((email || '').trim());
 
@@ -691,7 +1198,7 @@ const CustomerAuthFlow = () => {
       setError(''); setInfo(''); setLoading(true);
       try {
         const r = await axios.post(`${API_URL}/auth/google`, { credential: response.credential });
-        login(r.data.customer.businessEmail, r.data.token, r.data.customer);
+        handleAuthSuccess(r.data.token, r.data.customer);
       } catch (e) { setError(e?.response?.data?.error || 'Google sign-in failed.'); }
       finally { setLoading(false); }
     };
@@ -755,7 +1262,7 @@ const CustomerAuthFlow = () => {
         setError('Unexpected response from the server — please try again.');
         return;
       }
-      login(r.data.customer.businessEmail, r.data.token, r.data.customer);
+      handleAuthSuccess(r.data.token, r.data.customer);
     } catch (e2) {
       console.error('login failed:', e2?.response?.status, e2?.response?.data);
       setError(e2?.response?.data?.error || `Login failed${e2?.response?.status ? ` (${e2.response.status})` : ''}.`);
@@ -772,7 +1279,7 @@ const CustomerAuthFlow = () => {
     setLoading(true);
     try {
       const r = await axios.post(`${API_URL}/auth/signup-quick`, { businessEmail: email.trim(), password });
-      login(r.data.customer.businessEmail, r.data.token, r.data.customer);
+      handleAuthSuccess(r.data.token, r.data.customer);
     } catch (e2) { setError(e2?.response?.data?.error || 'Sign up failed.'); }
     finally { setLoading(false); }
   };
@@ -840,6 +1347,31 @@ const CustomerAuthFlow = () => {
                 </a>
             }
           </div>
+
+          {pendingDomain && (
+            <div style={{
+              background: '#f5f3ff',
+              border: '1px solid #ddd6fe',
+              borderRadius: 14,
+              padding: '12px 16px',
+              marginBottom: 18,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              textAlign: 'left',
+              boxShadow: '0 1px 3px rgba(110, 70, 235, 0.06)'
+            }}>
+              <div style={{ fontSize: 22, flexShrink: 0 }}>🌐</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, color: '#4c1d95', fontSize: 14 }}>
+                  Securing {pendingDomain.domainName}
+                </div>
+                <div style={{ color: '#6d28d9', fontSize: 12.5, marginTop: 2 }}>
+                  {pendingDomain.price != null ? `$${Number(pendingDomain.price).toFixed(2)}/yr` : ''} • Sign in or create an account to go directly to checkout.
+                </div>
+              </div>
+            </div>
+          )}
 
           {step === 'email' && (
             <>
@@ -5232,6 +5764,12 @@ const CustomerPortal = ({ onViewStorefront }) => {
     ? window.location.hash.replace('#', '') : 'overview';
   const [section, setSectionState] = useState(initialSection || 'overview');
   const [payBanner, setPayBanner] = useState('');
+  const [purchasedDomain, setPurchasedDomain] = useState(() => {
+    try {
+      return (typeof window !== 'undefined' ? sessionStorage.getItem('justPurchasedDomain') : '') || '';
+    } catch (_) { return ''; }
+  });
+  const [workspaceStartStep, setWorkspaceStartStep] = useState(1);
 
   // Wrap setSection so changing pages also updates the URL hash and scrolls to top.
   const setSection = (s) => {
@@ -5258,6 +5796,14 @@ const CustomerPortal = ({ onViewStorefront }) => {
     const params = new URLSearchParams(window.location.search);
     const payStatus = params.get('payment');
     const pid = params.get('pid');
+    const paramType = params.get('type');
+    const paramDomain = params.get('domain');
+
+    if (paramDomain) {
+      setPurchasedDomain(paramDomain);
+      try { sessionStorage.setItem('justPurchasedDomain', paramDomain); } catch (_) {}
+    }
+
     if (payStatus === 'cancelled') {
       setPayBanner('Payment was cancelled. You can try again anytime.');
       // Clean the URL
@@ -5271,7 +5817,16 @@ const CustomerPortal = ({ onViewStorefront }) => {
         try {
           const r = await axios.get(`${API_URL}/customer/payment-status/${pid}`);
           if (r.data.paid) {
-            setPayBanner('✓ Payment confirmed — your order is being set up. Thank you!');
+            const isDomainOrder = paramType === 'domain' || paramType === 'domain_transfer' || r.data.orderType === 'domain' || r.data.orderType === 'domain_transfer';
+            const dom = r.data.domain || paramDomain || purchasedDomain;
+            if (isDomainOrder && dom) {
+              setPurchasedDomain(dom);
+              try { sessionStorage.setItem('justPurchasedDomain', dom); } catch (_) {}
+              setPayBanner(`🎉 Domain ${dom} registered successfully! Now set up your Google Workspace below.`);
+              setSection('domain-workspace-setup');
+            } else {
+              setPayBanner('✓ Payment confirmed — your order is being set up. Thank you!');
+            }
             window.history.replaceState({}, '', window.location.pathname);
             return;
           }
@@ -5282,14 +5837,31 @@ const CustomerPortal = ({ onViewStorefront }) => {
           }
           attempt++;
           if (attempt < 30) { setPayBanner('Confirming your payment… (this can take a moment for crypto)'); setTimeout(poll, 8000); }
-          else { setPayBanner('Your payment is still confirming. Your order will activate automatically once confirmed — check back shortly or contact support.'); window.history.replaceState({}, '', window.location.pathname); }
+          else {
+            if ((paramType === 'domain' || paramType === 'domain_transfer') && (paramDomain || purchasedDomain)) {
+              setSection('domain-workspace-setup');
+            }
+            setPayBanner('Your payment is still confirming. Your order will activate automatically once confirmed — check back shortly or contact support.');
+            window.history.replaceState({}, '', window.location.pathname);
+          }
         } catch (_) {
           attempt++;
           if (attempt < 30) setTimeout(poll, 8000);
-          else { setPayBanner('We couldn\'t confirm the payment automatically. If you paid, your order will activate soon — contact support if needed.'); window.history.replaceState({}, '', window.location.pathname); }
+          else {
+            if ((paramType === 'domain' || paramType === 'domain_transfer') && (paramDomain || purchasedDomain)) {
+              setSection('domain-workspace-setup');
+            }
+            setPayBanner('We couldn\'t confirm the payment automatically. If you paid, your order will activate soon — contact support if needed.');
+            window.history.replaceState({}, '', window.location.pathname);
+          }
         }
       };
       poll();
+    } else if (payStatus === 'success' && (paramType === 'domain' || paramType === 'domain_transfer') && (paramDomain || purchasedDomain)) {
+      const dom = paramDomain || purchasedDomain;
+      setPurchasedDomain(dom);
+      setSection('domain-workspace-setup');
+      window.history.replaceState({}, '', window.location.pathname);
     }
   }, []);
 
@@ -5397,11 +5969,15 @@ const CustomerPortal = ({ onViewStorefront }) => {
             <div className="cp-breadcrumb">
               <button onClick={() => setSection('overview')} className="cp-breadcrumb-root">Customer Portal</button>
               <span className="cp-breadcrumb-sep">/</span>
-              <span className="cp-breadcrumb-current">{navItems.find(it => it.key === section)?.label || 'Overview'}</span>
+              <span className="cp-breadcrumb-current">
+                {section === 'domain-workspace-setup'
+                  ? 'Setup Google Workspace'
+                  : (navItems.find(it => it.key === section)?.label || 'Overview')}
+              </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               {section !== 'order' && (
-                <button onClick={() => setSection('order')} className="btn btn-primary" style={{ padding: '6px 14px', fontSize: 12.5, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <button onClick={() => { setWorkspaceStartStep(1); setSection('order'); }} className="btn btn-primary" style={{ padding: '6px 14px', fontSize: 12.5, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <GoogleWorkspaceIcon size={14} />
                   <span>+ Setup Workspace</span>
                 </button>
@@ -5414,20 +5990,60 @@ const CustomerPortal = ({ onViewStorefront }) => {
             </div>
           </div>
           {payBanner && (
-            <div style={{ background: payBanner.startsWith('✓') ? '#dcfce7' : '#fef3c7', color: payBanner.startsWith('✓') ? '#166534' : '#92600a', borderRadius: 12, padding: '14px 18px', marginBottom: 18, fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <div style={{ background: payBanner.startsWith('✓') || payBanner.startsWith('🎉') ? '#dcfce7' : '#fef3c7', color: payBanner.startsWith('✓') || payBanner.startsWith('🎉') ? '#166534' : '#92600a', borderRadius: 12, padding: '14px 18px', marginBottom: 18, fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
               <span>{payBanner}</span>
               <button onClick={() => setPayBanner('')} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 18, color: 'inherit' }}>×</button>
             </div>
           )}
-          {section === 'overview' && <CustomerOverview onNavigate={setSection} />}
+          {section === 'overview' && (
+            <CustomerOverview
+              onNavigate={setSection}
+              onSetupWorkspace={(dom) => {
+                setPurchasedDomain(dom);
+                setSection('domain-workspace-setup');
+              }}
+            />
+          )}
+          {section === 'domain-workspace-setup' && (
+            <DomainPostPurchaseSetup
+              domain={purchasedDomain}
+              onOpenWorkspace={(dom, step = 2) => {
+                setPurchasedDomain(dom);
+                setWorkspaceStartStep(step);
+                setSection('order');
+              }}
+              onOpenAddons={(dom) => {
+                setPurchasedDomain(dom);
+                setSection('addons');
+              }}
+              onOpenHosting={(dom) => {
+                setPurchasedDomain(dom);
+                setSection('hosting');
+              }}
+              onDismiss={() => setSection('overview')}
+            />
+          )}
           {section === 'dashboard' && <CustomerSubscriptions />}
-          {section === 'order' && <WorkspaceOrderFlow />}
+          {section === 'order' && (
+            <WorkspaceOrderFlow
+              initialDomain={purchasedDomain}
+              initialStep={workspaceStartStep}
+              onBackToDomainSetup={() => setSection('domain-workspace-setup')}
+            />
+          )}
           {section === 'import' && <CustomerWorkspaceImport />}
-          {section === 'domains' && <CustomerDomains />}
+          {section === 'domains' && (
+            <CustomerDomains
+              onSetupWorkspace={(dom) => {
+                setPurchasedDomain(dom);
+                setSection('domain-workspace-setup');
+              }}
+            />
+          )}
           {section === 'ssl' && <CustomerSsl />}
-          {section === 'hosting' && <CustomerHosting />}
+          {section === 'hosting' && <CustomerHosting initialDomain={purchasedDomain} />}
           {section === 'voice' && <CustomerVoice />}
-          {section === 'addons' && <CustomerAddons />}
+          {section === 'addons' && <CustomerAddons initialDomain={purchasedDomain} />}
           {section === 'payments' && <CustomerPayments />}
           {section === 'balance' && <CustomerBalance />}
           {section === 'support' && <CustomerSupport />}
@@ -5439,7 +6055,7 @@ const CustomerPortal = ({ onViewStorefront }) => {
 };
 
 // Customer Overview — stat cards + recent subscriptions (matches screenshot)
-const CustomerOverview = ({ onNavigate }) => {
+const CustomerOverview = ({ onNavigate, onSetupWorkspace = null }) => {
   const { user } = useAuth();
   const [data, setData] = useState(null);
   const [domains, setDomains] = useState([]);
@@ -5501,6 +6117,35 @@ const CustomerOverview = ({ onNavigate }) => {
           </button>
         </div>
       </div>
+
+      {/* If customer has an active registered domain without an active Google Workspace subscription */}
+      {activeDomains.length > 0 && !subs.some(s => activeDomains.some(d => (s.domain || '').toLowerCase() === (d.domainName || '').toLowerCase())) && (
+        <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 14, padding: 18, marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 38, height: 38, borderRadius: 10, background: '#ede9fe', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6e46eb', fontWeight: 800, fontSize: 18 }}>
+              🌐
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, color: '#4c1d95', marginBottom: 2 }}>
+                Connect Google Workspace to {activeDomains[0].domainName}
+              </div>
+              <div style={{ color: '#6d28d9', fontSize: 13.5 }}>
+                Activate professional business email, cloud storage, and video meetings for your domain.
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={() => onSetupWorkspace ? onSetupWorkspace(activeDomains[0].domainName) : onNavigate('domain-workspace-setup')}
+              className="btn btn-primary"
+              style={{ padding: '8px 18px', fontSize: 13, background: '#6e46eb', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <GoogleWorkspaceIcon size={14} />
+              Setup Google Workspace
+            </button>
+          </div>
+        </div>
+      )}
 
       {draft && (
         <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 14, padding: 18, marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
@@ -5889,9 +6534,519 @@ const CustomerPayments = () => {
   );
 };
 
+// ==================== WIX-STYLE POST-DOMAIN PURCHASE SETUP ====================
+// Guides customer to set up Google Workspace for their newly purchased domain,
+// provides one-click button to fill form and checkout,
+// and highlights Google Workspace Addon Subscriptions and Buy Web Hosting options.
+const DomainPostPurchaseSetup = ({
+  domain = '',
+  onOpenWorkspace,
+  onOpenAddons,
+  onOpenHosting,
+  onDismiss,
+}) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [targetDomain, setTargetDomain] = useState(domain || '');
+
+  useEffect(() => {
+    if (domain) {
+      setTargetDomain(domain);
+    } else {
+      try {
+        const saved = sessionStorage.getItem('justPurchasedDomain');
+        if (saved) setTargetDomain(saved);
+      } catch (_) {}
+    }
+  }, [domain]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadInfo = async () => {
+      setLoading(true);
+      const domToLoad = targetDomain || 'yourdomain.com';
+      try {
+        const token = localStorage.getItem('token');
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        const res = await axios.get(`${API_URL}/customer/domain-post-purchase/${encodeURIComponent(domToLoad)}`, { headers });
+        if (isMounted && res.data) {
+          setData(res.data);
+        }
+      } catch (_) {
+        try {
+          const token = localStorage.getItem('token');
+          const headers = token ? { Authorization: `Bearer ${token}` } : {};
+          const [pRes, hRes, aRes] = await Promise.all([
+            axios.get(`${API_URL}/products`).catch(() => ({ data: {} })),
+            axios.get(`${API_URL}/customer/nc/hosting`, { headers }).catch(() => ({ data: { plans: [] } })),
+            axios.get(`${API_URL}/customer/addons`, { headers }).catch(() => ({ data: { addons: [] } })),
+          ]);
+          if (isMounted) {
+            setData({
+              domain: domToLoad,
+              workspacePlans: pRes.data?.workspace || [],
+              hostingPlans: hRes.data?.plans || [],
+              addons: aRes.data?.addons || [],
+            });
+          }
+        } catch (e) {
+          // ignore
+        }
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+    loadInfo();
+    return () => { isMounted = false; };
+  }, [targetDomain]);
+
+  const activeDom = targetDomain || data?.domain || 'your domain';
+  const cleanDom = activeDom.replace(/^https?:\/\//, '').replace(/\/.*$/, '').toLowerCase();
+
+  const cardStyle = {
+    background: '#ffffff',
+    borderRadius: 16,
+    border: '1px solid #e2e8f0',
+    padding: '28px',
+    boxShadow: '0 1px 3px rgba(15, 23, 42, 0.05)',
+  };
+
+  const starterPlan = data?.workspacePlans?.[0] || { name: 'Google Workspace Business Starter', monthlyPrice: 6.00 };
+
+  const defaultAddons = [
+    {
+      skuId: '1010370001',
+      name: 'Gemini for Google Workspace',
+      badge: 'AI Assistant',
+      desc: 'Supercharge Gmail and Docs with Google AI for drafting emails, creating templates, and analyzing data.',
+      price: 20.00,
+      icon: (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6e46eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+        </svg>
+      ),
+    },
+    {
+      skuId: 'voice_starter',
+      name: 'Google Voice for Business',
+      badge: 'Smart Business Phone',
+      desc: 'Cloud business phone numbers with visual voicemail, automated phone tree, and call forwarding on all devices.',
+      price: 10.00,
+      icon: (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0284c7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+        </svg>
+      ),
+    },
+    {
+      skuId: '1010330004',
+      name: 'AppSheet Enterprise / Core',
+      badge: 'No-Code Automation',
+      desc: 'Create custom mobile and web applications directly connected to your Google Workspace and Sheets data.',
+      price: 10.00,
+      icon: (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" />
+        </svg>
+      ),
+    },
+    {
+      skuId: '1010310002',
+      name: 'Cloud Identity Premium',
+      badge: 'Enterprise Security',
+      desc: 'Single sign-on (SSO), multi-factor security rules, and device management for all team members.',
+      price: 6.00,
+      icon: (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        </svg>
+      ),
+    },
+  ];
+
+  const defaultHostingPlans = [
+    {
+      planId: 'stellar',
+      name: 'Stellar Hosting',
+      price: 4.48,
+      billingCycle: 'monthly',
+      description: 'Ideal starting plan for high-speed WordPress and corporate websites.',
+      features: ['20 GB SSD Storage', '3 Websites Supported', 'Unmetered Bandwidth', 'Free SSL Certificates', 'cPanel Control Panel'],
+    },
+    {
+      planId: 'stellar_plus',
+      name: 'Stellar Plus Hosting',
+      price: 6.98,
+      billingCycle: 'monthly',
+      description: 'Maximum power with unmetered storage and automated cloud backups.',
+      features: ['Unmetered SSD Storage', 'Unlimited Websites', 'Auto-Backup & Cloud Storage', 'Free SSL & CDN', 'Unlimited Domain Mailboxes'],
+    },
+    {
+      planId: 'stellar_business',
+      name: 'Stellar Business',
+      price: 11.98,
+      billingCycle: 'monthly',
+      description: 'High-traffic e-commerce and mission-critical business hosting.',
+      features: ['50 GB Pure SSD Space', 'PCI-DSS Compliant', 'Dedicated Cloud Resources', 'Priority Technical Support', 'Advanced DDoS Shield'],
+    },
+  ];
+
+  const hostingList = (data?.hostingPlans && data.hostingPlans.length > 0) ? data.hostingPlans : defaultHostingPlans;
+
+  return (
+    <div style={{ maxWidth: 1040, margin: '0 auto', padding: '10px 0 40px' }}>
+      {/* Wix-Style Stepper Header */}
+      <div style={{ background: '#fff', borderRadius: 16, border: '1px solid #e2e8f0', padding: '20px 28px', marginBottom: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', background: '#dcfce7', color: '#15803d', fontWeight: 800, fontSize: 14 }}>✓</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#15803d' }}>Step 1: Domain Registered</span>
+            <span style={{ color: '#cbd5e1' }}>→</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', background: '#6e46eb', color: '#fff', fontWeight: 800, fontSize: 13, boxShadow: '0 2px 6px rgba(110,70,235,0.3)' }}>2</span>
+            <span style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>Step 2: Set Up Google Workspace</span>
+            <span style={{ color: '#cbd5e1' }}>→</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', background: '#f1f5f9', color: '#64748b', fontWeight: 700, fontSize: 13 }}>3</span>
+            <span style={{ fontSize: 13.5, fontWeight: 600, color: '#64748b' }}>Step 3: Add-ons & Hosting</span>
+          </div>
+          {onDismiss && (
+            <button
+              type="button"
+              onClick={onDismiss}
+              style={{ background: 'transparent', border: 'none', color: '#64748b', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+            >
+              Skip to Portal Overview →
+            </button>
+          )}
+        </div>
+
+        {/* Domain Registered Confirmation Bar */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', padding: '14px 18px', background: '#f0fdf4', borderRadius: 12, border: '1px solid #bbf7d0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#166534', fontSize: 20 }}>
+              🌐
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <strong style={{ fontSize: 17, color: '#14532d', letterSpacing: '-0.01em' }}>{cleanDom}</strong>
+                <span style={{ background: '#dcfce7', color: '#166534', fontSize: 11.5, fontWeight: 700, padding: '2px 8px', borderRadius: 999, border: '1px solid #86efac' }}>
+                  ✓ Domain Registered & Active
+                </span>
+              </div>
+              <div style={{ fontSize: 13, color: '#15803d', marginTop: 2 }}>
+                Your domain is active on our DNS. Follow the steps below to finish setting up your business.
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12.5, color: '#166534', fontWeight: 600 }}>Next: Connect Business Email</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Primary Setup Card: Google Workspace (Wix Flow Core Requirement) */}
+      <section style={{ ...cardStyle, position: 'relative', overflow: 'hidden', border: '1.5px solid #c7d2fe', background: 'linear-gradient(180deg, #ffffff 0%, #f8faff 100%)', marginBottom: 28, boxShadow: '0 4px 20px -4px rgba(99,102,241,0.12)' }}>
+        {/* Google 4-color top bar */}
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'linear-gradient(90deg, #4285F4 0%, #EA4335 33%, #FBBC05 66%, #34A853 100%)' }} />
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 20, flexWrap: 'wrap', marginBottom: 20 }}>
+          <div style={{ maxWidth: 660 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#eef2ff', padding: '4px 12px', borderRadius: 999, marginBottom: 12, border: '1px solid #e0e7ff' }}>
+              <GoogleWorkspaceIcon size={16} />
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: '#4338ca' }}>Official Google Workspace Partner Integration</span>
+            </div>
+            <h2 style={{ fontSize: 'clamp(1.5rem, 2.5vw, 1.85rem)', margin: '0 0 10px', color: '#0f172a', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.25 }}>
+              Set Up Google Workspace for <span style={{ color: '#4f46e5' }}>{cleanDom}</span>
+            </h2>
+            <p style={{ fontSize: 15, color: '#475569', margin: 0, lineHeight: 1.55 }}>
+              Get custom business email addresses (like <strong>you@{cleanDom}</strong>), 30GB to 5TB Google Drive cloud storage, high-definition Google Meet video conferencing, and full administrative security controls.
+            </p>
+          </div>
+
+          <div style={{ background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', padding: '14px 18px', textAlign: 'right', minWidth: 160, boxShadow: '0 2px 6px rgba(0,0,0,0.03)' }}>
+            <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Starter Plan From</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
+              ${Number(starterPlan.monthlyPrice || 6).toFixed(2)}
+              <span style={{ fontSize: 13, fontWeight: 500, color: '#64748b' }}> /user/mo</span>
+            </div>
+            <div style={{ fontSize: 11.5, color: '#16a34a', fontWeight: 600, marginTop: 2 }}>✓ Flexible monthly billing</div>
+          </div>
+        </div>
+
+        {/* Feature Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 26 }}>
+          <div style={{ background: '#ffffff', padding: '16px', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+            <div style={{ fontSize: 22, marginBottom: 8 }}>✉️</div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#0f172a', marginBottom: 4 }}>Custom Business Email</div>
+            <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.45 }}>
+              Build customer trust with <strong>@{cleanDom}</strong> addresses on Gmail's clean, spam-free infrastructure.
+            </div>
+          </div>
+          <div style={{ background: '#ffffff', padding: '16px', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+            <div style={{ fontSize: 22, marginBottom: 8 }}>📁</div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#0f172a', marginBottom: 4 }}>Google Drive & Docs</div>
+            <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.45 }}>
+              Store, share, and collaborate in real time on Docs, Sheets, and Slides with generous cloud storage.
+            </div>
+          </div>
+          <div style={{ background: '#ffffff', padding: '16px', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+            <div style={{ fontSize: 22, marginBottom: 8 }}>🎥</div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#0f172a', marginBottom: 4 }}>Google Meet & Calendar</div>
+            <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.45 }}>
+              Host secure HD video meetings with screen sharing, noise cancellation, and integrated team calendar scheduling.
+            </div>
+          </div>
+          <div style={{ background: '#ffffff', padding: '16px', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+            <div style={{ fontSize: 22, marginBottom: 8 }}>🛡️</div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#0f172a', marginBottom: 4 }}>Admin Security Console</div>
+            <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.45 }}>
+              Manage users, configure 2-step verification, mobile device security, and enjoy a 99.9% uptime SLA guarantee.
+            </div>
+          </div>
+        </div>
+
+        {/* Wix-Style Action Buttons */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', paddingTop: 10, borderTop: '1px solid #e2e8f0' }}>
+          <button
+            type="button"
+            onClick={() => onOpenWorkspace && onOpenWorkspace(cleanDom, 2)}
+            className="btn btn-primary"
+            style={{
+              padding: '14px 28px',
+              fontSize: 15,
+              fontWeight: 700,
+              background: '#4f46e5',
+              boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 10,
+              borderRadius: 10,
+            }}
+          >
+            <GoogleWorkspaceIcon size={20} />
+            <span>Setup Google Workspace for {cleanDom}</span>
+            <span style={{ fontSize: 16 }}>→</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onOpenWorkspace && onOpenWorkspace(cleanDom, 1)}
+            style={{
+              background: '#ffffff',
+              border: '1px solid #cbd5e1',
+              color: '#334155',
+              padding: '13px 20px',
+              borderRadius: 10,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Choose a different plan tier first
+          </button>
+        </div>
+      </section>
+
+      {/* Section 2: Google Workspace Addon Subscriptions (from existing setup) */}
+      <section style={{ ...cardStyle, marginBottom: 28 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <span style={{ fontSize: 18 }}>🧩</span>
+              <h3 style={{ margin: 0, fontSize: 20, color: '#0f172a', fontWeight: 700, letterSpacing: '-0.015em' }}>
+                Google Workspace Add-on Subscriptions
+              </h3>
+            </div>
+            <p style={{ margin: 0, fontSize: 14, color: '#64748b' }}>
+              Add enterprise capabilities, generative AI, phone lines, and automated workflows to your domain.
+            </p>
+          </div>
+          {onOpenAddons && (
+            <button
+              type="button"
+              onClick={() => onOpenAddons(cleanDom)}
+              className="btn btn-outline"
+              style={{ fontSize: 13, padding: '7px 16px', fontWeight: 600 }}
+            >
+              Explore All Add-ons →
+            </button>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 16 }}>
+          {defaultAddons.map((addon, idx) => (
+            <div
+              key={addon.skuId || idx}
+              style={{
+                background: '#fafaf9',
+                borderRadius: 12,
+                border: '1px solid #e7e5e4',
+                padding: '18px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 8, background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+                    {addon.icon}
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', background: '#f1f5f9', padding: '2px 8px', borderRadius: 999 }}>
+                    {addon.badge}
+                  </span>
+                </div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a', marginBottom: 6 }}>
+                  {addon.name}
+                </div>
+                <p style={{ fontSize: 12.5, color: '#64748b', margin: '0 0 14px', lineHeight: 1.45 }}>
+                  {addon.desc}
+                </p>
+              </div>
+
+              <div style={{ paddingTop: 12, borderTop: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <div>
+                  <span style={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>${addon.price.toFixed(2)}</span>
+                  <span style={{ fontSize: 11, color: '#64748b' }}> /mo</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onOpenAddons && onOpenAddons(cleanDom)}
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 8,
+                    padding: '6px 12px',
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: '#0f172a',
+                    cursor: 'pointer',
+                  }}
+                >
+                  + Add Option
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Section 3: Buy Web Hosting Option (from existing setup) */}
+      <section style={{ ...cardStyle }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <span style={{ fontSize: 18 }}>🖥️</span>
+              <h3 style={{ margin: 0, fontSize: 20, color: '#0f172a', fontWeight: 700, letterSpacing: '-0.015em' }}>
+                Buy Web Hosting for {cleanDom}
+              </h3>
+            </div>
+            <p style={{ margin: 0, fontSize: 14, color: '#64748b' }}>
+              Launch your corporate website with lightning-fast cPanel hosting, pure SSD storage, and free SSL certificates.
+            </p>
+          </div>
+          {onOpenHosting && (
+            <button
+              type="button"
+              onClick={() => onOpenHosting(cleanDom)}
+              className="btn btn-outline"
+              style={{ fontSize: 13, padding: '7px 16px', fontWeight: 600 }}
+            >
+              All Hosting Options →
+            </button>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(270px, 1fr))', gap: 16 }}>
+          {hostingList.slice(0, 3).map((plan) => (
+            <div
+              key={plan.planId}
+              style={{
+                background: '#f8fafc',
+                borderRadius: 14,
+                border: '1px solid #e2e8f0',
+                padding: '20px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <div style={{ fontWeight: 800, fontSize: 16, color: '#0f172a' }}>{plan.name}</div>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: '#0369a1', background: '#e0f2fe', padding: '2px 8px', borderRadius: 999 }}>
+                    cPanel SSD
+                  </span>
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', marginBottom: 4 }}>
+                  ${Number(plan.price || 4.48).toFixed(2)}
+                  <span style={{ fontSize: 12.5, fontWeight: 500, color: '#64748b' }}> /{plan.billingCycle || 'month'}</span>
+                </div>
+                <p style={{ fontSize: 12.5, color: '#64748b', margin: '0 0 14px', lineHeight: 1.4 }}>
+                  {plan.description || 'Fast SSD web hosting with auto SSL.'}
+                </p>
+
+                {plan.features && plan.features.length > 0 && (
+                  <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 16px', fontSize: 12.5, color: '#475569' }}>
+                    {plan.features.slice(0, 4).map((f, i) => (
+                      <li key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                        <span style={{ color: '#16a34a', fontWeight: 700 }}>✓</span>
+                        <span>{f}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => onOpenHosting && onOpenHosting(cleanDom)}
+                className="btn btn-primary"
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  fontSize: 13.5,
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  borderRadius: 8,
+                }}
+              >
+                <span>Buy Hosting for {cleanDom}</span>
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Footer Navigation */}
+      <div style={{ marginTop: 24, textAlign: 'center', display: 'flex', justifyContent: 'center', gap: 16 }}>
+        {onDismiss && (
+          <button
+            type="button"
+            onClick={onDismiss}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#64748b',
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: 'pointer',
+              textDecoration: 'underline',
+            }}
+          >
+            ← Skip for now and go to Customer Portal
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // Customer: their own subscriptions
 // Customer: domain search + availability (DomainNameAPI)
-const CustomerDomains = () => {
+const CustomerDomains = ({ onSetupWorkspace = null }) => {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -5964,6 +7119,7 @@ const CustomerDomains = () => {
     if (!xferEpp.trim()) { setXferMsg('Enter the EPP / Auth code from your current registrar.'); return; }
     setXferBusy(true); setXferMsg('');
     try {
+      try { sessionStorage.setItem('justPurchasedDomain', dom); } catch (_) {}
       const res = await axios.post(`${API_URL}/customer/domains/transfer`, { domainName: dom, eppCode: xferEpp.trim(), method });
       if (res.data.checkoutUrl) window.location.href = res.data.checkoutUrl;
       else setXferMsg('Could not start transfer checkout.');
@@ -5996,6 +7152,7 @@ const CustomerDomains = () => {
     const price = d.price;
     setBuyingDomain(domainName); setRegBusy(true); setRegMsg('');
     try {
+      try { sessionStorage.setItem('justPurchasedDomain', domainName); } catch (_) {}
       const res = await axios.post(`${API_URL}/customer/domains/register`, {
         domainName, period: 1, price, method,
       });
@@ -6115,6 +7272,14 @@ const CustomerDomains = () => {
                         customer needs to renew. Only 'failed' and 'pending' hide the actions. */}
                     {!['failed', 'pending'].includes(d.status) && (
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                        {onSetupWorkspace && (
+                          <button onClick={() => onSetupWorkspace(d.domainName)}
+                            title={`Set up Google Workspace for ${d.domainName}`}
+                            style={{ background: '#f5f3ff', color: '#6e46eb', border: '1px solid #ddd6fe', borderRadius: 8, padding: '6px 12px', fontWeight: 700, cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                            <GoogleWorkspaceIcon size={14} />
+                            <span>Setup Workspace</span>
+                          </button>
+                        )}
                         <button onClick={() => setManageDomain(d.domainName)}
                           style={{ background: '#fff', color: INK, border: '1px solid #d8dbe6', borderRadius: 8, padding: '6px 12px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
                           ⚙ Manage
@@ -7031,14 +8196,18 @@ const CustomerSsl = () => {
 };
 
 // ==================== CUSTOMER: ADD-ONS ====================
-const CustomerAddons = () => {
+const CustomerAddons = ({ initialDomain = '' }) => {
   const [addons, setAddons] = useState([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
   const [domains, setDomains] = useState(null); // null = not loaded; [] = none
   const [picking, setPicking] = useState(null); // the addon being purchased
-  const [chosenDomain, setChosenDomain] = useState('');
+  const [chosenDomain, setChosenDomain] = useState(initialDomain || '');
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (initialDomain) setChosenDomain(initialDomain);
+  }, [initialDomain]);
 
   const [voice, setVoice] = useState(null);       // { approved, eligible, domains:[...] }
   const [voicePick, setVoicePick] = useState(null); // { domain, plan }
@@ -8951,12 +10120,51 @@ const SuccessStoriesSection = ({ brand, T, INKL, MUTEL }) => {
 // ==================== PUBLIC LANDING PAGE ====================
 const LandingPage = ({ onOpenPortal }) => {
   const brand = useBranding();
+  const { token, user } = useAuth();
   const [plans, setPlans] = useState([]);
   const [dq, setDq] = useState('');
   const [dResult, setDResult] = useState(null);
   const [dLoading, setDLoading] = useState(false);
   const [dError, setDError] = useState('');
   const [searchMode, setSearchMode] = useState('register'); // 'register' | 'transfer'
+  const [authModalDomain, setAuthModalDomain] = useState(null);
+  const [buyBusyDomain, setBuyBusyDomain] = useState('');
+  const [buyError, setBuyError] = useState('');
+
+  const handleInitiateBuyDomain = async (domainObj, method = 'stripe') => {
+    const domainName = (domainObj.domain || domainObj.domainName || '').toLowerCase().trim();
+    const price = Number(domainObj.price || 12.99);
+    const mode = searchMode === 'transfer' ? 'transfer' : 'register';
+    const pending = {
+      domainName,
+      price,
+      period: 1,
+      method,
+      mode,
+    };
+
+    // Store pending purchase across storage
+    try {
+      sessionStorage.setItem('pendingDomainPurchase', JSON.stringify(pending));
+      localStorage.setItem('pendingDomainPurchase', JSON.stringify(pending));
+    } catch (_) {}
+
+    // If customer is already logged in, take them straight to checkout
+    if (token) {
+      setBuyBusyDomain(domainName);
+      setBuyError('');
+      try {
+        await executePendingDomainCheckout(token, pending);
+      } catch (err) {
+        setBuyError(err?.response?.data?.error || 'Could not start domain checkout. Please try again.');
+        setBuyBusyDomain('');
+      }
+      return;
+    }
+
+    // Customer is NOT logged in: ask them to sign up or login via modal
+    setAuthModalDomain(pending);
+  };
 
   // Lead Generation state variables
   const [leadForm, setLeadForm] = useState({
@@ -9296,20 +10504,71 @@ const LandingPage = ({ onOpenPortal }) => {
                       </div>
                     </div>
                     {searchMode === 'transfer' ? (
-                      <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '8px 18px', fontSize: 13.5 }}>
-                        {r.available ? 'Register instead' : 'Transfer to us'}
+                      <button
+                        onClick={() => handleInitiateBuyDomain(r, 'stripe')}
+                        disabled={buyBusyDomain === r.domain}
+                        className="btn btn-primary"
+                        style={{ padding: '8px 18px', fontSize: 13.5 }}
+                      >
+                        {buyBusyDomain === r.domain ? 'Preparing…' : (r.available ? 'Register instead' : 'Transfer to us')}
                       </button>
                     ) : (r.available && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                         <strong style={{ fontSize: 18, color: T }}>{r.price != null ? `$${Number(r.price).toFixed(2)}/yr` : ''}</strong>
-                        <button onClick={() => go('/register')} className="btn btn-primary" style={{ padding: '8px 18px', fontSize: 13.5 }}>
-                          Get started
+                        <button
+                          onClick={() => handleInitiateBuyDomain(r, 'stripe')}
+                          disabled={buyBusyDomain === r.domain}
+                          className="btn btn-primary"
+                          style={{
+                            padding: '8px 18px',
+                            fontSize: 13.5,
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6
+                          }}
+                        >
+                          {buyBusyDomain === r.domain ? (
+                            'Preparing checkout…'
+                          ) : (
+                            <>
+                              <CardIcon size={14} />
+                              <span>Buy Domain</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleInitiateBuyDomain(r, 'nicky')}
+                          disabled={buyBusyDomain === r.domain}
+                          title="Buy with Crypto"
+                          style={{
+                            background: '#ffffff',
+                            color: T,
+                            border: `1px solid ${T}`,
+                            borderRadius: 10,
+                            padding: '8px 12px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            fontSize: 13,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 5
+                          }}
+                        >
+                          <CryptoIcon size={13} color={T} />
+                          <span>Crypto</span>
                         </button>
                       </div>
                     ))}
                   </div>
                   );
                 })}
+              </div>
+            )}
+            {buyError && (
+              <div style={{ color: '#ef4444', marginTop: 14, fontWeight: 600, fontSize: 14 }}>
+                ⚠️ {buyError}
               </div>
             )}
           </div>
@@ -9762,6 +11021,13 @@ const LandingPage = ({ onOpenPortal }) => {
           </div>
         ))}
       </div>
+
+      {authModalDomain && (
+        <DomainAuthModal
+          domainInfo={authModalDomain}
+          onClose={() => setAuthModalDomain(null)}
+        />
+      )}
     </div>
   );
 };
@@ -9797,6 +11063,22 @@ const useNoIndexOnPrivatePages = (isPrivate) => {
 function App() {
   const { token, user, loading } = useAuth();
   const [viewStorefront, setViewStorefront] = useState(false);
+
+  // If user is authenticated and there is a pending domain purchase awaiting checkout, trigger it immediately
+  useEffect(() => {
+    if (!token) return;
+    try {
+      const raw = sessionStorage.getItem('pendingDomainPurchase') || localStorage.getItem('pendingDomainPurchase');
+      if (raw) {
+        const pending = JSON.parse(raw);
+        if (pending && pending.domainName) {
+          executePendingDomainCheckout(token, pending).catch((err) => {
+            console.error('Auto pending domain checkout error:', err);
+          });
+        }
+      }
+    } catch (_) {}
+  }, [token]);
 
   // Private = signed in (portal, account, cart, checkout, admin) or on an auth page.
   const p = typeof window !== 'undefined' ? window.location.pathname : '/';
@@ -9892,8 +11174,8 @@ const US_STATES = [
   ['DC', 'District of Columbia'],
 ];
 
-function WorkspaceOrderFlow() {
-  const [step, setStep] = useState(1);
+function WorkspaceOrderFlow({ initialDomain = '', initialStep = 1, onBackToDomainSetup = null }) {
+  const [step, setStep] = useState(initialStep || 1);
   const [plans, setPlans] = useState(null);
   const [plansError, setPlansError] = useState('');
   const [selectedPlanId, setSelectedPlanId] = useState('');
@@ -9901,7 +11183,7 @@ function WorkspaceOrderFlow() {
   const [planType, setPlanType] = useState('flexible');
   const [orderOpts, setOrderOpts] = useState({ flexibleEnabled: true, annualEnabled: false });
   const [form, setForm] = useState({
-    organizationName: '', domain: '', desiredAdminUsername: '', tempPassword: '',
+    organizationName: '', domain: (initialDomain || '').toLowerCase().trim(), desiredAdminUsername: '', tempPassword: '',
     languageCode: 'en-US',
     country: 'United States', streetAddress: '', streetAddress2: '', streetAddress3: '',
     city: '', state: '', zip: '',
@@ -9918,8 +11200,28 @@ function WorkspaceOrderFlow() {
   const [provisionMsg, setProvisionMsg] = useState('');
   const [provisionSuccess, setProvisionSuccess] = useState(false);
   const [loginInfo, setLoginInfo] = useState(null);
-  const [domainStatus, setDomainStatus] = useState({ state: 'idle', message: '' }); // idle|checking|available|taken|invalid
+  const [domainStatus, setDomainStatus] = useState(initialDomain ? { state: 'available', message: `✓ Domain ${initialDomain} is registered & ready.` } : { state: 'idle', message: '' }); // idle|checking|available|taken|invalid
   const [draftLoaded, setDraftLoaded] = useState(false);
+
+  useEffect(() => {
+    if (initialDomain) {
+      const cleanDom = initialDomain.toLowerCase().trim();
+      const defaultOrg = cleanDom.split('.')[0];
+      const capitalizedOrg = defaultOrg ? (defaultOrg.charAt(0).toUpperCase() + defaultOrg.slice(1)) : '';
+      setForm((prev) => ({
+        ...prev,
+        domain: cleanDom,
+        organizationName: prev.organizationName || capitalizedOrg,
+      }));
+      setDomainStatus({
+        state: 'available',
+        message: `✓ Domain ${cleanDom} is registered and ready for Google Workspace.`,
+      });
+      if (initialStep && initialStep > 1) {
+        setStep(initialStep);
+      }
+    }
+  }, [initialDomain, initialStep]);
 
   useEffect(() => {
     (async () => {
@@ -10182,6 +11484,33 @@ function WorkspaceOrderFlow() {
           <li className={step >= 3 ? 'on' : ''}>Review</li>
         </ol>
       </header>
+
+      {initialDomain && (
+        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: '14px 18px', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 8, background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#166534', fontWeight: 700, fontSize: 16 }}>
+              ✓
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, color: '#166534', fontSize: 14.5 }}>
+                Setting up Google Workspace for {initialDomain}
+              </div>
+              <div style={{ fontSize: 13, color: '#15803d' }}>
+                Your domain is locked in. Fill in your business details below to complete checkout.
+              </div>
+            </div>
+          </div>
+          {onBackToDomainSetup && (
+            <button
+              type="button"
+              onClick={onBackToDomainSetup}
+              style={{ background: '#ffffff', border: '1px solid #86efac', color: '#166534', borderRadius: 8, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+            >
+              ← Domain Setup Overview
+            </button>
+          )}
+        </div>
+      )}
 
       {step === 1 && (
         <section className="wof-card">
@@ -10801,12 +12130,16 @@ const CustomerWorkspaceImport = () => {
 };
 
 // ==================== CUSTOMER: HOSTING ====================
-const CustomerHosting = () => {
+const CustomerHosting = ({ initialDomain = '' }) => {
   const [plans, setPlans] = useState([]);
   const [orders, setOrders] = useState([]);
-  const [forDomain, setForDomain] = useState('');
+  const [forDomain, setForDomain] = useState(initialDomain || '');
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    if (initialDomain) setForDomain(initialDomain);
+  }, [initialDomain]);
 
   const load = async () => {
     try {
