@@ -4472,7 +4472,14 @@ const AdminEmailsSection = () => {
   const card = { background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 16 };
   const inp = { width: '100%', borderRadius: 8, border: '1px solid #d8dbe6', padding: '10px 12px', marginBottom: 12, fontSize: 14, fontFamily: 'inherit' };
 
-  const labels = { warning: 'Renewal warning', suspension: 'Suspension notice', payment: 'Payment confirmation', expiry_7day: '7-day Expiry Warning', expiry_today: 'Expiration Day Warning' };
+  const labels = {
+    warning: 'Renewal warning',
+    suspension: 'Suspension notice',
+    payment: 'Payment confirmation',
+    expiry_7day: '7-day Expiry Warning',
+    expiry_5day: '5-Day Expiry & Renewal Notice',
+    expiry_today: 'Expiration Day Warning',
+  };
 
   const load = async () => {
     try { const r = await axios.get(`${API_URL}/admin/email/templates`); setData(r.data); pick('warning', r.data); }
@@ -4538,7 +4545,7 @@ const AdminEmailsSection = () => {
       {tab === 'templates' && (
         <>
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-            {['warning', 'suspension', 'payment', 'expiry_7day', 'expiry_today'].map(k => (
+            {['warning', 'suspension', 'payment', 'expiry_7day', 'expiry_5day', 'expiry_today'].map(k => (
               <button key={k} className={`btn ${editing === k ? 'btn-primary' : 'btn-secondary'}`} onClick={() => pick(k)}>
                 {labels[k]}{data.templates[k] && data.templates[k].customized ? ' •' : ''}
               </button>
@@ -4547,7 +4554,7 @@ const AdminEmailsSection = () => {
 
           <div style={card}>
             <p style={{ color: '#6b7280', fontSize: 13, marginTop: 0 }}>
-              Use variables: <code>{'{{domain}}'}</code>, <code>{'{{dueDate}}'}</code>, <code>{'{{amount}}'}</code>, <code>{'{{brand}}'}</code>. They're filled automatically when sent.
+              Use variables: <code>{'{{domain}}'}</code>, <code>{'{{serviceName}}'}</code>, <code>{'{{billingCycle}}'}</code>, <code>{'{{customerName}}'}</code>, <code>{'{{dueDate}}'}</code>, <code>{'{{amount}}'}</code>, <code>{'{{brand}}'}</code>. They are populated automatically when sent.
             </p>
             <label style={{ fontSize: 13, fontWeight: 600 }}>Subject</label>
             <input style={inp} value={draft.subject} onChange={e => setDraft({ ...draft, subject: e.target.value })} />

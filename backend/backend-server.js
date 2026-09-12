@@ -490,9 +490,15 @@ const SubBillingSchema = new mongoose.Schema({
   whitelisted: { type: Boolean, default: false },   // whitelisted = never auto-suspended
   whitelistedAt: Date,
 
-  // New expiration reminder tracking
+  // Expiration reminder tracking
   notified7DaysBefore: { type: Boolean, default: false },
+  notified5DaysBefore: { type: Boolean, default: false },
   notifiedOnExpiration: { type: Boolean, default: false },
+
+  // Billing cycle classification (monthly vs annual)
+  planType: { type: String, default: 'flexible' },   // 'flexible' (monthly) or 'annual'
+  billingCycle: { type: String, default: 'monthly' }, // 'monthly' or 'annual'
+  amount: Number,
 
   // Auto-renew card charging (one attempt per daily billing run; after 3 failures ALL of the
   // customer's subscriptions are suspended until they pay).
@@ -512,6 +518,46 @@ const SubBillingSchema = new mongoose.Schema({
 });
 SubBillingSchema.index({ domain: 1, skuId: 1 }, { unique: true });
 const SubBilling = mongoose.model('SubBilling', SubBillingSchema);
+
+// ===== NON-WORKSPACE SERVICE BILLING CYCLES (Domains, Hosting, SSL, Voice/Addons) =====
+// Standard industry billing rules:
+// - Domains: Annual cycle (365 days / period)
+// - Hosting: Monthly (30 days) or Annual (365 days) based on plan
+// - SSL Certificates: Annual cycle (365 days / year)
+// - Voice / Other Addons: Monthly (30 days)
+const ServiceBillingCycleSchema = new mongoose.Schema({
+  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', index: true },
+  customerEmail: { type: String, index: true },
+  customerName: { type: String, default: 'Valued Customer' },
+  domain: { type: String, index: true },
+  serviceType: { type: String, enum: ['domain', 'hosting', 'ssl', 'voice', 'addon', 'custom'], required: true, index: true },
+  serviceName: { type: String, required: true },
+  sourceOrderType: { type: String, default: 'DomainOrder' }, // 'DomainOrder', 'DomainTransfer', 'HostingOrder', 'SslOrder', 'Subscription'
+  sourceOrderId: { type: mongoose.Schema.Types.ObjectId, index: true },
+  orderNumber: String,
+
+  // Schedule & rules
+  billingCycle: { type: String, enum: ['monthly', 'annual'], default: 'annual' },
+  cycleDays: { type: Number, default: 365 },
+  price: { type: Number, default: 0 },
+  currency: { type: String, default: 'USD' },
+
+  billingCycleStart: Date,
+  nextBillingDate: { type: Date, index: true },
+  currentCycleStatus: { type: String, enum: ['paid', 'unpaid'], default: 'paid' },
+  billingStatus: { type: String, enum: ['active', 'warned', 'expired', 'suspended', 'cancelled'], default: 'active' },
+
+  // Expiration notifications
+  notified5DaysBefore: { type: Boolean, default: false },
+  notifiedToday: { type: Boolean, default: false },
+  lastNotifiedAt: Date,
+
+  autoRenew: { type: Boolean, default: true },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+});
+ServiceBillingCycleSchema.index({ customerId: 1, serviceType: 1, domain: 1, sourceOrderId: 1 }, { unique: false });
+const ServiceBillingCycle = mongoose.model('ServiceBillingCycle', ServiceBillingCycleSchema);
 
 // ---- Billing cycle helpers (implement the fixed-schedule rules) ----
 
@@ -533,6 +579,7 @@ function startNewBillingCycle(rec, start = new Date()) {
   rec.warnedAt = null;
   rec.suspendedAt = null;
   rec.notified7DaysBefore = false;
+  rec.notified5DaysBefore = false;
   rec.notifiedOnExpiration = false;
   rec.updatedAt = new Date();
   return rec;
@@ -548,6 +595,7 @@ function advanceToNextCycle(rec) {
   rec.currentCycleStatus = 'unpaid';
   rec.warnedAt = null;
   rec.notified7DaysBefore = false;
+  rec.notified5DaysBefore = false;
   rec.notifiedOnExpiration = false;
   rec.updatedAt = new Date();
   return rec;
@@ -910,41 +958,73 @@ const transporter = nodemailer.createTransport({
 // Set RESEND_API_KEY and EMAIL_FROM (e.g. "GNB MENTOR LLC <noreply@yourdomain>").
 async function sendViaResend(to, subject, html) {
   const fromName = process.env.EMAIL_FROM_NAME || process.env.BRAND_NAME || 'GNB MENTOR LLC';
-  // Resend requires a verified domain sender; falls back to onboarding sender if EMAIL_FROM unset
-  const from = process.env.EMAIL_FROM || `${fromName} <onboarding@resend.dev>`;
+  let rawFrom = process.env.EMAIL_FROM || process.env.EMAIL_FROM_ADDRESS;
+  let from;
+  if (!rawFrom) {
+    from = `${fromName} <onboarding@resend.dev>`;
+  } else if (rawFrom.includes('<') && rawFrom.includes('>')) {
+    from = rawFrom;
+  } else {
+    from = `${fromName} <${rawFrom.trim()}>`;
+  }
+
+  const recipients = Array.isArray(to) ? to.map(e => String(e).trim()).filter(Boolean) : [String(to).trim()];
+  if (!recipients.length || !recipients[0]) {
+    throw new Error('No recipient email provided for sending via Resend');
+  }
+
   const resp = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ from, to, subject, html }),
+    body: JSON.stringify({ from, to: recipients, subject, html }),
   });
   const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(`Resend ${resp.status}: ${JSON.stringify(data).slice(0, 200)}`);
+  if (!resp.ok) {
+    throw new Error(`Resend API error (${resp.status}): ${JSON.stringify(data).slice(0, 300)}`);
+  }
+  console.log(`[Email:Resend] Successfully delivered to ${recipients.join(', ')} (id: ${data.id || 'ok'})`);
   return data;
 }
 
 const sendEmail = async (to, subject, htmlContent) => {
-  try {
-    const fromName = process.env.EMAIL_FROM_NAME || process.env.BRAND_NAME || 'GNB MENTOR LLC';
-    // Prefer Resend (HTTP API — works on Railway where SMTP is blocked)
-    if (process.env.RESEND_API_KEY) {
-      await sendViaResend(to, subject, htmlContent);
-      return true;
-    }
-    // Fallback: SMTP (works only where outbound SMTP isn't blocked)
-    await transporter.sendMail({
-      from: `"${fromName}" <${process.env.EMAIL_USER}>`,
-      to,
-      subject,
-      html: htmlContent,
-    });
-    return true;
-  } catch (error) {
-    console.error('Email send error:', error.message || error);
+  if (!to) {
+    console.warn('[sendEmail] Skipped: recipient email is missing or empty.');
     return false;
   }
+  const fromName = process.env.EMAIL_FROM_NAME || process.env.BRAND_NAME || 'GNB MENTOR LLC';
+
+  // 1. Prefer Resend (HTTP API — works reliably in modern containerized environments)
+  if (process.env.RESEND_API_KEY) {
+    try {
+      await sendViaResend(to, subject, htmlContent);
+      return true;
+    } catch (resendError) {
+      console.error(`[Resend Send Error] ${resendError.message}. Attempting fallback to SMTP...`);
+    }
+  }
+
+  // 2. Fallback: SMTP (works where outbound SMTP is open)
+  if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
+    try {
+      await transporter.sendMail({
+        from: `"${fromName}" <${process.env.EMAIL_USER}>`,
+        to: String(to).trim(),
+        subject,
+        html: htmlContent,
+      });
+      console.log(`[Email:SMTP] Successfully delivered to ${to}`);
+      return true;
+    } catch (smtpError) {
+      console.error('[SMTP Send Error]:', smtpError.message || smtpError);
+      return false;
+    }
+  }
+
+  console.warn('[sendEmail] Neither RESEND_API_KEY nor SMTP credentials succeeded. Email not delivered to ' + to);
+  return false;
 };
 
 // ===== Billing email templates (brand: GNB MENTOR LLC, teal theme) =====
@@ -985,6 +1065,11 @@ const DEFAULT_EMAIL_TEMPLATES = {
     heading: 'Your subscription expires in 7 days',
     body: 'Hi,\n\nYour subscription for {{domain}} is set to expire on {{dueDate}} (in 7 days).\n\nTo prevent any disruption or suspension of your emails and services, please complete your payment in the portal before the expiration day.',
   },
+  expiry_5day: {
+    subject: 'Action required: your {{serviceName}} subscription expires in 5 days',
+    heading: 'Your {{serviceName}} subscription expires in 5 days',
+    body: 'Hi {{customerName}},\n\nYour {{billingCycle}} subscription for {{serviceName}} ({{domain}}) is scheduled for renewal and expires on {{dueDate}} (in 5 days).\n\nSubscription Details:\n• Service: {{serviceName}}\n• Domain: {{domain}}\n• Billing Frequency: {{billingCycle}}\n• Renewal Amount: {{amount}}\n• Next Due Date: {{dueDate}}\n\nTo prevent any disruption, downtime, or service suspension, please log into your portal to ensure your payment method is active or complete your renewal payment before {{dueDate}}.',
+  },
   expiry_today: {
     subject: 'Action required: your {{domain}} subscription expires today',
     heading: 'Your subscription expires today',
@@ -1014,6 +1099,38 @@ async function sendRenewalWarningEmail(to, domain, dueDate) {
   await sendEmail(to, subject, html);
 }
 
+// Dedicated 5-Day Expiry & Renewal Email
+async function sendSubscriptionExpiryRenewal5DayEmail(to, details = {}) {
+  if (!to) return false;
+  const {
+    customerName = 'Valued Customer',
+    serviceName = 'Google Workspace Subscription',
+    domain = '',
+    billingCycle = 'Monthly',
+    amount = '',
+    dueDate = '',
+    daysLeft = 5,
+  } = details;
+
+  const dueStr = dueDate ? new Date(dueDate).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'in 5 days';
+  const formattedAmount = amount != null && amount !== '' ? (String(amount).startsWith('$') ? amount : `$${Number(amount).toFixed(2)}`) : 'Standard Renewal Rate';
+  const cleanCycle = billingCycle ? (billingCycle.charAt(0).toUpperCase() + billingCycle.slice(1).toLowerCase()) : 'Monthly';
+
+  const vars = {
+    customerName,
+    serviceName,
+    domain: domain || 'your service',
+    billingCycle: cleanCycle,
+    amount: formattedAmount,
+    dueDate: dueStr,
+    brand: BRAND_NAME,
+    portalUrl: PORTAL_URL,
+  };
+
+  const { subject, html } = await getFilledTemplate('expiry_5day', vars);
+  return await sendEmail(to, subject, html);
+}
+
 async function sendSuspensionEmail(to, domain) {
   if (!to) return;
   const { subject, html } = await getFilledTemplate('suspension', { domain: domain || 'your account', brand: BRAND_NAME });
@@ -1027,11 +1144,74 @@ async function sendPaymentConfirmationEmail(to, domain, amount) {
   await sendEmail(to, subject, html);
 }
 
+// Comprehensive customer lookup across Customer, Domain, DomainOrder, WorkspaceOrder, HostingOrder, SslOrder, Subscription
+async function findCustomerDetails(domain, customerId = null) {
+  const cleanDomain = String(domain || '').toLowerCase().trim();
+  let customer = null;
+
+  if (customerId) {
+    try { customer = await Customer.findById(customerId); } catch (_) {}
+  }
+  if (!customer && cleanDomain) {
+    try { customer = await Customer.findOne({ domain: cleanDomain }); } catch (_) {}
+  }
+  if (!customer && cleanDomain) {
+    try { customer = await Customer.findOne({ businessEmail: cleanDomain }); } catch (_) {}
+  }
+  if (!customer && cleanDomain) {
+    try {
+      const escaped = cleanDomain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      customer = await Customer.findOne({ businessEmail: new RegExp(`@${escaped}$`, 'i') });
+    } catch (_) {}
+  }
+  if (!customer && cleanDomain) {
+    try {
+      const d = await Domain.findOne({ domainName: cleanDomain });
+      if (d?.customerId) customer = await Customer.findById(d.customerId);
+    } catch (_) {}
+  }
+  if (!customer && cleanDomain) {
+    try {
+      const doDoc = await DomainOrder.findOne({ domainName: cleanDomain });
+      if (doDoc?.customerId) customer = await Customer.findById(doDoc.customerId);
+    } catch (_) {}
+  }
+  if (!customer && cleanDomain) {
+    try {
+      const wo = await WorkspaceOrder.findOne({ 'organization.domain': cleanDomain });
+      if (wo?.customerId) customer = await Customer.findById(wo.customerId);
+    } catch (_) {}
+  }
+  if (!customer && cleanDomain) {
+    try {
+      const ho = await HostingOrder.findOne({ forDomain: cleanDomain });
+      if (ho?.customerId) customer = await Customer.findById(ho.customerId);
+    } catch (_) {}
+  }
+  if (!customer && cleanDomain) {
+    try {
+      const so = await SslOrder.findOne({ forDomain: cleanDomain });
+      if (so?.customerId) customer = await Customer.findById(so.customerId);
+    } catch (_) {}
+  }
+
+  if (customer) {
+    const name = [customer.firstName, customer.lastName].filter(Boolean).join(' ') || customer.companyName || customer.username || 'Valued Customer';
+    return {
+      email: customer.businessEmail,
+      name,
+      companyName: customer.companyName || '',
+      customerId: customer._id,
+      customer,
+    };
+  }
+  return { email: null, name: 'Valued Customer', companyName: '', customerId: null, customer: null };
+}
+
 // Find a customer's email by domain (for billing notifications)
 async function emailForDomain(domain) {
-  if (!domain) return null;
-  const c = await Customer.findOne({ domain: domain.toLowerCase() });
-  return c?.businessEmail || null;
+  const info = await findCustomerDetails(domain);
+  return info.email || null;
 }
 
 // Welcome / registration email
@@ -4859,7 +5039,54 @@ async function runSubscriptionBillingCheck(opts = {}) {
         }
       }
 
-      // 2. Automated expiration day reminder email (secondary reminder on expiration day)
+      // 2. Automated 5-day expiration & renewal reminder email (Workspace subscription cycle)
+      if (r.currentCycleStatus !== 'paid' && daysToDue <= 5 && daysToDue > 0 && !r.notified5DaysBefore) {
+        r.notified5DaysBefore = true;
+        await r.save();
+        const custInfo = await findCustomerDetails(r.domain);
+        const email = custInfo.email;
+        if (email) {
+          try {
+            // Determine whether Workspace subscription is Annual or Monthly
+            let isAnnual = r.planType === 'annual' || r.billingCycle === 'annual' || r.billingCycle === 'yearly';
+            if (!isAnnual) {
+              const wo = await WorkspaceOrder.findOne({ 'organization.domain': String(r.domain || '').toLowerCase() });
+              if (wo?.planType === 'annual') isAnnual = true;
+            }
+            const cycleName = isAnnual ? 'Annual' : 'Monthly';
+
+            // Find plan name & price
+            let planDoc = null;
+            if (r.skuId) {
+              planDoc = await Plan.findOne({ skuId: r.skuId });
+              if (!planDoc) planDoc = await Plan.findOne({ planId: r.skuId });
+            }
+            const serviceName = planDoc?.name ? `Google Workspace ${planDoc.name}` : (skuName(r.skuId) || 'Google Workspace Subscription');
+            const unitPrice = planDoc?.monthlyPrice || 7.20;
+            const amountVal = isAnnual ? (unitPrice * 12) : unitPrice;
+            const formattedAmount = r.amount ? `$${Number(r.amount).toFixed(2)}` : `$${Number(amountVal).toFixed(2)}`;
+
+            await sendSubscriptionExpiryRenewal5DayEmail(email, {
+              customerName: custInfo.name,
+              serviceName,
+              domain: r.domain || 'your account',
+              billingCycle: cycleName,
+              amount: formattedAmount,
+              dueDate: nextBilling,
+              daysLeft: Math.ceil(daysToDue),
+            });
+            console.log(`[5-Day Workspace Expiry Notice] Sent to ${email} for domain ${r.domain} (${cycleName})`);
+            results.notified5Days = results.notified5Days || [];
+            results.notified5Days.push(`${r.domain} (${cycleName})`);
+          } catch (err) {
+            console.error(`[5-Day Workspace Expiry Notice] Failed to send to ${email} for domain ${r.domain}:`, err.message);
+          }
+        } else {
+          console.warn(`[5-Day Workspace Expiry Notice] No customer email found for domain ${r.domain}`);
+        }
+      }
+
+      // 3. Automated expiration day reminder email (secondary reminder on expiration day)
       if (r.currentCycleStatus !== 'paid' && daysToDue <= 1 && daysToDue > 0 && !r.notifiedOnExpiration) {
         r.notifiedOnExpiration = true;
         await r.save();
@@ -4968,6 +5195,336 @@ async function runSubscriptionBillingCheck(opts = {}) {
     console.warn(`⚠️  SUSPEND CAP: ${results.suspendSkipped.length} subscription(s) were due for suspension beyond the cap of ${maxSuspends} and were LEFT ACTIVE. ` +
       'If this is unexpected, do NOT raise BILLING_MAX_SUSPENDS_PER_RUN — investigate why so many records are marked unpaid/past-due first.');
   }
+  return results;
+}
+
+// ==================== NON-WORKSPACE SUBSCRIPTION BILLING ENGINE ====================
+// Standard industry billing rules applied across hosting & registrar providers:
+// - Domains: Annual cycle (365 days / 1 year per registration period)
+// - Web Hosting: Monthly (30 days) or Annual (365 days) based on chosen plan
+// - SSL Certificates: Annual cycle (365 days per year of validity)
+// - Voice / Addon Services: Monthly (30 days)
+async function syncAndCheckNonWorkspaceSubscriptions(opts = {}) {
+  const now = new Date();
+  const dryRun = !!opts.dryRun;
+  const results = {
+    checked: 0,
+    seeded: 0,
+    notified5Days: [],
+    advanced: [],
+    warned: [],
+    errors: [],
+  };
+
+  try {
+    // 1. DOMAIN REGISTRATIONS
+    const domainOrders = await DomainOrder.find({
+      status: { $in: ['registered', 'completed', 'active', 'test_paid'] },
+    });
+    for (const d of domainOrders) {
+      try {
+        const periodYears = Math.max(Number(d.period || 1), 1);
+        const cycleDays = periodYears * 365;
+        const initialDate = d.registeredAt || d.createdAt || new Date();
+        const price = d.price || 12.99;
+        const domainName = String(d.domainName || '').toLowerCase().trim();
+
+        let cycle = await ServiceBillingCycle.findOne({ sourceOrderId: d._id, serviceType: 'domain' });
+        if (!cycle) {
+          const cust = await findCustomerDetails(domainName, d.customerId);
+          let start = new Date(initialDate);
+          let nextDate = addDays(start, cycleDays);
+          let guard = 0;
+          while (nextDate.getTime() <= now.getTime() && guard++ < 500) {
+            start = nextDate;
+            nextDate = addDays(nextDate, cycleDays);
+          }
+          cycle = await ServiceBillingCycle.create({
+            customerId: cust.customerId || d.customerId,
+            customerEmail: cust.email,
+            customerName: cust.name,
+            domain: domainName,
+            serviceType: 'domain',
+            serviceName: `Domain Registration (${domainName})`,
+            sourceOrderType: 'DomainOrder',
+            sourceOrderId: d._id,
+            orderNumber: d.orderNumber || '',
+            billingCycle: 'annual',
+            cycleDays,
+            price,
+            billingCycleStart: start,
+            nextBillingDate: nextDate,
+            currentCycleStatus: 'unpaid',
+            billingStatus: 'active',
+          });
+          results.seeded++;
+        }
+      } catch (err) {
+        results.errors.push({ type: 'domain', id: d._id, error: err.message });
+      }
+    }
+
+    // 2. DOMAIN TRANSFERS
+    const domainTransfers = await DomainTransfer.find({
+      status: { $in: ['completed', 'submitted', 'test_paid'] },
+    });
+    for (const dt of domainTransfers) {
+      try {
+        const cycleDays = 365;
+        const initialDate = dt.completedAt || dt.createdAt || new Date();
+        const price = dt.price || 12.99;
+        const domainName = String(dt.domainName || '').toLowerCase().trim();
+
+        let cycle = await ServiceBillingCycle.findOne({ sourceOrderId: dt._id, serviceType: 'domain' });
+        if (!cycle) {
+          const cust = await findCustomerDetails(domainName, dt.customerId);
+          let start = new Date(initialDate);
+          let nextDate = addDays(start, cycleDays);
+          let guard = 0;
+          while (nextDate.getTime() <= now.getTime() && guard++ < 500) {
+            start = nextDate;
+            nextDate = addDays(nextDate, cycleDays);
+          }
+          cycle = await ServiceBillingCycle.create({
+            customerId: cust.customerId || dt.customerId,
+            customerEmail: cust.email,
+            customerName: cust.name,
+            domain: domainName,
+            serviceType: 'domain',
+            serviceName: `Domain Transfer (${domainName})`,
+            sourceOrderType: 'DomainTransfer',
+            sourceOrderId: dt._id,
+            orderNumber: dt.orderNumber || '',
+            billingCycle: 'annual',
+            cycleDays,
+            price,
+            billingCycleStart: start,
+            nextBillingDate: nextDate,
+            currentCycleStatus: 'unpaid',
+            billingStatus: 'active',
+          });
+          results.seeded++;
+        }
+      } catch (err) {
+        results.errors.push({ type: 'transfer', id: dt._id, error: err.message });
+      }
+    }
+
+    // 3. WEB HOSTING ORDERS
+    const hostingOrders = await HostingOrder.find({
+      status: { $in: ['active', 'test_paid'] },
+    });
+    for (const ho of hostingOrders) {
+      try {
+        const isMonthly = String(ho.billingCycle || '').toLowerCase() === 'monthly';
+        const cycleDays = isMonthly ? 30 : 365;
+        const billingCycle = isMonthly ? 'monthly' : 'annual';
+        const initialDate = ho.activatedAt || ho.createdAt || new Date();
+        const price = ho.price || 9.99;
+        const domainName = String(ho.forDomain || '').toLowerCase().trim();
+
+        let cycle = await ServiceBillingCycle.findOne({ sourceOrderId: ho._id, serviceType: 'hosting' });
+        if (!cycle) {
+          const cust = await findCustomerDetails(domainName, ho.customerId);
+          let start = new Date(initialDate);
+          let nextDate = addDays(start, cycleDays);
+          let guard = 0;
+          while (nextDate.getTime() <= now.getTime() && guard++ < 500) {
+            start = nextDate;
+            nextDate = addDays(nextDate, cycleDays);
+          }
+          cycle = await ServiceBillingCycle.create({
+            customerId: cust.customerId || ho.customerId,
+            customerEmail: cust.email,
+            customerName: cust.name,
+            domain: domainName,
+            serviceType: 'hosting',
+            serviceName: `Cloud Web Hosting (${ho.planName || ho.planId || 'Standard'})`,
+            sourceOrderType: 'HostingOrder',
+            sourceOrderId: ho._id,
+            orderNumber: ho.orderNumber || '',
+            billingCycle,
+            cycleDays,
+            price,
+            billingCycleStart: start,
+            nextBillingDate: nextDate,
+            currentCycleStatus: 'unpaid',
+            billingStatus: 'active',
+          });
+          results.seeded++;
+        }
+      } catch (err) {
+        results.errors.push({ type: 'hosting', id: ho._id, error: err.message });
+      }
+    }
+
+    // 4. SSL CERTIFICATE ORDERS
+    const sslOrders = await SslOrder.find({
+      status: { $in: ['active', 'purchased', 'test_paid'] },
+    });
+    for (const so of sslOrders) {
+      try {
+        const years = Math.max(Number(so.years || 1), 1);
+        const cycleDays = years * 365;
+        const initialDate = so.purchasedAt || so.createdAt || new Date();
+        const price = so.price || 14.99;
+        const domainName = String(so.forDomain || '').toLowerCase().trim();
+
+        let cycle = await ServiceBillingCycle.findOne({ sourceOrderId: so._id, serviceType: 'ssl' });
+        if (!cycle) {
+          const cust = await findCustomerDetails(domainName, so.customerId);
+          let start = new Date(initialDate);
+          let nextDate = addDays(start, cycleDays);
+          let guard = 0;
+          while (nextDate.getTime() <= now.getTime() && guard++ < 500) {
+            start = nextDate;
+            nextDate = addDays(nextDate, cycleDays);
+          }
+          cycle = await ServiceBillingCycle.create({
+            customerId: cust.customerId || so.customerId,
+            customerEmail: cust.email,
+            customerName: cust.name,
+            domain: domainName,
+            serviceType: 'ssl',
+            serviceName: `SSL Certificate (${so.productType || 'PositiveSSL'})`,
+            sourceOrderType: 'SslOrder',
+            sourceOrderId: so._id,
+            orderNumber: so.orderNumber || '',
+            billingCycle: 'annual',
+            cycleDays,
+            price,
+            billingCycleStart: start,
+            nextBillingDate: nextDate,
+            currentCycleStatus: 'unpaid',
+            billingStatus: 'active',
+          });
+          results.seeded++;
+        }
+      } catch (err) {
+        results.errors.push({ type: 'ssl', id: so._id, error: err.message });
+      }
+    }
+
+    // 5. OTHER SUBSCRIPTIONS (e.g. Google Voice or Addons)
+    const otherSubs = await Subscription.find({
+      status: 'active',
+      type: { $ne: 'workspace' },
+    });
+    for (const sub of otherSubs) {
+      try {
+        const isAnnual = String(sub.plan || '').toLowerCase().includes('annual');
+        const cycleDays = isAnnual ? 365 : 30;
+        const billingCycle = isAnnual ? 'annual' : 'monthly';
+        const initialDate = sub.createdAt || new Date();
+        const price = sub.monthlyPrice || 10.00;
+
+        let cycle = await ServiceBillingCycle.findOne({ sourceOrderId: sub._id, serviceType: 'voice' });
+        if (!cycle) {
+          const cust = await findCustomerDetails('', sub.customerId);
+          let start = new Date(initialDate);
+          let nextDate = addDays(start, cycleDays);
+          let guard = 0;
+          while (nextDate.getTime() <= now.getTime() && guard++ < 500) {
+            start = nextDate;
+            nextDate = addDays(nextDate, cycleDays);
+          }
+          cycle = await ServiceBillingCycle.create({
+            customerId: cust.customerId || sub.customerId,
+            customerEmail: cust.email,
+            customerName: cust.name,
+            domain: '',
+            serviceType: sub.type === 'voice' ? 'voice' : 'addon',
+            serviceName: `Google Voice (${sub.plan || 'Standard'})`,
+            sourceOrderType: 'Subscription',
+            sourceOrderId: sub._id,
+            billingCycle,
+            cycleDays,
+            price,
+            billingCycleStart: start,
+            nextBillingDate: nextDate,
+            currentCycleStatus: 'unpaid',
+            billingStatus: 'active',
+          });
+          results.seeded++;
+        }
+      } catch (err) {
+        results.errors.push({ type: 'subscription', id: sub._id, error: err.message });
+      }
+    }
+
+    // EVALUATE ALL ACTIVE NON-WORKSPACE BILLING CYCLES
+    const allCycles = await ServiceBillingCycle.find({
+      billingStatus: { $in: ['active', 'warned'] },
+    });
+
+    for (const c of allCycles) {
+      results.checked++;
+      const nextBilling = new Date(c.nextBillingDate);
+      const daysToDue = (nextBilling.getTime() - now.getTime()) / 86400000;
+
+      // Ensure customer email is populated
+      if (!c.customerEmail) {
+        const cust = await findCustomerDetails(c.domain, c.customerId);
+        if (cust?.email) {
+          c.customerEmail = cust.email;
+          if (cust.name) c.customerName = cust.name;
+          if (!dryRun) await c.save();
+        }
+      }
+
+      // Check 5-day expiration & renewal reminder
+      if (c.currentCycleStatus !== 'paid' && daysToDue <= 5 && daysToDue > 0 && !c.notified5DaysBefore) {
+        c.notified5DaysBefore = true;
+        c.lastNotifiedAt = now;
+        if (!dryRun) await c.save();
+
+        const emailToSend = c.customerEmail || (await emailForDomain(c.domain));
+        if (emailToSend && !dryRun) {
+          try {
+            await sendSubscriptionExpiryRenewal5DayEmail(emailToSend, {
+              customerName: c.customerName || 'Valued Customer',
+              serviceName: c.serviceName,
+              domain: c.domain || 'your account',
+              billingCycle: c.billingCycle,
+              amount: `$${Number(c.price || 0).toFixed(2)}`,
+              dueDate: nextBilling,
+              daysLeft: Math.ceil(daysToDue),
+            });
+            console.log(`[5-Day Non-Workspace Expiry Notice] Sent to ${emailToSend} for ${c.serviceName} (${c.billingCycle})`);
+            results.notified5Days.push(`${c.serviceName} (${c.billingCycle}) → ${emailToSend}`);
+          } catch (sendErr) {
+            console.error(`[5-Day Non-Workspace Expiry Notice] Failed to send to ${emailToSend}:`, sendErr.message);
+          }
+        }
+      }
+
+      // Due date reached
+      if (now.getTime() >= nextBilling.getTime()) {
+        if (c.currentCycleStatus === 'paid') {
+          // Advance to next cycle
+          c.billingCycleStart = nextBilling;
+          c.nextBillingDate = addDays(nextBilling, c.cycleDays);
+          c.currentCycleStatus = 'unpaid';
+          c.billingStatus = 'active';
+          c.notified5DaysBefore = false;
+          c.notifiedToday = false;
+          if (!dryRun) await c.save();
+          results.advanced.push(`${c.serviceName} → next ${c.nextBillingDate.toISOString().slice(0, 10)}`);
+        } else {
+          // Unpaid past due
+          if (c.billingStatus !== 'warned' && c.billingStatus !== 'expired') {
+            c.billingStatus = 'warned';
+            if (!dryRun) await c.save();
+            results.warned.push(`${c.serviceName} (due: ${nextBilling.toISOString().slice(0, 10)})`);
+          }
+        }
+      }
+    }
+  } catch (outerErr) {
+    console.error('Non-workspace billing cycle check failed:', outerErr.message);
+    results.error = outerErr.message;
+  }
+
   return results;
 }
 
@@ -6062,6 +6619,144 @@ app.get('/api/admin/billing/subscriptions', authenticateCustomer, requireAdmin, 
   }
 });
 
+// Admin: list all non-workspace billing cycles (domain, hosting, ssl, voice/addon)
+app.get('/api/admin/billing/non-workspace-cycles', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const cycles = await ServiceBillingCycle.find().sort({ nextBillingDate: 1 }).lean();
+    res.json({ success: true, cycles });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: manually trigger non-workspace billing cycle synchronization and 5-day checks
+app.post('/api/admin/billing/sync-non-workspace', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const dryRun = req.body?.dryRun === true;
+    const results = await syncAndCheckNonWorkspaceSubscriptions({ dryRun });
+    res.json({ success: true, dryRun, ...results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: test / manually send 5-day expiration & renewal notice to customer
+app.post('/api/admin/billing/send-5day-notice', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { to, serviceName, domain, billingCycle, amount, dueDate } = req.body;
+    let targetEmail = to;
+    let targetDomain = domain || '';
+    let targetName = 'Valued Customer';
+
+    if (domain && !targetEmail) {
+      const cust = await findCustomerDetails(domain);
+      targetEmail = cust?.email;
+      targetName = cust?.name || 'Valued Customer';
+    }
+
+    if (!targetEmail) {
+      return res.status(400).json({ error: 'Customer email address is required or could not be found for the given domain.' });
+    }
+
+    const ok = await sendSubscriptionExpiryRenewal5DayEmail(targetEmail, {
+      customerName: targetName,
+      serviceName: serviceName || 'Cloud Subscription',
+      domain: targetDomain,
+      billingCycle: billingCycle || 'Monthly',
+      amount: amount || '$14.40',
+      dueDate: dueDate || new Date(Date.now() + 5 * 86400000),
+      daysLeft: 5,
+    });
+
+    if (!ok) {
+      return res.status(500).json({ error: 'Failed to dispatch 5-day expiration email. Verify email credentials in environment.' });
+    }
+    res.json({ success: true, sentTo: targetEmail, message: `5-day notice dispatched to ${targetEmail}` });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: get all active billing cycles (Workspace + Non-workspace) for logged-in customer
+app.get('/api/customer/billing-cycles', authenticateCustomer, async (req, res) => {
+  try {
+    const me = req.customer;
+    if (!me) return res.status(401).json({ error: 'Unauthorized' });
+
+    const now = new Date();
+    const customerDomains = new Set();
+    if (me.domain) customerDomains.add(me.domain.toLowerCase().trim());
+
+    // Pull domains associated with this customer
+    const domains = await Domain.find({ customerId: me._id }).lean();
+    domains.forEach(d => d.domainName && customerDomains.add(d.domainName.toLowerCase().trim()));
+    const domainOrders = await DomainOrder.find({ customerId: me._id }).lean();
+    domainOrders.forEach(d => d.domainName && customerDomains.add(d.domainName.toLowerCase().trim()));
+    const wsOrders = await WorkspaceOrder.find({ customerId: me._id }).lean();
+    wsOrders.forEach(w => w.organization?.domain && customerDomains.add(w.organization.domain.toLowerCase().trim()));
+
+    const domainList = Array.from(customerDomains);
+
+    // 1. Google Workspace subscriptions from SubBilling
+    const wsBilling = await SubBilling.find({ domain: { $in: domainList } }).lean();
+    const workspaceSubscriptions = wsBilling.map(wb => {
+      const nextDate = wb.nextBillingDate ? new Date(wb.nextBillingDate) : null;
+      const daysLeft = nextDate ? Math.ceil((nextDate.getTime() - now.getTime()) / 86400000) : null;
+      const isAnnual = wb.planType === 'annual' || wb.billingCycle === 'annual';
+      return {
+        id: wb._id,
+        category: 'Google Workspace',
+        serviceName: skuName(wb.skuId) || 'Google Workspace',
+        domain: wb.domain,
+        billingCycle: isAnnual ? 'Annual' : 'Monthly',
+        cycleDays: isAnnual ? 365 : BILLING_CYCLE_DAYS,
+        nextBillingDate: wb.nextBillingDate,
+        daysLeft,
+        is5DayNoticeEligible: daysLeft !== null && daysLeft <= 5 && daysLeft > 0,
+        status: wb.billingStatus,
+        paymentStatus: wb.currentCycleStatus,
+      };
+    });
+
+    // 2. Non-workspace subscriptions from ServiceBillingCycle
+    const nonWsCycles = await ServiceBillingCycle.find({
+      $or: [
+        { customerId: me._id },
+        { customerEmail: me.businessEmail },
+        { domain: { $in: domainList } },
+      ],
+    }).lean();
+
+    const otherSubscriptions = nonWsCycles.map(sb => {
+      const nextDate = sb.nextBillingDate ? new Date(sb.nextBillingDate) : null;
+      const daysLeft = nextDate ? Math.ceil((nextDate.getTime() - now.getTime()) / 86400000) : null;
+      return {
+        id: sb._id,
+        category: sb.serviceType.toUpperCase(),
+        serviceName: sb.serviceName,
+        domain: sb.domain,
+        billingCycle: sb.billingCycle ? (sb.billingCycle.charAt(0).toUpperCase() + sb.billingCycle.slice(1)) : 'Annual',
+        cycleDays: sb.cycleDays,
+        price: sb.price,
+        nextBillingDate: sb.nextBillingDate,
+        daysLeft,
+        is5DayNoticeEligible: daysLeft !== null && daysLeft <= 5 && daysLeft > 0,
+        status: sb.billingStatus,
+        paymentStatus: sb.currentCycleStatus,
+      };
+    });
+
+    res.json({
+      success: true,
+      workspaceSubscriptions,
+      otherSubscriptions,
+      totalActive: workspaceSubscriptions.length + otherSubscriptions.length,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Admin: run the subscription billing check now
 app.post('/api/admin/billing/run', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
@@ -6125,13 +6820,13 @@ app.get('/api/admin/email/templates', authenticateCustomer, requireAdmin, async 
     const custom = await EmailTemplate.find();
     const byKey = {}; custom.forEach(t => { byKey[t.key] = t; });
     const out = {};
-    for (const key of ['warning', 'suspension', 'payment', 'expiry_7day', 'expiry_today']) {
+    for (const key of ['warning', 'suspension', 'payment', 'expiry_7day', 'expiry_5day', 'expiry_today']) {
       const def = DEFAULT_EMAIL_TEMPLATES[key];
       const c = byKey[key];
       out[key] = {
-        subject: c?.subject ?? def.subject,
-        heading: c?.heading ?? def.heading,
-        body: c?.body ?? def.body,
+        subject: c?.subject ?? def?.subject,
+        heading: c?.heading ?? def?.heading,
+        body: c?.body ?? def?.body,
         customized: !!c,
       };
     }
@@ -6150,7 +6845,7 @@ app.get('/api/admin/email/templates', authenticateCustomer, requireAdmin, async 
 app.put('/api/admin/email/templates/:key', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const key = req.params.key;
-    if (!['warning', 'suspension', 'payment', 'expiry_7day', 'expiry_today'].includes(key)) return res.status(400).json({ error: 'Invalid template.' });
+    if (!['warning', 'suspension', 'payment', 'expiry_7day', 'expiry_5day', 'expiry_today'].includes(key)) return res.status(400).json({ error: 'Invalid template.' });
     const { subject, heading, body } = req.body;
     const t = await EmailTemplate.findOneAndUpdate(
       { key },
@@ -6177,7 +6872,15 @@ app.delete('/api/admin/email/templates/:key', authenticateCustomer, requireAdmin
 app.post('/api/admin/email/preview', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const { key } = req.body;
-    const sample = { domain: 'example.com', dueDate: new Date().toLocaleDateString(), amount: '$14.40', brand: BRAND_NAME };
+    const sample = {
+      domain: 'example.com',
+      serviceName: 'Google Workspace Business Standard',
+      billingCycle: 'Monthly',
+      customerName: 'Alex Morgan',
+      dueDate: new Date(Date.now() + 5 * 86400000).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }),
+      amount: '$14.40',
+      brand: BRAND_NAME
+    };
     const { subject, html } = await getFilledTemplate(key, sample);
     res.json({ subject, html });
   } catch (e) {
@@ -6193,7 +6896,15 @@ app.post('/api/admin/email/test', authenticateCustomer, requireAdmin, async (req
     }
     const { key, to } = req.body;
     const dest = to || process.env.EMAIL_USER;
-    const sample = { domain: 'example.com', dueDate: new Date().toLocaleDateString(), amount: '$14.40', brand: BRAND_NAME };
+    const sample = {
+      domain: 'example.com',
+      serviceName: 'Google Workspace Business Standard',
+      billingCycle: 'Monthly',
+      customerName: 'Alex Morgan',
+      dueDate: new Date(Date.now() + 5 * 86400000).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }),
+      amount: '$14.40',
+      brand: BRAND_NAME
+    };
     const { subject, html } = await getFilledTemplate(key, sample);
     const ok = await sendEmail(dest, '[TEST] ' + subject, html);
     if (!ok) return res.status(500).json({ error: 'Send failed — check email credentials in Railway logs.' });
@@ -11770,6 +12481,12 @@ async function runDailyBillingTasks() {
     console.log('⏰ Monthly-anchored billing:', JSON.stringify({ checked: subResults.checked, warned: subResults.warned.length, suspended: subResults.suspended.length, skippedWhitelisted: subResults.skippedWhitelisted }));
   } catch (e) {
     console.error('Daily subscription billing error:', e.message);
+  }
+  try {
+    const nonWsResults = await syncAndCheckNonWorkspaceSubscriptions();
+    console.log('⏰ Non-workspace subscription billing:', JSON.stringify({ checked: nonWsResults.checked, seeded: nonWsResults.seeded, notified5Days: nonWsResults.notified5Days.length, advanced: nonWsResults.advanced.length }));
+  } catch (e) {
+    console.error('Daily non-workspace billing error:', e.message);
   }
 }
 
