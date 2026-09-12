@@ -692,28 +692,77 @@ const AuthSocialButtons = ({ label, googleBtnRef, showGoogleFallback, onGoogleFa
   </div>
 );
 
-// ==================== INLINE DOMAIN AUTH MODAL ====================
-// When a customer searches a domain on the home page and clicks to buy,
-// if they are not logged in, this modal asks them to sign up or sign in.
-// Right after authentication completes, it immediately initiates the domain
-// registration and takes them directly to checkout!
-const DomainAuthModal = ({ domainInfo, onClose }) => {
+// ==================== UNIFIED CUSTOMER AUTHENTICATION FLOW ====================
+// Used everywhere for customers:
+// 1. Full-page at /login and /register
+// 2. Direct modal in Domain Search and Buy Checkout flow
+// Features:
+// - One-click social login: Google (GSI / One Tap), Microsoft SSO, Facebook SSO
+// - Smart email-first account detection: Checks if the email already exists in DB.
+//   * Existing user -> Enter password with Show/Hide, 2FA support, Forgot password help.
+//   * New user -> Quick password creation, instant account provisioning.
+//   * Google account -> Clear notice to use Google One-Click, avoiding password confusion.
+// - Direct pending domain checkout: Immediately forwards to Stripe / payment gateway
+//   upon successful authentication.
+const CustomerAuthFlow = ({ isModal = false, onClose = null, domainInfo = null, initialTab = null }) => {
   const { login } = useAuth();
-  const [tab, setTab] = useState('signup'); // 'signup' | 'login'
+  const brand = useBranding();
+  const isRegisterInitial = typeof window !== 'undefined' && window.location.pathname.startsWith('/register');
+  const [tabIntent, setTabIntent] = useState(initialTab || (isRegisterInitial ? 'signup' : 'login'));
+  const [step, setStep] = useState('email'); // 'email' | 'login' | 'signup' | '2fa'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
-  const [showOtp, setShowOtp] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [showPw, setShowPw] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [statusMsg, setStatusMsg] = useState('');
+  const [info, setInfo] = useState('');
+  const [googleOnly, setGoogleOnly] = useState(false);
   const [googleClientId, setGoogleClientId] = useState(GOOGLE_SIGNIN_CLIENT_ID);
+  const [msConfigured, setMsConfigured] = useState(false);
+  const [fbConfigured, setFbConfigured] = useState(false);
+  const [redirectingToCheckout, setRedirectingToCheckout] = useState(false);
   const googleBtnRef = useRef(null);
 
-  const domainName = (domainInfo?.domainName || '').toLowerCase().trim();
-  const price = domainInfo?.price != null ? `$${Number(domainInfo.price).toFixed(2)}/yr` : '';
+  // Read pending domain from prop or storage
+  const [pendingDomain] = useState(() => {
+    if (domainInfo && domainInfo.domainName) return domainInfo;
+    try {
+      const raw = typeof window !== 'undefined' ? (sessionStorage.getItem('pendingDomainPurchase') || localStorage.getItem('pendingDomainPurchase')) : null;
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) { return null; }
+  });
 
+  const activeDomain = domainInfo || pendingDomain;
+
+  const handleAuthSuccess = async (tokenVal, customerVal) => {
+    login(customerVal.businessEmail, tokenVal, customerVal);
+    const domainToBuy = activeDomain || (() => {
+      try {
+        const raw = sessionStorage.getItem('pendingDomainPurchase') || localStorage.getItem('pendingDomainPurchase');
+        return raw ? JSON.parse(raw) : null;
+      } catch (_) { return null; }
+    })();
+
+    if (domainToBuy && domainToBuy.domainName) {
+      setRedirectingToCheckout(true);
+      setLoading(true);
+      setInfo(`Securing ${domainToBuy.domainName}… Redirecting you directly to checkout…`);
+      try {
+        const ok = await executePendingDomainCheckout(tokenVal, domainToBuy);
+        if (ok) return;
+      } catch (err) {
+        console.error('Pending checkout redirect error:', err);
+        setError(err?.response?.data?.error || 'Could not start checkout automatically. You can register it from your portal.');
+        setRedirectingToCheckout(false);
+        setLoading(false);
+      }
+    }
+  };
+
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((email || '').trim());
+
+  // Fetch Google Client ID if needed
   useEffect(() => {
     if (googleClientId) return;
     let active = true;
@@ -723,451 +772,7 @@ const DomainAuthModal = ({ domainInfo, onClose }) => {
     return () => { active = false; };
   }, [googleClientId]);
 
-  useEffect(() => {
-    if (!googleClientId) return;
-    let cancelled = false;
-    let tries = 0;
-    const handleGoogleCredential = async (response) => {
-      setError(''); setBusy(true);
-      setStatusMsg('Signing in and taking you directly to checkout…');
-      try {
-        const r = await axios.post(`${API_URL}/auth/google`, { credential: response.credential });
-        login(r.data.customer.businessEmail, r.data.token, r.data.customer);
-        setStatusMsg(`Securing ${domainName}… Redirecting to checkout…`);
-        await executePendingDomainCheckout(r.data.token, domainInfo);
-      } catch (err) {
-        setError(err?.response?.data?.error || 'Google sign-in failed. Please try email/password.');
-        setBusy(false);
-      }
-    };
-
-    const render = () => {
-      if (cancelled || !googleBtnRef.current) return;
-      if (!window.google?.accounts?.id) {
-        if (tries++ < 30) setTimeout(render, 100);
-        return;
-      }
-      try {
-        window.google.accounts.id.initialize({ client_id: googleClientId, callback: handleGoogleCredential });
-        googleBtnRef.current.innerHTML = '';
-        window.google.accounts.id.renderButton(googleBtnRef.current, {
-          theme: 'outline',
-          size: 'large',
-          width: 340,
-          text: tab === 'signup' ? 'signup_with' : 'continue_with',
-        });
-      } catch (_) {}
-    };
-
-    if (window.google?.accounts?.id) {
-      render();
-      return () => { cancelled = true; };
-    }
-    const script = document.getElementById('google-gsi-script');
-    if (script) {
-      script.addEventListener('load', render);
-      return () => { cancelled = true; script.removeEventListener('load', render); };
-    }
-  }, [googleClientId, tab, domainInfo, domainName, login]);
-
-  const handleSubmit = async (e) => {
-    e?.preventDefault?.();
-    setError('');
-    const em = (email || '').trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
-      setError('Please enter a valid email address.');
-      return;
-    }
-    if (!password || password.length < 6) {
-      setError('Password must be at least 6 characters.');
-      return;
-    }
-
-    setBusy(true);
-    if (tab === 'signup') {
-      setStatusMsg('Creating your account…');
-      try {
-        const res = await axios.post(`${API_URL}/auth/signup-quick`, {
-          businessEmail: em,
-          password,
-        });
-        const { token, customer } = res.data;
-        login(customer.businessEmail, token, customer);
-        setStatusMsg(`Securing ${domainName}… Taking you directly to checkout…`);
-        await executePendingDomainCheckout(token, domainInfo);
-      } catch (err) {
-        const errMsg = err?.response?.data?.error || 'Sign up failed.';
-        if (errMsg.toLowerCase().includes('already exists')) {
-          setTab('login');
-          setError('An account with this email already exists. Please enter your password to sign in.');
-        } else {
-          setError(errMsg);
-        }
-        setBusy(false);
-      }
-    } else {
-      setStatusMsg('Signing in…');
-      try {
-        const body = { businessEmail: em, password, portal: 'customer' };
-        if (otp) body.otp = otp;
-        const res = await axios.post(`${API_URL}/auth/login`, body);
-        if (res.data.twoFactorRequired) {
-          setShowOtp(true);
-          setBusy(false);
-          setStatusMsg('');
-          return;
-        }
-        const { token, customer } = res.data;
-        login(customer.businessEmail, token, customer);
-        setStatusMsg(`Securing ${domainName}… Taking you directly to checkout…`);
-        await executePendingDomainCheckout(token, domainInfo);
-      } catch (err) {
-        setError(err?.response?.data?.error || 'Sign in failed. Please check your credentials.');
-        setBusy(false);
-      }
-    }
-  };
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(15, 23, 42, 0.72)',
-        backdropFilter: 'blur(5px)',
-        zIndex: 99999,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 16,
-      }}
-      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
-    >
-      <div
-        style={{
-          background: '#ffffff',
-          borderRadius: 22,
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
-          maxWidth: 460,
-          width: '100%',
-          padding: '28px 28px 24px',
-          position: 'relative',
-          fontFamily: 'Geist, -apple-system, BlinkMacSystemFont, sans-serif',
-          color: '#111827',
-          maxHeight: '92vh',
-          overflowY: 'auto',
-          border: '1px solid #e2e8f0',
-        }}
-      >
-        {!busy && (
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              position: 'absolute',
-              top: 18,
-              right: 18,
-              background: '#f1f5f9',
-              border: 'none',
-              borderRadius: '50%',
-              width: 32,
-              height: 32,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 16,
-              color: '#64748b',
-              cursor: 'pointer',
-              fontWeight: 700,
-            }}
-          >
-            ✕
-          </button>
-        )}
-
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 999, padding: '5px 14px', marginBottom: 14 }}>
-          <span style={{ fontSize: 14 }}>🌐</span>
-          <strong style={{ color: '#4c1d95', fontSize: 13.5 }}>{domainName}</strong>
-          {price && <span style={{ color: '#7c3aed', fontSize: 13, fontWeight: 700 }}>• {price}</span>}
-        </div>
-
-        <h3 style={{ margin: '0 0 6px', fontSize: 21, fontWeight: 800, color: '#111827', letterSpacing: '-0.02em' }}>
-          {tab === 'signup' ? 'Create account to buy domain' : 'Sign in to buy domain'}
-        </h3>
-        <p style={{ margin: '0 0 18px', color: '#64748b', fontSize: 13.5, lineHeight: 1.45 }}>
-          You will be taken directly to checkout as soon as you sign in.
-        </p>
-
-        <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: 10, padding: 4, marginBottom: 18 }}>
-          <button
-            type="button"
-            onClick={() => { setTab('signup'); setError(''); }}
-            disabled={busy}
-            style={{
-              flex: 1,
-              padding: '8px 12px',
-              borderRadius: 8,
-              border: 'none',
-              background: tab === 'signup' ? '#ffffff' : 'transparent',
-              color: tab === 'signup' ? '#6e46eb' : '#64748b',
-              fontWeight: tab === 'signup' ? 700 : 600,
-              fontSize: 13.5,
-              cursor: 'pointer',
-              boxShadow: tab === 'signup' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-              transition: 'all .15s ease',
-            }}
-          >
-            Create Account
-          </button>
-          <button
-            type="button"
-            onClick={() => { setTab('login'); setError(''); }}
-            disabled={busy}
-            style={{
-              flex: 1,
-              padding: '8px 12px',
-              borderRadius: 8,
-              border: 'none',
-              background: tab === 'login' ? '#ffffff' : 'transparent',
-              color: tab === 'login' ? '#6e46eb' : '#64748b',
-              fontWeight: tab === 'login' ? 700 : 600,
-              fontSize: 13.5,
-              cursor: 'pointer',
-              boxShadow: tab === 'login' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-              transition: 'all .15s ease',
-            }}
-          >
-            Sign In
-          </button>
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
-          <div ref={googleBtnRef} style={{ minHeight: 40 }} />
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '12px 0 16px', color: '#94a3b8', fontSize: 12 }}>
-          <div style={{ flex: 1, height: 1, background: '#e2e8f0' }} />
-          <span>or continue with email</span>
-          <div style={{ flex: 1, height: 1, background: '#e2e8f0' }} />
-        </div>
-
-        {error && (
-          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontSize: 13, fontWeight: 500 }}>
-            {error}
-          </div>
-        )}
-
-        {statusMsg && (
-          <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', color: '#6d28d9', borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid #6d28d9', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-            <span>{statusMsg}</span>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 5 }}>
-              Business Email
-            </label>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={busy}
-              placeholder="name@company.com"
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: 10,
-                border: '1px solid #cbd5e1',
-                fontSize: 14,
-                outline: 'none',
-                boxSizing: 'border-box',
-              }}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 5 }}>
-              <span>Password</span>
-              {tab === 'login' && (
-                <a href="/login" style={{ color: '#6e46eb', textDecoration: 'none', fontWeight: 600, fontSize: 12 }}>
-                  Forgot?
-                </a>
-              )}
-            </label>
-            <div style={{ position: 'relative' }}>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={busy}
-                placeholder={tab === 'signup' ? 'At least 6 characters' : 'Enter your password'}
-                style={{
-                  width: '100%',
-                  padding: '10px 42px 10px 14px',
-                  borderRadius: 10,
-                  border: '1px solid #cbd5e1',
-                  fontSize: 14,
-                  outline: 'none',
-                  boxSizing: 'border-box',
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                tabIndex={-1}
-                style={{
-                  position: 'absolute',
-                  right: 10,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: '#94a3b8',
-                  fontSize: 14,
-                  padding: 4,
-                }}
-              >
-                {showPassword ? '🙈' : '👁️'}
-              </button>
-            </div>
-          </div>
-
-          {showOtp && (
-            <div>
-              <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 5 }}>
-                Two-Factor Code (2FA)
-              </label>
-              <input
-                type="text"
-                required
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                disabled={busy}
-                placeholder="6-digit code"
-                style={{
-                  width: '100%',
-                  padding: '10px 14px',
-                  borderRadius: 10,
-                  border: '1px solid #cbd5e1',
-                  fontSize: 14,
-                  outline: 'none',
-                  boxSizing: 'border-box',
-                }}
-              />
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={busy}
-            className="btn btn-primary"
-            style={{
-              width: '100%',
-              padding: '12px 18px',
-              fontSize: 14.5,
-              fontWeight: 700,
-              borderRadius: 10,
-              marginTop: 6,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-            }}
-          >
-            {busy ? (
-              <span>Taking you to checkout…</span>
-            ) : (
-              <>
-                <span>{tab === 'signup' ? 'Create Account & Continue to Checkout' : 'Sign In & Continue to Checkout'}</span>
-                <span>→</span>
-              </>
-            )}
-          </button>
-        </form>
-
-        <div style={{ marginTop: 16, textAlign: 'center' }}>
-          <a
-            href={tab === 'signup' ? '/register' : '/login'}
-            style={{ color: '#64748b', fontSize: 12.5, textDecoration: 'underline' }}
-          >
-            Prefer full-screen page? Open sign in page →
-          </a>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ==================== EMAIL-FIRST CUSTOMER AUTH (Wix-style) ====================
-// Screen 1: enter email + social. On "Continue with Email" we ask the backend
-// whether the account exists, then branch: existing -> password login screen;
-// new -> "choose a password" signup screen. Google works today; Facebook/Apple
-// buttons show but need OAuth credentials configured before they function.
-const CustomerAuthFlow = () => {
-  const { login } = useAuth();
-  const brand = useBranding();
-  const isRegisterInitial = typeof window !== 'undefined' && window.location.pathname.startsWith('/register');
-  const [tabIntent, setTabIntent] = useState(isRegisterInitial ? 'signup' : 'login');
-  const [step, setStep] = useState('email'); // 'email' | 'login' | 'signup' | '2fa'
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [otp, setOtp] = useState('');
-  const [showPw, setShowPw] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [info, setInfo] = useState('');
-  const [googleOnly, setGoogleOnly] = useState(false); // account exists but has no password (Google signup)
-  const [googleClientId, setGoogleClientId] = useState(GOOGLE_SIGNIN_CLIENT_ID);
-  const [msConfigured, setMsConfigured] = useState(false);
-  const [fbConfigured, setFbConfigured] = useState(false);
-  const googleBtnRef = useRef(null);
-
-  const [pendingDomain] = useState(() => {
-    try {
-      const raw = typeof window !== 'undefined' ? (sessionStorage.getItem('pendingDomainPurchase') || localStorage.getItem('pendingDomainPurchase')) : null;
-      return raw ? JSON.parse(raw) : null;
-    } catch (_) { return null; }
-  });
-
-  const handleAuthSuccess = async (tokenVal, customerVal) => {
-    login(customerVal.businessEmail, tokenVal, customerVal);
-    try {
-      const raw = sessionStorage.getItem('pendingDomainPurchase') || localStorage.getItem('pendingDomainPurchase');
-      if (raw) {
-        const pending = JSON.parse(raw);
-        if (pending && pending.domainName) {
-          setLoading(true);
-          setInfo(`Taking you directly to checkout for ${pending.domainName}…`);
-          const ok = await executePendingDomainCheckout(tokenVal, pending);
-          if (ok) return;
-        }
-      }
-    } catch (err) {
-      console.error('Pending checkout redirect error:', err);
-      setError(err?.response?.data?.error || 'Could not start checkout automatically. You can register it in your portal.');
-      setLoading(false);
-    }
-  };
-
-  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((email || '').trim());
-
-  // Fetch Google client id from backend if not baked in at build time.
-  useEffect(() => {
-    if (googleClientId) return;
-    let active = true;
-    axios.get(`${API_URL}/auth/google-client-id`)
-      .then((res) => { if (active && res.data.clientId) setGoogleClientId(res.data.clientId); })
-      .catch(() => {});
-    return () => { active = false; };
-  }, [googleClientId]);
-
-  // Which redirect SSO providers are configured on the backend?
+  // Check SSO availability
   useEffect(() => {
     let active = true;
     axios.get(`${API_URL}/auth/microsoft/config`)
@@ -1179,7 +784,7 @@ const CustomerAuthFlow = () => {
     return () => { active = false; };
   }, []);
 
-  // Surface an error handed back by a redirect provider (.../login#sso_error=...).
+  // Handle SSO callback error in URL hash
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const m = (window.location.hash || '').match(/[#&]sso_error=([^&]+)/);
@@ -1189,7 +794,7 @@ const CustomerAuthFlow = () => {
     }
   }, []);
 
-  // Render the Google Identity Services button into the current step's container.
+  // Render Google GIS button
   useEffect(() => {
     if (!googleClientId) return;
     let cancelled = false;
@@ -1198,9 +803,11 @@ const CustomerAuthFlow = () => {
       setError(''); setInfo(''); setLoading(true);
       try {
         const r = await axios.post(`${API_URL}/auth/google`, { credential: response.credential });
-        handleAuthSuccess(r.data.token, r.data.customer);
-      } catch (e) { setError(e?.response?.data?.error || 'Google sign-in failed.'); }
-      finally { setLoading(false); }
+        await handleAuthSuccess(r.data.token, r.data.customer);
+      } catch (e) {
+        setError(e?.response?.data?.error || 'Google sign-in failed.');
+        setLoading(false);
+      }
     };
     const render = () => {
       if (cancelled) return;
@@ -1212,9 +819,15 @@ const CustomerAuthFlow = () => {
         window.google.accounts.id.initialize({ client_id: googleClientId, callback: handleCredential });
         googleBtnRef.current.innerHTML = '';
         const w = Math.min(376, googleBtnRef.current.offsetWidth || 360);
-        window.google.accounts.id.renderButton(googleBtnRef.current, { theme: 'outline', size: 'large', width: w, text: step === 'signup' ? 'signup_with' : 'continue_with' });
+        window.google.accounts.id.renderButton(googleBtnRef.current, {
+          theme: 'outline',
+          size: 'large',
+          width: w,
+          text: tabIntent === 'signup' || step === 'signup' ? 'signup_with' : 'continue_with',
+        });
       } catch (e) { console.error('Google button render error:', e); }
     };
+
     if (window.google?.accounts?.id) { render(); return () => { cancelled = true; }; }
     const existing = document.getElementById('google-gsi-script');
     if (existing) {
@@ -1229,7 +842,7 @@ const CustomerAuthFlow = () => {
     s.onload = render;
     document.body.appendChild(s);
     return () => { cancelled = true; };
-  }, [googleClientId, step]);
+  }, [googleClientId, step, tabIntent]);
 
   const continueWithEmail = async (e) => {
     e?.preventDefault?.();
@@ -1242,13 +855,16 @@ const CustomerAuthFlow = () => {
         setStep('login');
         if (!r.data.hasPassword) {
           setGoogleOnly(true);
-          setInfo('This account was created with Google. Please continue with Google below.');
+          setInfo('This account was created with Google. Please use Continue with Google to sign in.');
         }
       } else {
         setStep('signup');
       }
-    } catch (e2) { setError(e2?.response?.data?.error || 'Something went wrong. Please try again.'); }
-    finally { setLoading(false); }
+    } catch (e2) {
+      setError(e2?.response?.data?.error || 'Something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const submitLogin = async (otpVal) => {
@@ -1257,18 +873,24 @@ const CustomerAuthFlow = () => {
       const body = { businessEmail: email.trim(), password, portal: 'customer' };
       if (otpVal) body.otp = otpVal;
       const r = await axios.post(`${API_URL}/auth/login`, body);
-      if (r.data.twoFactorRequired) { setStep('2fa'); setLoading(false); return; }
-      if (!r.data?.token || !r.data?.customer) {
-        setError('Unexpected response from the server — please try again.');
+      if (r.data.twoFactorRequired) {
+        setStep('2fa');
+        setLoading(false);
         return;
       }
-      handleAuthSuccess(r.data.token, r.data.customer);
+      if (!r.data?.token || !r.data?.customer) {
+        setError('Unexpected response from server. Please try again.');
+        setLoading(false);
+        return;
+      }
+      await handleAuthSuccess(r.data.token, r.data.customer);
     } catch (e2) {
       console.error('login failed:', e2?.response?.status, e2?.response?.data);
       setError(e2?.response?.data?.error || `Login failed${e2?.response?.status ? ` (${e2.response.status})` : ''}.`);
+      setLoading(false);
     }
-    finally { setLoading(false); }
   };
+
   const doLogin = (e) => { e?.preventDefault?.(); submitLogin(); };
   const doLoginOtp = (e) => { e?.preventDefault?.(); submitLogin(otp); };
 
@@ -1279,17 +901,37 @@ const CustomerAuthFlow = () => {
     setLoading(true);
     try {
       const r = await axios.post(`${API_URL}/auth/signup-quick`, { businessEmail: email.trim(), password });
-      handleAuthSuccess(r.data.token, r.data.customer);
-    } catch (e2) { setError(e2?.response?.data?.error || 'Sign up failed.'); }
-    finally { setLoading(false); }
+      await handleAuthSuccess(r.data.token, r.data.customer);
+    } catch (e2) {
+      const errMsg = e2?.response?.data?.error || 'Sign up failed.';
+      if (errMsg.toLowerCase().includes('already exists')) {
+        setStep('login');
+        setError('An account with this email already exists. Please enter your password to sign in.');
+      } else {
+        setError(errMsg);
+      }
+      setLoading(false);
+    }
   };
 
-  const goBackToEmail = () => { setStep('email'); setPassword(''); setError(''); setInfo(''); setGoogleOnly(false); };
-  const notConfigured = (provider) => { setError(''); setInfo(`${provider} sign-in isn't set up yet — please use email or Google for now.`); };
+  const goBackToEmail = () => {
+    setStep('email');
+    setPassword('');
+    setError('');
+    setInfo('');
+    setGoogleOnly(false);
+  };
+
+  const notConfigured = (provider) => {
+    setError('');
+    setInfo(`${provider} sign-in is not configured yet. Please continue with Google or email.`);
+  };
+
   const startMicrosoft = () => {
     if (!msConfigured) { notConfigured('Microsoft'); return; }
     window.location.href = `${API_URL}/auth/microsoft/start`;
   };
+
   const startFacebook = () => {
     if (!fbConfigured) { notConfigured('Facebook'); return; }
     window.location.href = `${API_URL}/auth/facebook/start`;
@@ -1302,77 +944,108 @@ const CustomerAuthFlow = () => {
     onGoogleFallback: () => notConfigured('Google'),
     onMicrosoft: startMicrosoft,
     onFacebook: startFacebook,
+    disabled: loading || redirectingToCheckout,
   });
 
-  return (
-    <div className="auth-page-wrapper">
-      <div className="auth-top-nav">
-        <a href="/" className="auth-back-btn">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          <span>Back to website</span>
-        </a>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#475569', background: '#ffffff', padding: '5px 12px', borderRadius: 999, border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-            🔒 Official Workspace Partner Portal
-          </span>
-        </div>
+  const content = (
+    <div className="cauth auth-card-modern" style={{ position: 'relative', width: '100%', maxWidth: 450 }}>
+      {/* Top right close button when in modal */}
+      {isModal && onClose && !loading && !redirectingToCheckout && (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            position: 'absolute',
+            top: 18,
+            right: 18,
+            background: '#f1f5f9',
+            border: 'none',
+            borderRadius: '50%',
+            width: 32,
+            height: 32,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 15,
+            color: '#64748b',
+            cursor: 'pointer',
+            fontWeight: 700,
+            zIndex: 10,
+            transition: 'all .15s ease',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#64748b'; }}
+        >
+          ✕
+        </button>
+      )}
+
+      {/* Brand Header */}
+      <div style={{ textAlign: 'center', marginBottom: 18 }}>
+        {brand.logoDataUrl
+          ? <a href="/"><img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 42, maxWidth: 180, marginBottom: 8 }} /></a>
+          : <a href="/" style={{ textDecoration: 'none', display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg, #6e46eb 0%, #4c1d95 100%)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 20, marginBottom: 6, boxShadow: '0 4px 12px rgba(110,70,235,0.25)' }}>{(brand.brandName || 'G')[0]}</div>
+              <strong style={{ fontSize: 16.5, color: '#0f172a', letterSpacing: '-0.02em', fontWeight: 700 }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
+            </a>
+        }
       </div>
 
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 16px' }}>
-        <style>{`
-          .cauth, .cauth * { box-sizing: border-box; }
-          .cauth .field { width: 100%; height: 46px; border-radius: 10px; border: 1px solid #cbd5e1; padding: 0 14px; font-size: 15px; transition: border-color 0.15s, box-shadow 0.15s; }
-          .cauth .field:focus { outline: none; border-color: #6e46eb; box-shadow: 0 0 0 3px rgba(110, 70, 235, 0.12); }
-          .cauth .btn-primary { width: 100%; height: 48px; border-radius: 10px; font-weight: 700; cursor: pointer; border: none; background: #6e46eb; color: #fff; font-size: 15px; transition: background 0.15s, transform 0.1s; }
-          .cauth .btn-primary:hover:not(:disabled) { background: #5b35d5; }
-          .cauth .btn-primary:disabled { opacity: 0.6; cursor: default; }
-          .cauth .btn-social { width: 100%; height: 46px; border-radius: 10px; font-weight: 600; cursor: pointer; border: 1px solid #e2e8f0; background: #fff; color: #1e293b; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 14.5px; transition: background 0.15s; }
-          .cauth .btn-social:hover { background: #f8fafc; border-color: #cbd5e1; }
-          .cauth .divider { display: flex; align-items: center; gap: 10px; color: #94a3b8; font-size: 13px; margin: 18px 0; }
-          .cauth .divider::before, .cauth .divider::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
-          .cauth .linkbtn { background: transparent; border: none; color: #6e46eb; font-weight: 600; cursor: pointer; padding: 0; font-size: 14px; }
-          .cauth .linkbtn:hover { text-decoration: underline; }
-          .cauth .emailchip { display: flex; align-items: center; justify-content: space-between; border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 10px; padding: 10px 14px; font-size: 14px; color: #1e293b; font-weight: 600; }
-          .cauth .errbox { background: #fef2f2; color: #b91c1c; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; margin-bottom: 14px; border: 1px solid #fecaca; }
-          .cauth .infobox { background: #eff6ff; color: #1d4ed8; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; margin-bottom: 14px; border: 1px solid #bfdbfe; }
-        `}</style>
-
-        <div className="cauth auth-card-modern">
-          <div style={{ textAlign: 'center', marginBottom: 20 }}>
-            {brand.logoDataUrl
-              ? <a href="/"><img src={brand.logoDataUrl} alt={brand.brandName} style={{ maxHeight: 44, maxWidth: 180, marginBottom: 8 }} /></a>
-              : <a href="/" style={{ textDecoration: 'none', display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <div style={{ width: 44, height: 44, borderRadius: 12, background: '#6e46eb', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 20, marginBottom: 6, boxShadow: '0 4px 12px rgba(110,70,235,0.25)' }}>{(brand.brandName || 'G')[0]}</div>
-                  <strong style={{ fontSize: 17, color: '#0f172a', letterSpacing: '-0.02em', fontWeight: 700 }}>{brand.brandName || 'GNB MENTOR LLC'}</strong>
-                </a>
-            }
+      {/* Redirecting to Checkout Reassuring Screen */}
+      {redirectingToCheckout ? (
+        <div style={{ textAlign: 'center', padding: '28px 12px' }}>
+          <div style={{
+            width: 44,
+            height: 44,
+            border: '3px solid #ede9fe',
+            borderTopColor: '#6e46eb',
+            borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite',
+            margin: '0 auto 16px'
+          }} />
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px' }}>
+            Taking you to checkout…
+          </h2>
+          <p style={{ color: '#64748b', fontSize: 14, margin: '0 0 12px' }}>
+            Securing <strong>{activeDomain?.domainName || 'your domain'}</strong>. Please wait…
+          </p>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 999, padding: '4px 12px', fontSize: 12.5, color: '#6d28d9', fontWeight: 600 }}>
+            <span>🔒</span> Encrypted Checkout Gateway
           </div>
-
-          {pendingDomain && (
+        </div>
+      ) : (
+        <>
+          {/* Active Domain Purchase Banner */}
+          {activeDomain && activeDomain.domainName && (
             <div style={{
-              background: '#f5f3ff',
+              background: 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)',
               border: '1px solid #ddd6fe',
               borderRadius: 14,
-              padding: '12px 16px',
-              marginBottom: 18,
+              padding: '12px 14px',
+              marginBottom: 16,
               display: 'flex',
               alignItems: 'center',
               gap: 12,
               textAlign: 'left',
-              boxShadow: '0 1px 3px rgba(110, 70, 235, 0.06)'
+              boxShadow: '0 2px 6px rgba(110, 70, 235, 0.06)'
             }}>
-              <div style={{ fontSize: 22, flexShrink: 0 }}>🌐</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700, color: '#4c1d95', fontSize: 14 }}>
-                  Securing {pendingDomain.domainName}
+              <div style={{ fontSize: 24, flexShrink: 0 }}>🌐</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 800, color: '#4c1d95', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <span style={{ wordBreak: 'break-all' }}>Securing {activeDomain.domainName}</span>
+                  {activeDomain.mode === 'transfer' && (
+                    <span style={{ fontSize: 11, background: '#ddd6fe', color: '#5b21b6', padding: '1px 6px', borderRadius: 6, fontWeight: 700 }}>Transfer</span>
+                  )}
                 </div>
                 <div style={{ color: '#6d28d9', fontSize: 12.5, marginTop: 2 }}>
-                  {pendingDomain.price != null ? `$${Number(pendingDomain.price).toFixed(2)}/yr` : ''} • Sign in or create an account to go directly to checkout.
+                  {activeDomain.price != null ? `$${Number(activeDomain.price).toFixed(2)}/yr` : ''} • One click sign in or sign up to proceed to checkout
                 </div>
               </div>
             </div>
           )}
 
+          {/* STEP 1: Email + Social */}
           {step === 'email' && (
             <>
               <div className="auth-segmented-pill">
@@ -1392,97 +1065,299 @@ const CustomerAuthFlow = () => {
                 </button>
               </div>
 
-              <h1 style={{ fontSize: 22, textAlign: 'center', margin: '0 0 6px', color: '#0f172a', fontWeight: 800, letterSpacing: '-0.02em' }}>
+              <h1 style={{ fontSize: 21, textAlign: 'center', margin: '0 0 6px', color: '#0f172a', fontWeight: 800, letterSpacing: '-0.02em' }}>
                 {tabIntent === 'login' ? 'Welcome back' : 'Get started'}
               </h1>
-              <p style={{ textAlign: 'center', color: '#64748b', margin: '0 0 20px', fontSize: 14, lineHeight: 1.5 }}>
+              <p style={{ textAlign: 'center', color: '#64748b', margin: '0 0 18px', fontSize: 13.5, lineHeight: 1.5 }}>
                 {tabIntent === 'login'
-                  ? 'Sign in to access your Workspace console and services.'
-                  : 'Enter your business email to set up your account.'}
+                  ? (activeDomain ? 'Sign in to complete your domain purchase.' : 'Sign in to access your Workspace console and services.')
+                  : (activeDomain ? 'Sign up with one click to lock in your domain and checkout.' : 'Enter your business email to set up your account.')}
               </p>
+
               {error && <div className="errbox">{error}</div>}
               {info && <div className="infobox">{info}</div>}
+
+              {/* Social Logins */}
               <AuthSocialButtons {...socialProps(tabIntent === 'signup' ? 'Sign up' : 'Continue')} />
+
               <div className="divider">or continue with email</div>
-              <form onSubmit={continueWithEmail} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <input className="field" type="email" placeholder="name@company.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
-                <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Please wait…' : 'Continue with Email'}</button>
+
+              <form onSubmit={continueWithEmail} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div>
+                  <input
+                    className="field"
+                    type="email"
+                    placeholder="name@company.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    autoFocus
+                    disabled={loading}
+                    required
+                  />
+                </div>
+                <button type="submit" className="btn-primary" disabled={loading}>
+                  {loading ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 14, height: 14, border: '2px solid #ffffff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                      <span>Checking account…</span>
+                    </span>
+                  ) : 'Continue with Email →'}
+                </button>
               </form>
             </>
           )}
 
+          {/* STEP 2: Password Login (Account Found) */}
           {step === 'login' && (
             <>
-              <button className="linkbtn" onClick={goBackToEmail} style={{ marginBottom: 14, display: 'inline-flex', alignItems: 'center', gap: 4 }}>← Use different email</button>
-              <h1 style={{ fontSize: 22, textAlign: 'center', margin: '0 0 6px', color: '#0f172a', fontWeight: 800 }}>Account found</h1>
-              <p style={{ textAlign: 'center', color: '#64748b', margin: '0 0 18px', fontSize: 14 }}>
-                {googleOnly ? 'Continue with Google to access your portal.' : 'Enter your password to sign in.'}
+              <button className="linkbtn" onClick={goBackToEmail} style={{ marginBottom: 12, display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
+                ← Use different email
+              </button>
+              <h1 style={{ fontSize: 21, textAlign: 'center', margin: '0 0 4px', color: '#0f172a', fontWeight: 800 }}>Account found</h1>
+              <p style={{ textAlign: 'center', color: '#64748b', margin: '0 0 16px', fontSize: 13.5 }}>
+                {googleOnly ? 'Continue with Google to sign in to your portal.' : 'Enter your password to sign in.'}
               </p>
+
               {error && <div className="errbox">{error}</div>}
               {info && <div className="infobox">{info}</div>}
+
               <div className="emailchip" style={{ marginBottom: 14 }}>
-                <span>{email}</span>
-                <button className="linkbtn" onClick={goBackToEmail} title="Change email">✕</button>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</span>
+                <button className="linkbtn" onClick={goBackToEmail} title="Change email" style={{ padding: '2px 6px', fontSize: 13 }}>Change</button>
               </div>
+
               {!googleOnly && (
-                <form onSubmit={doLogin} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <form onSubmit={doLogin} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div style={{ position: 'relative' }}>
-                    <input className="field" type={showPw ? 'text' : 'password'} placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ paddingRight: 60 }} autoFocus />
-                    <button type="button" onClick={() => setShowPw((v) => !v)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{showPw ? 'Hide' : 'Show'}</button>
+                    <input
+                      className="field"
+                      type={showPw ? 'text' : 'password'}
+                      placeholder="Enter your password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      style={{ paddingRight: 60 }}
+                      autoFocus
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPw((v) => !v)}
+                      style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      {showPw ? 'Hide' : 'Show'}
+                    </button>
                   </div>
-                  <button type="button" className="linkbtn" onClick={() => setInfo('To reset your password, please contact support and we\'ll assist you.')} style={{ alignSelf: 'flex-start', fontSize: 13 }}>Forgot Password?</button>
-                  <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Logging in…' : 'Sign in to Portal'}</button>
+                  <button
+                    type="button"
+                    className="linkbtn"
+                    onClick={() => setInfo('To reset your password, contact support at support@gnbmentor.com')}
+                    style={{ alignSelf: 'flex-start', fontSize: 12.5 }}
+                  >
+                    Forgot Password?
+                  </button>
+                  <button type="submit" className="btn-primary" disabled={loading}>
+                    {loading ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ width: 14, height: 14, border: '2px solid #ffffff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                        <span>Signing in…</span>
+                      </span>
+                    ) : (activeDomain ? 'Sign In & Continue to Checkout →' : 'Sign In to Portal →')}
+                  </button>
                 </form>
               )}
+
               <div className="divider">or continue with</div>
               <AuthSocialButtons {...socialProps('Continue')} />
             </>
           )}
 
+          {/* STEP 3: 2FA */}
           {step === '2fa' && (
             <>
-              <button className="linkbtn" onClick={() => { setStep('login'); setOtp(''); setError(''); }} style={{ marginBottom: 14, display: 'inline-flex', alignItems: 'center', gap: 4 }}>← Back</button>
-              <h1 style={{ fontSize: 22, textAlign: 'center', margin: '0 0 6px', color: '#0f172a', fontWeight: 800 }}>Two-step verification</h1>
-              <p style={{ textAlign: 'center', color: '#64748b', margin: '0 0 18px', fontSize: 14 }}>Enter the 6-digit code from your authenticator app.</p>
+              <button className="linkbtn" onClick={() => { setStep('login'); setOtp(''); setError(''); }} style={{ marginBottom: 12, display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
+                ← Back
+              </button>
+              <h1 style={{ fontSize: 21, textAlign: 'center', margin: '0 0 6px', color: '#0f172a', fontWeight: 800 }}>Two-step verification</h1>
+              <p style={{ textAlign: 'center', color: '#64748b', margin: '0 0 16px', fontSize: 13.5 }}>Enter the 6-digit code from your authenticator app.</p>
               {error && <div className="errbox">{error}</div>}
               <form onSubmit={doLoginOtp} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <input className="field" style={{ textAlign: 'center', letterSpacing: 6, fontSize: 20, fontWeight: 700 }} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="123456" inputMode="numeric" autoFocus />
-                <button type="submit" className="btn-primary" disabled={loading || otp.length < 6}>{loading ? 'Verifying…' : 'Verify & Sign In'}</button>
+                <input
+                  className="field"
+                  style={{ textAlign: 'center', letterSpacing: 6, fontSize: 20, fontWeight: 700 }}
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="123456"
+                  inputMode="numeric"
+                  autoFocus
+                />
+                <button type="submit" className="btn-primary" disabled={loading || otp.length < 6}>
+                  {loading ? 'Verifying…' : 'Verify & Continue'}
+                </button>
               </form>
             </>
           )}
 
+          {/* STEP 4: Signup (New Account) */}
           {step === 'signup' && (
             <>
-              <button className="linkbtn" onClick={goBackToEmail} style={{ marginBottom: 14, display: 'inline-flex', alignItems: 'center', gap: 4 }}>← Use different email</button>
-              <h1 style={{ fontSize: 22, textAlign: 'center', margin: '0 0 6px', color: '#0f172a', fontWeight: 800 }}>Create your account</h1>
-              <p style={{ textAlign: 'center', color: '#64748b', margin: '0 0 18px', fontSize: 14 }}>Set up a password for your account.</p>
+              <button className="linkbtn" onClick={goBackToEmail} style={{ marginBottom: 12, display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
+                ← Use different email
+              </button>
+              <h1 style={{ fontSize: 21, textAlign: 'center', margin: '0 0 4px', color: '#0f172a', fontWeight: 800 }}>Create your account</h1>
+              <p style={{ textAlign: 'center', color: '#64748b', margin: '0 0 16px', fontSize: 13.5 }}>
+                Choose a secure password to activate your account.
+              </p>
+
               {error && <div className="errbox">{error}</div>}
               {info && <div className="infobox">{info}</div>}
+
               <div className="emailchip" style={{ marginBottom: 14 }}>
-                <span>{email}</span>
-                <button className="linkbtn" onClick={goBackToEmail} title="Change email">✕</button>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</span>
+                <button className="linkbtn" onClick={goBackToEmail} title="Change email" style={{ padding: '2px 6px', fontSize: 13 }}>Change</button>
               </div>
-              <form onSubmit={doSignup} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+              <form onSubmit={doSignup} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ position: 'relative' }}>
-                  <input className="field" type={showPw ? 'text' : 'password'} placeholder="Choose a secure password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ paddingRight: 60 }} autoFocus />
-                  <button type="button" onClick={() => setShowPw((v) => !v)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{showPw ? 'Hide' : 'Show'}</button>
+                  <input
+                    className="field"
+                    type={showPw ? 'text' : 'password'}
+                    placeholder="Choose a password (min 6 chars)"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    style={{ paddingRight: 60 }}
+                    autoFocus
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPw((v) => !v)}
+                    style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    {showPw ? 'Hide' : 'Show'}
+                  </button>
                 </div>
-                <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Creating account…' : 'Complete Registration'}</button>
+                <button type="submit" className="btn-primary" disabled={loading}>
+                  {loading ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 14, height: 14, border: '2px solid #ffffff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                      <span>Creating account…</span>
+                    </span>
+                  ) : (activeDomain ? 'Create Account & Continue to Checkout →' : 'Complete Registration →')}
+                </button>
               </form>
+
               <div className="divider">or sign up with</div>
               <AuthSocialButtons {...socialProps('Sign up')} />
             </>
           )}
 
-          <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: 12, margin: '20px 0 0' }}>
+          {isModal && (
+            <div style={{ marginTop: 16, textAlign: 'center' }}>
+              <a
+                href={tabIntent === 'signup' ? '/register' : '/login'}
+                style={{ color: '#64748b', fontSize: 12.5, textDecoration: 'underline' }}
+              >
+                Prefer full-screen page? Open sign in page →
+              </a>
+            </div>
+          )}
+
+          <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: 12, margin: '18px 0 0' }}>
             By continuing, you agree to our <a href="/voice-aup" target="_blank" rel="noreferrer" style={{ color: '#64748b', textDecoration: 'underline' }}>Terms</a> and Privacy Policy.
           </p>
+        </>
+      )}
+    </div>
+  );
+
+  // If in modal mode, wrap in backdrop overlay
+  if (isModal) {
+    return (
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.72)',
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
+          zIndex: 99999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '20px 16px',
+          animation: 'fadeIn 0.2s ease',
+        }}
+        onClick={(e) => { if (e.target === e.currentTarget && !loading && !redirectingToCheckout) onClose?.(); }}
+      >
+        <style>{`
+          .cauth, .cauth * { box-sizing: border-box; }
+          .cauth .field { width: 100%; height: 46px; border-radius: 10px; border: 1px solid #cbd5e1; padding: 0 14px; font-size: 15px; transition: border-color 0.15s, box-shadow 0.15s; }
+          .cauth .field:focus { outline: none; border-color: #6e46eb; box-shadow: 0 0 0 3px rgba(110, 70, 235, 0.14); }
+          .cauth .btn-primary { width: 100%; height: 48px; border-radius: 10px; font-weight: 700; cursor: pointer; border: none; background: #6e46eb; color: #fff; font-size: 15px; transition: background 0.15s, transform 0.1s, box-shadow 0.15s; box-shadow: 0 4px 12px rgba(110, 70, 235, 0.22); }
+          .cauth .btn-primary:hover:not(:disabled) { background: #5b35d5; box-shadow: 0 6px 18px rgba(110, 70, 235, 0.3); }
+          .cauth .btn-primary:disabled { opacity: 0.6; cursor: default; }
+          .cauth .btn-social { width: 100%; height: 46px; border-radius: 10px; font-weight: 600; cursor: pointer; border: 1px solid #e2e8f0; background: #fff; color: #1e293b; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 14px; transition: all 0.15s; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
+          .cauth .btn-social:hover:not(:disabled) { background: #f8fafc; border-color: #cbd5e1; box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
+          .cauth .btn-social:disabled { opacity: 0.6; cursor: default; }
+          .cauth .divider { display: flex; align-items: center; gap: 10px; color: #94a3b8; font-size: 12.5px; margin: 16px 0; }
+          .cauth .divider::before, .cauth .divider::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+          .cauth .linkbtn { background: transparent; border: none; color: #6e46eb; font-weight: 600; cursor: pointer; padding: 0; font-size: 13.5px; }
+          .cauth .linkbtn:hover { text-decoration: underline; }
+          .cauth .emailchip { display: flex; align-items: center; justify-content: space-between; border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 10px; padding: 9px 12px; font-size: 13.5px; color: #1e293b; font-weight: 600; }
+          .cauth .errbox { background: #fef2f2; color: #b91c1c; padding: 10px 14px; border-radius: 10px; font-size: 13px; margin-bottom: 12px; border: 1px solid #fecaca; }
+          .cauth .infobox { background: #eff6ff; color: #1d4ed8; padding: 10px 14px; border-radius: 10px; font-size: 13px; margin-bottom: 12px; border: 1px solid #bfdbfe; }
+        `}</style>
+        {content}
+      </div>
+    );
+  }
+
+  // Full page view at /login or /register
+  return (
+    <div className="auth-page-wrapper">
+      <div className="auth-top-nav">
+        <a href="/" className="auth-back-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          <span>Back to website</span>
+        </a>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#475569', background: '#ffffff', padding: '5px 12px', borderRadius: 999, border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+            🔒 Official Workspace Partner Portal
+          </span>
         </div>
+      </div>
+
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 16px' }}>
+        <style>{`
+          .cauth, .cauth * { box-sizing: border-box; }
+          .cauth .field { width: 100%; height: 46px; border-radius: 10px; border: 1px solid #cbd5e1; padding: 0 14px; font-size: 15px; transition: border-color 0.15s, box-shadow 0.15s; }
+          .cauth .field:focus { outline: none; border-color: #6e46eb; box-shadow: 0 0 0 3px rgba(110, 70, 235, 0.14); }
+          .cauth .btn-primary { width: 100%; height: 48px; border-radius: 10px; font-weight: 700; cursor: pointer; border: none; background: #6e46eb; color: #fff; font-size: 15px; transition: background 0.15s, transform 0.1s, box-shadow 0.15s; box-shadow: 0 4px 12px rgba(110, 70, 235, 0.22); }
+          .cauth .btn-primary:hover:not(:disabled) { background: #5b35d5; box-shadow: 0 6px 18px rgba(110, 70, 235, 0.3); }
+          .cauth .btn-primary:disabled { opacity: 0.6; cursor: default; }
+          .cauth .btn-social { width: 100%; height: 46px; border-radius: 10px; font-weight: 600; cursor: pointer; border: 1px solid #e2e8f0; background: #fff; color: #1e293b; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 14px; transition: all 0.15s; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
+          .cauth .btn-social:hover:not(:disabled) { background: #f8fafc; border-color: #cbd5e1; box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
+          .cauth .btn-social:disabled { opacity: 0.6; cursor: default; }
+          .cauth .divider { display: flex; align-items: center; gap: 10px; color: #94a3b8; font-size: 12.5px; margin: 16px 0; }
+          .cauth .divider::before, .cauth .divider::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+          .cauth .linkbtn { background: transparent; border: none; color: #6e46eb; font-weight: 600; cursor: pointer; padding: 0; font-size: 13.5px; }
+          .cauth .linkbtn:hover { text-decoration: underline; }
+          .cauth .emailchip { display: flex; align-items: center; justify-content: space-between; border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 10px; padding: 9px 12px; font-size: 13.5px; color: #1e293b; font-weight: 600; }
+          .cauth .errbox { background: #fef2f2; color: #b91c1c; padding: 10px 14px; border-radius: 10px; font-size: 13px; margin-bottom: 12px; border: 1px solid #fecaca; }
+          .cauth .infobox { background: #eff6ff; color: #1d4ed8; padding: 10px 14px; border-radius: 10px; font-size: 13px; margin-bottom: 12px; border: 1px solid #bfdbfe; }
+        `}</style>
+        {content}
       </div>
     </div>
   );
 };
+
+// ==================== DOMAIN CHECKOUT AUTH MODAL ====================
+// Links directly to the unified CustomerAuthFlow in modal view with full social logins
+// (Google One-Click GIS, Microsoft SSO, Facebook SSO) and instant checkout redirection!
+const DomainAuthModal = ({ domainInfo, onClose }) => (
+  <CustomerAuthFlow isModal={true} onClose={onClose} domainInfo={domainInfo} />
+);
 
 const LoginPage = ({ adminMode = false, startTab = 'login' }) => {
   const { login } = useAuth();
