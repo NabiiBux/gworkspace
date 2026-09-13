@@ -288,7 +288,7 @@ const PaymentSchema = new mongoose.Schema({
   seatChangeFromSeats: Number,
   seatChangeSubId: String,
   currency: { type: String, default: 'USD' },
-  method: { type: String, enum: ['stripe', 'nicky'], default: 'stripe' },
+  method: { type: String, enum: ['stripe', 'nicky', 'admin_direct', 'saved_card'], default: 'stripe' },
   status: { type: String, enum: ['pending', 'paid', 'failed', 'cancelled'], default: 'pending' },
   providerRef: String,     // Stripe session id or Nicky bill/order id (GUID)
   providerShortId: String, // Nicky shortId (e.g. 6DBY95) — used for status lookups
@@ -9867,6 +9867,194 @@ app.get('/api/admin/domain-balance', authenticateCustomer, requireAdmin, async (
     res.json({ balance: b.availableBalance, currency: b.currency, raw: b });
   } catch (e) {
     res.status(500).json({ error: 'Balance error: ' + e.message });
+  }
+});
+
+// Admin: search domain availability + raw Namecheap wholesale cost (0% markup, NO profit margin)
+app.post('/api/admin/domains/search-wholesale', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { domainName } = req.body;
+    const raw = (domainName || '').toLowerCase().trim();
+    if (!raw) return res.status(400).json({ error: 'Enter a domain or a name to search.' });
+
+    // Full domain (has a dot)
+    if (raw.includes('.')) {
+      if (!/^[a-z0-9-]+\.[a-z.]{2,}$/.test(raw)) return res.status(400).json({ error: 'Enter a valid domain like example.com' });
+      const check = await ncCheckDomains([raw]);
+      if (!check.ok) return res.status(502).json({ error: check.error });
+      const d = check.domains[0];
+      let cost = null;
+      if (d.available) {
+        if (d.isPremium && d.premiumPrice) {
+          cost = d.premiumPrice;
+        } else {
+          const tld = tldOf(raw);
+          const pricing = await ncGetTldPricing(tld, 'REGISTER');
+          if (pricing.ok) cost = pricing.cost;
+        }
+      }
+      return res.json({
+        domainName: raw,
+        available: d.available,
+        isPremium: d.isPremium,
+        currency: 'USD',
+        period: 1,
+        cost,
+        price: cost, // raw API wholesale cost with NO profit margin added
+        results: [{ domain: raw, available: d.available, isPremium: d.isPremium, cost, price: cost }],
+      });
+    }
+
+    // Bare name: check popular TLDs in parallel
+    const name = raw.replace(/[^a-z0-9-]/g, '');
+    if (!name) return res.status(400).json({ error: 'Enter a valid name (letters, numbers, hyphens).' });
+    const tlds = ['com', 'net', 'org', 'io', 'co', 'shop', 'store', 'online', 'site', 'xyz', 'biz', 'info'];
+    const domains = tlds.map((t) => `${name}.${t}`);
+    const check = await ncCheckDomains(domains);
+    if (!check.ok) return res.status(502).json({ error: check.error });
+    const results = await Promise.all(check.domains.map(async (d) => {
+      let cost = null;
+      if (d.available) {
+        if (d.isPremium && d.premiumPrice) {
+          cost = d.premiumPrice;
+        } else {
+          const tld = tldOf(d.domain);
+          try {
+            const pricing = await ncGetTldPricing(tld, 'REGISTER');
+            if (pricing.ok) cost = pricing.cost;
+          } catch (_) {}
+        }
+      }
+      return { domain: d.domain, available: d.available, isPremium: d.isPremium, cost, price: cost };
+    }));
+    results.sort((a, b) => (b.available - a.available) || ((a.cost || 999) - (b.cost || 999)));
+    res.json({ multi: true, results });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Admin: directly purchase a domain for a customer (no credit/debit card required)
+// Uses real Namecheap API wholesale cost, registers domain directly, and assigns to customer
+app.post('/api/admin/domains/direct-purchase', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const { domainName, customerId, period, contact: customContact, markAsCustomerDomain } = req.body;
+    const dom = (domainName || '').toLowerCase().trim();
+    if (!dom || !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) {
+      return res.status(400).json({ error: 'Valid domain name required (e.g. example.com).' });
+    }
+
+    const regYears = Math.max(1, Math.min(10, parseInt(period, 10) || 1));
+
+    // Target customer (either specified or current admin)
+    let customer = null;
+    if (customerId) {
+      customer = await Customer.findById(customerId);
+      if (!customer) return res.status(404).json({ error: 'Customer not found.' });
+    } else {
+      customer = await Customer.findById(req.customerId);
+    }
+
+    // Check TLD wholesale cost
+    const tld = tldOf(dom);
+    const pricing = await ncGetTldPricing(tld, 'REGISTER');
+    const wholesaleCostPerYear = pricing.ok ? pricing.cost : 0;
+    const totalWholesaleCost = Number((wholesaleCostPerYear * regYears).toFixed(2));
+
+    // Build registrant contact info
+    const contact = {
+      firstName: customContact?.firstName || customer?.firstName || customer?.username || 'Domain',
+      lastName: customContact?.lastName || customer?.lastName || 'Owner',
+      address: customContact?.address || customer?.address || '123 Business St',
+      city: customContact?.city || customer?.city || 'New York',
+      state: customContact?.state || customer?.state || 'NY',
+      zip: customContact?.zip || customer?.postalCode || '10001',
+      country: customContact?.country || customer?.country || 'US',
+      phone: customContact?.phone || customer?.phone || '+1.5550000000',
+      email: customContact?.email || customer?.businessEmail || 'admin@' + dom,
+    };
+
+    console.log(`[ADMIN DIRECT DOMAIN PURCHASE] Registering ${dom} for ${customer?.businessEmail || 'admin'} for ${regYears}yr(s) at wholesale cost $${totalWholesaleCost}...`);
+
+    // Call Namecheap API to register directly
+    const regResult = await ncRegisterDomain(dom, regYears, contact);
+    if (!regResult.ok) {
+      console.error('[ADMIN DIRECT DOMAIN PURCHASE ERROR]:', regResult.error);
+      return res.status(502).json({
+        error: `Namecheap registration failed: ${regResult.error || 'Unknown error'}. Please check your Namecheap balance and contact info.`,
+        raw: regResult,
+      });
+    }
+
+    // Create DomainOrder record
+    const orderNumber = `DM-ADMIN-${Date.now()}`;
+    const order = await DomainOrder.create({
+      customerId: customer?._id,
+      orderNumber,
+      domainName: dom,
+      period: regYears,
+      price: totalWholesaleCost,
+      status: regResult.registered ? 'registered' : 'pending',
+      registeredAt: regResult.registered ? new Date() : null,
+      registrationResult: JSON.stringify({
+        ...regResult,
+        adminDirect: true,
+        wholesaleCost: totalWholesaleCost,
+        registeredByAdmin: req.customerEmail || req.customerId,
+      }),
+    });
+
+    // Create completed Payment record (method: admin_direct, $0 card charge, audit tracked)
+    await Payment.create({
+      customerId: customer?._id,
+      customerEmail: customer?.businessEmail || req.customerEmail,
+      domain: dom,
+      orderId: order._id,
+      orderType: 'domain',
+      amount: totalWholesaleCost,
+      subtotal: totalWholesaleCost,
+      tax: 0,
+      fee: 0,
+      currency: 'USD',
+      method: 'admin_direct',
+      status: 'paid',
+      paidAt: new Date(),
+      providerRef: `ADMIN-DIRECT-${regResult.domainId || Date.now()}`,
+    });
+
+    // Create/update domain in customer's portal
+    await Domain.findOneAndUpdate(
+      { domainName: dom },
+      {
+        customerId: customer?._id,
+        domainName: dom,
+        verified: true,
+        verificationMethod: 'dns',
+      },
+      { upsert: true, new: true }
+    );
+
+    // Link customer primary domain if empty or if requested
+    if (customer && (!customer.domain || markAsCustomerDomain)) {
+      customer.domain = dom;
+      await customer.save();
+    }
+
+    res.json({
+      success: true,
+      registered: regResult.registered,
+      domain: dom,
+      orderNumber: order.orderNumber,
+      domainId: regResult.domainId,
+      customerId: customer?._id,
+      customerEmail: customer?.businessEmail,
+      wholesaleCost: totalWholesaleCost,
+      period: regYears,
+      message: `Domain ${dom} successfully registered directly via Namecheap at wholesale price ($${totalWholesaleCost.toFixed(2)}) for ${customer?.businessEmail || 'customer'}!`,
+    });
+  } catch (e) {
+    console.error('Error in admin direct domain purchase:', e);
+    res.status(500).json({ error: e.message });
   }
 });
 

@@ -1930,6 +1930,7 @@ const Dashboard = () => {
   const sectionLabels = {
     'overview': '📊 Overview & Analytics',
     'order-workspace': 'Setup Google Workspace',
+    'order-domain': '⚡ Direct Order Domain',
     'domain-orders': '🌐 Domain Orders',
     'products': '📦 Products',
     'addon-pricing': 'Gsuite Addon Prices',
@@ -1962,6 +1963,7 @@ const Dashboard = () => {
   const adminNavItems = [
     { key: 'overview', label: 'Overview', icon: <NavIcons.Overview size={18} />, bg: '#eef2ff', border: '#e0e7ff' },
     { key: 'order-workspace', label: 'Setup Google Workspace', icon: <GoogleWorkspaceIcon size={18} />, bg: '#ffffff', border: '#e2e8f0', shadow: true },
+    { key: 'order-domain', label: 'Direct Order Domain', icon: <NavIcons.Domains size={18} />, bg: '#ecfeff', border: '#a5f3fc', shadow: true },
     { key: 'domain-orders', label: 'Domain Orders', icon: <NavIcons.Domains size={18} />, bg: '#ecfeff', border: '#cffafe' },
     { key: 'products', label: 'Products', icon: <NavIcons.AdminProducts size={18} />, bg: '#fef3c7', border: '#fde68a' },
     { key: 'addon-pricing', label: 'Gsuite Addon Prices', icon: <NavIcons.GsuiteAddon size={18} />, bg: '#ffffff', border: '#e2e8f0', shadow: true },
@@ -2056,7 +2058,8 @@ const Dashboard = () => {
       <main className="dashboard-content" id="admin-dashboard-content">
         {activeSection === 'overview' && <OverviewSection stats={stats} />}
         {activeSection === 'order-workspace' && <AdminOrderWorkspace />}
-        {activeSection === 'domain-orders' && <AdminDomainOrders />}
+        {activeSection === 'order-domain' && <AdminDirectOrderDomain onGoToOrders={() => setActiveSection('domain-orders')} />}
+        {activeSection === 'domain-orders' && <AdminDomainOrders onSwitchToDirectOrder={() => setActiveSection('order-domain')} />}
         {activeSection === 'products' && <ProductsSection />}
         {activeSection === 'addon-pricing' && <AdminAddonPricing />}
         {activeSection === 'subs-pk' && <SubscriptionsSection account="PK" />}
@@ -12466,9 +12469,609 @@ const CustomerHosting = ({ initialDomain = '' }) => {
 
 // ==================== ADMIN: CREATE & PROVISION WORKSPACE (no payment) + TRACK ORDERS ====================
 
-// Admin: domain purchases (search + retry registration). Own sidebar section.
-const AdminDomainOrders = () => {
+// ==================== ADMIN: DIRECT DOMAIN PURCHASE (NO CARD, REAL WHOLESALE API PRICE) ====================
+const AdminDirectOrderDomain = ({ onGoToOrders }) => {
   const inp = { width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', fontSize: 14, boxSizing: 'border-box' };
+  const label = { display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 5 };
+
+  // Live Namecheap Balance
+  const [balance, setBalance] = useState(null);
+  const [balanceLoading, setBalanceLoading] = useState(false);
+
+  // Customer selection
+  const [customers, setCustomers] = useState([]);
+  const [custSearch, setCustSearch] = useState('');
+  const [selectedCustId, setSelectedCustId] = useState('');
+  const [useCustomCustomer, setUseCustomCustomer] = useState(false);
+
+  // Domain search & results
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchErr, setSearchErr] = useState('');
+  const [searchResults, setSearchResults] = useState(null);
+
+  // Selected domain & pricing
+  const [selectedDomain, setSelectedDomain] = useState('');
+  const [wholesaleUnitCost, setWholesaleUnitCost] = useState(null);
+  const [regYears, setRegYears] = useState(1);
+  const [markPrimary, setMarkPrimary] = useState(true);
+
+  // Registrant / Whois contact info
+  const [showContactDetails, setShowContactDetails] = useState(false);
+  const [contact, setContact] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    address: '',
+    city: '',
+    state: '',
+    zip: '',
+    country: 'United States',
+  });
+
+  // Purchase execution state
+  const [purchasing, setPurchasing] = useState(false);
+  const [purchaseErr, setPurchaseErr] = useState('');
+  const [purchaseSuccess, setPurchaseSuccess] = useState(null);
+
+  // Load balance
+  const loadBalance = async () => {
+    setBalanceLoading(true);
+    try {
+      const r = await axios.get(`${API_URL}/admin/nc/balance`);
+      setBalance(r.data);
+    } catch (_) {
+      try {
+        const fb = await axios.get(`${API_URL}/admin/domain-balance`);
+        setBalance(fb.data);
+      } catch (e) {
+        // ignore
+      }
+    } finally {
+      setBalanceLoading(false);
+    }
+  };
+
+  // Load customers
+  const loadCustomers = async () => {
+    try {
+      const r = await axios.get(`${API_URL}/admin/customers`);
+      setCustomers(r.data.customers || []);
+    } catch (e) {
+      console.error('Error loading customers:', e);
+    }
+  };
+
+  useEffect(() => {
+    loadBalance();
+    loadCustomers();
+  }, []);
+
+  // When customer selection changes, pre-fill contact
+  useEffect(() => {
+    if (!selectedCustId) return;
+    const c = customers.find(x => x.id === selectedCustId);
+    if (c) {
+      setContact(prev => ({
+        ...prev,
+        firstName: c.username || c.companyName || prev.firstName || 'Domain',
+        lastName: prev.lastName || 'Owner',
+        email: c.email || prev.email,
+        phone: prev.phone || '+1.5550000000',
+        address: prev.address || '123 Business St',
+        city: prev.city || 'New York',
+        state: prev.state || 'NY',
+        zip: prev.zip || '10001',
+        country: c.country || prev.country || 'United States',
+      }));
+    }
+  }, [selectedCustId, customers]);
+
+  // Execute domain search
+  const doSearch = async (termOverride) => {
+    const raw = (termOverride || searchQuery || '').trim().toLowerCase();
+    if (!raw) {
+      setSearchErr('Please enter a domain name (e.g. clientbusiness.com) or keyword.');
+      return;
+    }
+    setSearching(true);
+    setSearchErr('');
+    setSearchResults(null);
+    setPurchaseSuccess(null);
+    setPurchaseErr('');
+
+    try {
+      const r = await axios.post(`${API_URL}/admin/domains/search-wholesale`, { domainName: raw });
+      setSearchResults(r.data);
+      if (r.data.available && r.data.domainName) {
+        setSelectedDomain(r.data.domainName);
+        setWholesaleUnitCost(r.data.cost);
+      } else if (r.data.results && r.data.results.length === 1 && r.data.results[0].available) {
+        setSelectedDomain(r.data.results[0].domain);
+        setWholesaleUnitCost(r.data.results[0].cost);
+      }
+    } catch (e) {
+      setSearchErr(e?.response?.data?.error || 'Failed to check domain availability.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleSelectDomain = (dom, cost) => {
+    setSelectedDomain(dom);
+    setWholesaleUnitCost(cost);
+    setSearchErr('');
+  };
+
+  // Submit direct purchase
+  const handleDirectPurchase = async () => {
+    if (!selectedDomain) {
+      setPurchaseErr('Please select an available domain first.');
+      return;
+    }
+
+    setPurchasing(true);
+    setPurchaseErr('');
+    setPurchaseSuccess(null);
+
+    try {
+      const payload = {
+        domainName: selectedDomain,
+        customerId: selectedCustId || undefined,
+        period: Number(regYears) || 1,
+        markAsCustomerDomain: markPrimary,
+        contact: {
+          ...contact,
+          email: contact.email || (selectedCustId ? customers.find(c => c.id === selectedCustId)?.email : ''),
+        },
+      };
+
+      const r = await axios.post(`${API_URL}/admin/domains/direct-purchase`, payload);
+      setPurchaseSuccess(r.data);
+      loadBalance(); // update live Namecheap balance
+    } catch (e) {
+      setPurchaseErr(e?.response?.data?.error || 'Registration failed. Please check Namecheap balance and contact info.');
+    } finally {
+      setPurchasing(false);
+    }
+  };
+
+  const selectedCust = customers.find(c => c.id === selectedCustId);
+  const totalCost = (Number(wholesaleUnitCost || 0) * Number(regYears)).toFixed(2);
+
+  const filteredCustomers = customers.filter(c => {
+    if (!custSearch) return true;
+    const q = custSearch.toLowerCase();
+    return (
+      (c.companyName && c.companyName.toLowerCase().includes(q)) ||
+      (c.username && c.username.toLowerCase().includes(q)) ||
+      (c.email && c.email.toLowerCase().includes(q)) ||
+      (c.domain && c.domain.toLowerCase().includes(q))
+    );
+  });
+
+  return (
+    <div className="section" id="admin-direct-order-domain-section">
+      {/* Top Banner with Wholesale info & Live Namecheap Balance */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <h2 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>⚡ Direct Domain Purchase for Customer</h2>
+            <span style={{ background: '#ecfeff', border: '1px solid #0891b2', color: '#0e7490', fontSize: 12, fontWeight: 600, padding: '3px 10px', borderRadius: 20 }}>
+              No Card Required • Real Wholesale API Rate
+            </span>
+          </div>
+          <p style={{ color: '#4b5563', margin: '6px 0 0 0', fontSize: 14, maxWidth: 780 }}>
+            Directly register domains for offline customers who cannot pay online. Reseller profit margins and markups are completely bypassed — displaying exact real prices from the Namecheap API.
+          </p>
+        </div>
+
+        {/* Live Namecheap Balance Badge */}
+        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Namecheap API Balance</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: '#0f172a' }}>
+              {balanceLoading ? 'Updating…' : (balance ? `${balance.currency || '$'} ${Number(balance.availableBalance ?? balance.balance ?? 0).toFixed(2)}` : 'Connected')}
+            </div>
+          </div>
+          <button
+            id="btn-refresh-nc-balance"
+            onClick={loadBalance}
+            className="btn btn-secondary"
+            style={{ padding: '4px 8px', fontSize: 12, minWidth: 32 }}
+            title="Refresh Namecheap balance"
+          >
+            ↻
+          </button>
+        </div>
+      </div>
+
+      {/* Success Notification */}
+      {purchaseSuccess && (
+        <div id="direct-domain-success-card" style={{ background: '#ecfdf5', border: '1px solid #10b981', borderRadius: 12, padding: 20, marginBottom: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+            <div style={{ background: '#10b981', color: '#fff', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+              ✓
+            </div>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ margin: '0 0 6px 0', color: '#065f46', fontSize: 18, fontWeight: 700 }}>Domain Successfully Registered!</h3>
+              <p style={{ margin: '0 0 12px 0', color: '#047857', fontSize: 14 }}>
+                {purchaseSuccess.message}
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, background: '#ffffff', border: '1px solid #a7f3d0', borderRadius: 8, padding: 12, fontSize: 13, marginBottom: 14 }}>
+                <div><span style={{ color: '#6b7280' }}>Domain:</span> <strong style={{ color: '#111827' }}>{purchaseSuccess.domain}</strong></div>
+                <div><span style={{ color: '#6b7280' }}>Order #:</span> <strong style={{ color: '#111827', fontFamily: 'monospace' }}>{purchaseSuccess.orderNumber}</strong></div>
+                <div><span style={{ color: '#6b7280' }}>Assigned Customer:</span> <strong style={{ color: '#111827' }}>{purchaseSuccess.customerEmail || 'Self / Admin'}</strong></div>
+                <div><span style={{ color: '#6b7280' }}>Wholesale Price:</span> <strong style={{ color: '#059669' }}>${Number(purchaseSuccess.wholesaleCost).toFixed(2)} USD</strong></div>
+                <div><span style={{ color: '#6b7280' }}>Registration:</span> <strong style={{ color: '#111827' }}>{purchaseSuccess.period} Year(s)</strong></div>
+                <div><span style={{ color: '#6b7280' }}>Status:</span> <strong style={{ color: '#059669', textTransform: 'capitalize' }}>{purchaseSuccess.registered ? 'Registered' : 'Processed'}</strong></div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button
+                  id="btn-register-another-domain"
+                  onClick={() => {
+                    setPurchaseSuccess(null);
+                    setSelectedDomain('');
+                    setWholesaleUnitCost(null);
+                    setSearchResults(null);
+                    setSearchQuery('');
+                  }}
+                  className="btn btn-primary"
+                  style={{ fontSize: 13, padding: '8px 16px' }}
+                >
+                  ⚡ Register Another Domain
+                </button>
+                {onGoToOrders && (
+                  <button
+                    id="btn-view-domain-orders"
+                    onClick={onGoToOrders}
+                    className="btn btn-secondary"
+                    style={{ fontSize: 13, padding: '8px 16px' }}
+                  >
+                    🌐 View All Domain Orders
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Notification */}
+      {purchaseErr && (
+        <div id="direct-domain-error-card" style={{ background: '#fef2f2', border: '1px solid #f87171', borderRadius: 10, padding: '14px 18px', marginBottom: 20, color: '#991b1b', fontSize: 14 }}>
+          <strong>Registration Error:</strong> {purchaseErr}
+        </div>
+      )}
+
+      {/* Main Order Form Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 20, marginBottom: 20 }}>
+        
+        {/* Card 1: Customer Selection */}
+        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#1f2937' }}>
+              👤 1. Customer Assignment
+            </h3>
+            <span style={{ fontSize: 12, color: '#6b7280' }}>
+              {customers.length} customers available
+            </span>
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={label}>Search & Select Customer</label>
+            <input
+              id="input-customer-search"
+              style={{ ...inp, marginBottom: 8 }}
+              placeholder="Search by company, username, or email..."
+              value={custSearch}
+              onChange={e => setCustSearch(e.target.value)}
+            />
+            <select
+              id="select-customer-dropdown"
+              style={inp}
+              value={selectedCustId}
+              onChange={e => setSelectedCustId(e.target.value)}
+            >
+              <option value="">-- Choose Customer (or leave blank for Admin) --</option>
+              {filteredCustomers.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.companyName || c.username || 'Unnamed'} — {c.email} {c.domain ? `(${c.domain})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {selectedCust && (
+            <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: 12, fontSize: 13 }}>
+              <div style={{ fontWeight: 600, color: '#111827', marginBottom: 4 }}>{selectedCust.companyName || selectedCust.username}</div>
+              <div style={{ color: '#4b5563', marginBottom: 2 }}>📧 {selectedCust.email}</div>
+              {selectedCust.domain && <div style={{ color: '#4b5563', marginBottom: 2 }}>🌐 Current Domain: <strong style={{ color: '#2563eb' }}>{selectedCust.domain}</strong></div>}
+              {selectedCust.phone && <div style={{ color: '#4b5563' }}>📞 {selectedCust.phone}</div>}
+            </div>
+          )}
+
+          <div style={{ marginTop: 14 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#4b5563', cursor: 'pointer' }}>
+              <input
+                id="checkbox-mark-primary-domain"
+                type="checkbox"
+                checked={markPrimary}
+                onChange={e => setMarkPrimary(e.target.checked)}
+              />
+              Set registered domain as primary domain in customer's portal
+            </label>
+          </div>
+        </div>
+
+        {/* Card 2: Domain Search & Real Wholesale Pricing */}
+        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#1f2937' }}>
+              🌐 2. Search Domain (Real API Cost)
+            </h3>
+            <span style={{ background: '#dcfce7', color: '#15803d', fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 12 }}>
+              0% Markup
+            </span>
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={label}>Domain Name or Keyword</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                id="input-direct-domain-search"
+                style={{ ...inp, flex: 1 }}
+                placeholder="e.g. customerbrand.com or brandname"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') doSearch(); }}
+              />
+              <button
+                id="btn-direct-domain-search"
+                onClick={() => doSearch()}
+                disabled={searching}
+                className="btn btn-primary"
+                style={{ padding: '0 16px', height: 40, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                {searching ? 'Checking…' : '🔍 Search'}
+              </button>
+            </div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+              💡 Enter full domain (e.g. <code>myclient.com</code>) or just a name to compare popular TLDs.
+            </div>
+          </div>
+
+          {searchErr && (
+            <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', color: '#b91c1c', padding: '8px 12px', borderRadius: 8, fontSize: 13, marginBottom: 12 }}>
+              {searchErr}
+            </div>
+          )}
+
+          {/* Single domain availability box */}
+          {searchResults && !searchResults.multi && (
+            <div style={{ background: searchResults.available ? '#f0fdf4' : '#fef2f2', border: `1px solid ${searchResults.available ? '#86efac' : '#fca5a5'}`, borderRadius: 10, padding: 14, marginTop: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: searchResults.available ? '#166534' : '#991b1b' }}>
+                    {searchResults.available ? '✓ Available' : '✗ Unavailable / Taken'} : {searchResults.domainName}
+                  </div>
+                  {searchResults.available && (
+                    <div style={{ fontSize: 13, color: '#15803d', marginTop: 2 }}>
+                      Wholesale Cost: <strong>${Number(searchResults.cost || 0).toFixed(2)} USD / year</strong> (Pure Namecheap API price)
+                    </div>
+                  )}
+                </div>
+                {searchResults.available && (
+                  <button
+                    id="btn-select-single-domain"
+                    onClick={() => handleSelectDomain(searchResults.domainName, searchResults.cost)}
+                    className="btn btn-secondary"
+                    style={{ fontSize: 12, padding: '4px 12px', background: selectedDomain === searchResults.domainName ? '#166534' : '#fff', color: selectedDomain === searchResults.domainName ? '#fff' : '#166534', border: '1px solid #166534' }}
+                  >
+                    {selectedDomain === searchResults.domainName ? '✓ Selected' : 'Select This Domain'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Multi-TLD suggestions table */}
+          {searchResults && searchResults.multi && searchResults.results && (
+            <div style={{ marginTop: 10, maxHeight: 220, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 8 }}>
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                <thead style={{ background: '#f9fafb', position: 'sticky', top: 0 }}>
+                  <tr style={{ textAlign: 'left', color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>
+                    <th style={{ padding: '6px 10px' }}>Domain</th>
+                    <th style={{ padding: '6px 10px' }}>Real Wholesale API Cost</th>
+                    <th style={{ padding: '6px 10px', textAlign: 'right' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {searchResults.results.map(r => (
+                    <tr key={r.domain} style={{ borderBottom: '1px solid #f3f4f6', background: selectedDomain === r.domain ? '#ecfeff' : 'transparent' }}>
+                      <td style={{ padding: '6px 10px', fontWeight: 600 }}>
+                        {r.domain}
+                        {!r.available && <span style={{ fontSize: 11, color: '#ef4444', marginLeft: 6 }}>Taken</span>}
+                      </td>
+                      <td style={{ padding: '6px 10px' }}>
+                        {r.available ? (
+                          <span style={{ color: '#059669', fontWeight: 600 }}>
+                            ${Number(r.cost || 0).toFixed(2)} / yr
+                          </span>
+                        ) : (
+                          <span style={{ color: '#9ca3af' }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right' }}>
+                        {r.available && (
+                          <button
+                            id={`btn-select-${r.domain.replace(/\./g, '-')}`}
+                            onClick={() => handleSelectDomain(r.domain, r.cost)}
+                            className="btn btn-secondary"
+                            style={{ fontSize: 11, padding: '3px 8px', background: selectedDomain === r.domain ? '#0891b2' : undefined, color: selectedDomain === r.domain ? '#fff' : undefined }}
+                          >
+                            {selectedDomain === r.domain ? '✓ Selected' : 'Choose'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Selected Domain Summary & Checkout Configuration */}
+      {selectedDomain && (
+        <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 12, padding: 22, marginBottom: 20, boxShadow: '0 2px 4px rgba(0,0,0,0.06)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, borderBottom: '1px solid #f1f5f9', paddingBottom: 16, marginBottom: 16 }}>
+            <div>
+              <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.5px' }}>Selected Domain for Direct Registration</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: '#0f172a' }}>{selectedDomain}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 12, color: '#64748b' }}>Namecheap API Wholesale Rate</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#059669' }}>
+                ${Number(wholesaleUnitCost || 0).toFixed(2)} USD <span style={{ fontSize: 13, fontWeight: 500, color: '#6b7280' }}>/ yr</span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, alignItems: 'center', marginBottom: 16 }}>
+            <div>
+              <label style={label}>Registration Duration</label>
+              <select
+                id="select-direct-domain-period"
+                style={inp}
+                value={regYears}
+                onChange={e => setRegYears(Number(e.target.value))}
+              >
+                <option value={1}>1 Year (${(Number(wholesaleUnitCost || 0) * 1).toFixed(2)} USD)</option>
+                <option value={2}>2 Years (${(Number(wholesaleUnitCost || 0) * 2).toFixed(2)} USD)</option>
+                <option value={3}>3 Years (${(Number(wholesaleUnitCost || 0) * 3).toFixed(2)} USD)</option>
+                <option value={5}>5 Years (${(Number(wholesaleUnitCost || 0) * 5).toFixed(2)} USD)</option>
+                <option value={10}>10 Years (${(Number(wholesaleUnitCost || 0) * 10).toFixed(2)} USD)</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={label}>Total Namecheap Wholesale Cost</label>
+              <div style={{ height: 40, background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 8, display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
+                ${totalCost} USD
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#059669', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 4, padding: '2px 6px', marginLeft: 8 }}>
+                  Zero Margin Applied
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label style={label}>Whois Contact Info</label>
+              <button
+                id="btn-toggle-whois-details"
+                type="button"
+                onClick={() => setShowContactDetails(!showContactDetails)}
+                className="btn btn-secondary"
+                style={{ width: '100%', height: 40, fontSize: 13 }}
+              >
+                {showContactDetails ? '▲ Hide Registrant Details' : '▼ Edit Registrant Details'}
+              </button>
+            </div>
+          </div>
+
+          {/* Expandable Whois Registrant form */}
+          {showContactDetails && (
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#334155', marginBottom: 10 }}>
+                📋 Registrant / Whois Contact Information (Sent directly to Namecheap)
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                <div>
+                  <label style={{ ...label, fontSize: 12 }}>First Name</label>
+                  <input style={inp} value={contact.firstName} onChange={e => setContact({ ...contact, firstName: e.target.value })} placeholder="First Name" />
+                </div>
+                <div>
+                  <label style={{ ...label, fontSize: 12 }}>Last Name</label>
+                  <input style={inp} value={contact.lastName} onChange={e => setContact({ ...contact, lastName: e.target.value })} placeholder="Last Name" />
+                </div>
+                <div>
+                  <label style={{ ...label, fontSize: 12 }}>Registrant Email</label>
+                  <input style={inp} value={contact.email} onChange={e => setContact({ ...contact, email: e.target.value })} placeholder="email@domain.com" />
+                </div>
+                <div>
+                  <label style={{ ...label, fontSize: 12 }}>Phone</label>
+                  <input style={inp} value={contact.phone} onChange={e => setContact({ ...contact, phone: e.target.value })} placeholder="+1.5551234567" />
+                </div>
+                <div>
+                  <label style={{ ...label, fontSize: 12 }}>Street Address</label>
+                  <input style={inp} value={contact.address} onChange={e => setContact({ ...contact, address: e.target.value })} placeholder="123 Business Way" />
+                </div>
+                <div>
+                  <label style={{ ...label, fontSize: 12 }}>City</label>
+                  <input style={inp} value={contact.city} onChange={e => setContact({ ...contact, city: e.target.value })} placeholder="City" />
+                </div>
+                <div>
+                  <label style={{ ...label, fontSize: 12 }}>State / Province</label>
+                  <input style={inp} value={contact.state} onChange={e => setContact({ ...contact, state: e.target.value })} placeholder="State" />
+                </div>
+                <div>
+                  <label style={{ ...label, fontSize: 12 }}>Postal Code</label>
+                  <input style={inp} value={contact.zip} onChange={e => setContact({ ...contact, zip: e.target.value })} placeholder="Zip" />
+                </div>
+                <div>
+                  <label style={{ ...label, fontSize: 12 }}>Country</label>
+                  <input style={inp} value={contact.country} onChange={e => setContact({ ...contact, country: e.target.value })} placeholder="US or Country" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Direct Checkout Banner (NO CREDIT/DEBIT CARD REQUIRED) */}
+          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ fontSize: 24 }}>💳🚫</div>
+            <div style={{ fontSize: 13, color: '#166534' }}>
+              <strong>Zero Card Checkout:</strong> No credit card, debit card, or customer online transaction required. This purchase registers the domain directly against your Namecheap reseller account balance and links it automatically to the chosen customer.
+            </div>
+          </div>
+
+          {/* Action button */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+            <button
+              id="btn-direct-register-now"
+              onClick={handleDirectPurchase}
+              disabled={purchasing}
+              className="btn btn-primary"
+              style={{
+                background: '#0891b2',
+                borderColor: '#0e7490',
+                fontSize: 15,
+                fontWeight: 700,
+                padding: '12px 24px',
+                minHeight: 46,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              {purchasing ? (
+                <>⏳ Registering Domain with Namecheap API…</>
+              ) : (
+                <>⚡ Direct Register & Purchase Domain (${totalCost} USD Wholesale)</>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Admin: domain purchases (search + retry registration). Own sidebar section.
+const AdminDomainOrders = ({ onSwitchToDirectOrder }) => {
+  const inp = { width: '100%', height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', fontSize: 14, boxSizing: 'border-box' };
+  const [activeTab, setActiveTab] = useState('orders'); // 'orders' or 'direct'
   const [domQ, setDomQ] = useState('');
   const [domOrders, setDomOrders] = useState([]);
   const [domRetryBusy, setDomRetryBusy] = useState('');
@@ -12488,38 +13091,90 @@ const AdminDomainOrders = () => {
   useEffect(() => { loadDomOrders(); }, []);
 
   return (
-    <div className="section">
-      <h2 style={{ marginTop: 0 }}>🌐 Domain Orders</h2>
-      <p style={{ color: '#5b6075' }}>Search domain purchases by order number (DM-...) or domain. Retry registration for orders that were paid but not registered.</p>
-      {domMsg && <div style={{ padding: '8px 12px', borderRadius: 8, marginBottom: 12, background: domMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: domMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{domMsg}</div>}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-        <input style={{ ...inp, maxWidth: 360 }} value={domQ} onChange={e => setDomQ(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') loadDomOrders(); }} placeholder="DM-... or domain.com" />
-        <button onClick={loadDomOrders} className="btn btn-secondary">Search</button>
+    <div>
+      {/* Tab bar header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>🌐 Domain Management</h2>
+          <p style={{ color: '#5b6075', margin: '4px 0 0 0', fontSize: 14 }}>
+            Directly register domains at real Namecheap API cost or track and retry existing domain orders.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            id="tab-domain-orders-list"
+            onClick={() => setActiveTab('orders')}
+            className="btn"
+            style={{
+              background: activeTab === 'orders' ? '#4f46e5' : '#fff',
+              color: activeTab === 'orders' ? '#fff' : '#374151',
+              border: '1px solid ' + (activeTab === 'orders' ? '#4f46e5' : '#d1d5db'),
+              padding: '8px 16px',
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            📋 All Domain Orders
+          </button>
+          <button
+            id="tab-domain-direct-purchase"
+            onClick={() => {
+              if (onSwitchToDirectOrder) {
+                onSwitchToDirectOrder();
+              } else {
+                setActiveTab('direct');
+              }
+            }}
+            className="btn"
+            style={{
+              background: activeTab === 'direct' ? '#0891b2' : '#fff',
+              color: activeTab === 'direct' ? '#fff' : '#0e7490',
+              border: '1px solid ' + (activeTab === 'direct' ? '#0891b2' : '#a5f3fc'),
+              padding: '8px 16px',
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            ⚡ Direct Domain Purchase (No Card)
+          </button>
+        </div>
       </div>
-      {domOrders.length === 0 ? <p style={{ color: '#9ca3af' }}>No domain orders found.</p> : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
-            <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}>
-              <th style={{ padding: '8px 0' }}>Order #</th><th>Domain</th><th>Years</th><th>Status</th><th></th>
-            </tr></thead>
-            <tbody>
-              {domOrders.map(o => (
-                <tr key={o.orderNumber} style={{ borderTop: '1px solid #f0f0f0' }}>
-                  <td style={{ padding: '8px 0', fontFamily: 'monospace', fontSize: 13 }}>{o.orderNumber}</td>
-                  <td style={{ fontWeight: 600 }}>{o.domainName}</td>
-                  <td>{o.period}</td>
-                  <td><span style={{ color: o.status === 'registered' ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{o.status}</span>{o.error && <div style={{ fontSize: 11, color: '#b42318' }}>{o.error}</div>}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    {o.status !== 'registered' && (
-                      <button onClick={() => retryDom(o.orderNumber)} disabled={domRetryBusy === o.orderNumber} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>
-                        {domRetryBusy === o.orderNumber ? '…' : 'Retry register'}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+      {activeTab === 'direct' ? (
+        <AdminDirectOrderDomain onGoToOrders={() => { setActiveTab('orders'); loadDomOrders(); }} />
+      ) : (
+        <div className="section" id="admin-domain-orders-list-section">
+          {domMsg && <div style={{ padding: '8px 12px', borderRadius: 8, marginBottom: 12, background: domMsg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: domMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{domMsg}</div>}
+          <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+            <input id="input-domain-orders-search" style={{ ...inp, maxWidth: 360 }} value={domQ} onChange={e => setDomQ(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') loadDomOrders(); }} placeholder="DM-... or domain.com" />
+            <button id="btn-domain-orders-search" onClick={loadDomOrders} className="btn btn-secondary">Search</button>
+          </div>
+          {domOrders.length === 0 ? <p style={{ color: '#9ca3af' }}>No domain orders found.</p> : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+                <thead><tr style={{ textAlign: 'left', color: '#6b7280' }}>
+                  <th style={{ padding: '8px 0' }}>Order #</th><th>Domain</th><th>Years</th><th>Status</th><th></th>
+                </tr></thead>
+                <tbody>
+                  {domOrders.map(o => (
+                    <tr key={o.orderNumber} style={{ borderTop: '1px solid #f0f0f0' }}>
+                      <td style={{ padding: '8px 0', fontFamily: 'monospace', fontSize: 13 }}>{o.orderNumber}</td>
+                      <td style={{ fontWeight: 600 }}>{o.domainName}</td>
+                      <td>{o.period}</td>
+                      <td><span style={{ color: o.status === 'registered' ? '#166534' : o.status === 'failed' ? '#b42318' : '#b45309', fontWeight: 600 }}>{o.status}</span>{o.error && <div style={{ fontSize: 11, color: '#b42318' }}>{o.error}</div>}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        {o.status !== 'registered' && (
+                          <button onClick={() => retryDom(o.orderNumber)} disabled={domRetryBusy === o.orderNumber} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>
+                            {domRetryBusy === o.orderNumber ? '…' : 'Retry register'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
