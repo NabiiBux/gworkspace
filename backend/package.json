@@ -8,20 +8,21 @@
     "dev": "nodemon backend-server.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "mongoose": "^8.4.0",
-    "jsonwebtoken": "^9.0.2",
+    "axios": "^1.7.2",
     "bcryptjs": "^2.4.3",
+    "compression": "^1.8.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "googleapis": "^137.1.0",
-    "nodemailer": "^6.9.13",
-    "stripe": "^15.8.0",
-    "axios": "^1.7.2",
-    "strong-soap": "^4.1.4",
+    "express": "^4.19.2",
     "fast-xml-parser": "^4.4.1",
+    "googleapis": "^137.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.4.0",
+    "nodemailer": "^6.9.13",
     "otplib": "^12.0.1",
-    "qrcode": "^1.5.3"
+    "qrcode": "^1.5.3",
+    "stripe": "^15.8.0",
+    "strong-soap": "^4.1.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"

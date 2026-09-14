@@ -16,12 +16,19 @@ const { google } = require('googleapis');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const compression = require('compression');
 
 // Load .env from THIS file's directory, not the process working directory — so the config is
 // found no matter where the app is launched from (PM2, systemd, a different cwd, etc.).
 dotenv.config({ path: require('path').join(__dirname, '.env') });
 
 const app = express();
+
+// High-performance Gzip / Deflate response compression for all responses
+// Compresses JS bundles, CSS, HTML, and JSON by 70-80% for rapid initial page load
+app.use(compression({
+  threshold: 1024,
+}));
 
 // Middleware
 app.use(cors());
@@ -1611,6 +1618,7 @@ app.post('/api/auth/signup-quick', async (req, res) => {
 
 // Endpoint to expose Google Client ID to frontend dynamically
 app.get('/api/auth/google-client-id', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=3600');
   const clientId = process.env.GOOGLE_SIGNIN_CLIENT_ID || process.env.GOOGLE_OAUTH_CLIENT_ID || '';
   res.json({ clientId });
 });
@@ -10294,17 +10302,30 @@ app.post('/api/customer/domains/search', authenticateCustomer, async (req, res) 
 });
 
 // ---- BRANDING ----
+// In-memory cache to eliminate repeated MongoDB queries on every page load
+let _cachedBranding = null;
+let _cachedBrandingTime = 0;
+const BRANDING_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 // Public: get branding (logo, favicon, name, color) for the portal to render.
 app.get('/api/branding', async (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+  const now = Date.now();
+  if (_cachedBranding && (now - _cachedBrandingTime < BRANDING_CACHE_TTL_MS)) {
+    return res.json(_cachedBranding);
+  }
   try {
     const b = await BrandSettings.findOne({ singleton: 'main' });
-    res.json({
+    _cachedBranding = {
       brandName: b?.brandName || process.env.BRAND_NAME || 'GNB MENTOR LLC',
       brandColor: b?.brandColor || '#6e46eb',
       logoDataUrl: b?.logoDataUrl || '',
       faviconDataUrl: b?.faviconDataUrl || '',
-    });
+    };
+    _cachedBrandingTime = now;
+    res.json(_cachedBranding);
   } catch (e) {
+    if (_cachedBranding) return res.json(_cachedBranding);
     res.json({ brandName: 'GNB MENTOR LLC', brandColor: '#6e46eb', logoDataUrl: '', faviconDataUrl: '' });
   }
 });
@@ -10323,7 +10344,9 @@ app.post('/api/admin/branding', authenticateCustomer, requireAdmin, async (req, 
     if (logoDataUrl !== undefined) update.logoDataUrl = logoDataUrl;
     if (faviconDataUrl !== undefined) update.faviconDataUrl = faviconDataUrl;
     const b = await BrandSettings.findOneAndUpdate({ singleton: 'main' }, update, { upsert: true, new: true });
-    res.json({ success: true, branding: { brandName: b.brandName, brandColor: b.brandColor, logoDataUrl: b.logoDataUrl, faviconDataUrl: b.faviconDataUrl } });
+    _cachedBranding = { brandName: b.brandName, brandColor: b.brandColor, logoDataUrl: b.logoDataUrl, faviconDataUrl: b.faviconDataUrl };
+    _cachedBrandingTime = Date.now();
+    res.json({ success: true, branding: _cachedBranding });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -10487,18 +10510,33 @@ const DEFAULT_PRODUCTS = {
   addons: []
 };
 
+// In-memory cache for public products/plans catalog
+let _cachedProducts = null;
+let _cachedProductsTime = 0;
+const PRODUCTS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 app.get('/api/products', async (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+  const now = Date.now();
+  if (_cachedProducts && (now - _cachedProductsTime < PRODUCTS_CACHE_TTL_MS)) {
+    return res.json(_cachedProducts);
+  }
   try {
     const plans = await Plan.find({ active: true }).sort({ category: 1, sortOrder: 1 });
     if (!plans || plans.length === 0) {
+      _cachedProducts = DEFAULT_PRODUCTS;
+      _cachedProductsTime = now;
       return res.json(DEFAULT_PRODUCTS);
     }
     const shape = (cat) =>
       plans
         .filter((p) => p.category === cat)
         .map((p) => ({ id: p.planId, name: p.name, monthlyPrice: p.monthlyPrice, features: p.features }));
-    res.json({ workspace: shape('workspace'), voice: shape('voice'), addons: shape('addon') });
+    _cachedProducts = { workspace: shape('workspace'), voice: shape('voice'), addons: shape('addon') };
+    _cachedProductsTime = now;
+    res.json(_cachedProducts);
   } catch (error) {
+    if (_cachedProducts) return res.json(_cachedProducts);
     res.json(DEFAULT_PRODUCTS);
   }
 });
@@ -10516,6 +10554,7 @@ app.get('/api/admin/plans', async (req, res) => {
 app.post('/api/admin/plans', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     const plan = await Plan.create(req.body);
+    _cachedProducts = null;
     res.json(plan);
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -10526,6 +10565,7 @@ app.put('/api/admin/plans/:id', authenticateCustomer, requireAdmin, async (req, 
   try {
     const plan = await Plan.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!plan) return res.status(404).json({ error: 'Plan not found' });
+    _cachedProducts = null;
     res.json(plan);
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -10535,6 +10575,7 @@ app.put('/api/admin/plans/:id', authenticateCustomer, requireAdmin, async (req, 
 app.delete('/api/admin/plans/:id', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
     await Plan.findByIdAndDelete(req.params.id);
+    _cachedProducts = null;
     res.json({ deleted: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -13041,6 +13082,7 @@ app.get('/api/admin/google/dashboard', authenticateCustomer, async (req, res) =>
 // Maps JS keys are meant to be public (restrict by HTTP referrer / API in
 // Google Cloud Console); this just avoids baking it into the React build.
 app.get('/api/config/maps-key', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=3600');
   res.json({ key: process.env.GOOGLE_MAPS_API_KEY || process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '' });
 });
 
@@ -13051,7 +13093,29 @@ app.get('/api/health', (req, res) => {
 const path = require('path');
 // Serve static assets from frontend/build
 const frontendBuildPath = path.join(__dirname, '../frontend/build');
-app.use(express.static(frontendBuildPath));
+
+// Serve hashed static bundle assets (JS, CSS, images, fonts) with immutable 1-year cache
+app.use('/static', express.static(path.join(frontendBuildPath, 'static'), {
+  maxAge: '1y',
+  immutable: true,
+  etag: true,
+  lastModified: true,
+}));
+
+// Serve other root static files (favicon, manifest, robots.txt, icons) with 1-day cache
+app.use(express.static(frontendBuildPath, {
+  maxAge: '1d',
+  etag: true,
+  lastModified: true,
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) {
+      // Never cache HTML so users always get the latest bundle hash immediately on deploy
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }
+}));
 
 // Private areas that must never be indexed. Sent as an HTTP header so crawlers
 // honour it without executing JavaScript (the in-app meta tag covers client-side
@@ -13067,6 +13131,10 @@ app.get('*', (req, res, next) => {
   if (NOINDEX_PATHS.some((prefix) => p === prefix || p.startsWith(prefix + '/'))) {
     res.set('X-Robots-Tag', 'noindex, nofollow');
   }
+  // Ensure index.html is never cached so new builds are immediately picked up
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.sendFile(path.join(frontendBuildPath, 'index.html'));
 });
 

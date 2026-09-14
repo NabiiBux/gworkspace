@@ -482,11 +482,20 @@ const BrandingContext = createContext({ brandName: 'GNB MENTOR LLC', brandColor:
 const useBranding = () => useContext(BrandingContext);
 
 const BrandingProvider = ({ children }) => {
-  const [branding, setBranding] = useState({ brandName: 'GNB MENTOR LLC', brandColor: '#6e46eb', logoDataUrl: '', faviconDataUrl: '' });
+  const [branding, setBranding] = useState(() => {
+    try {
+      const cached = localStorage.getItem('cached_branding');
+      if (cached) return JSON.parse(cached);
+    } catch (_) {}
+    return { brandName: 'GNB MENTOR LLC', brandColor: '#6e46eb', logoDataUrl: '', faviconDataUrl: '' };
+  });
   const refresh = async () => {
     try {
       const r = await axios.get(`${API_URL}/branding`);
-      if (r.data) setBranding(r.data);
+      if (r.data) {
+        setBranding(r.data);
+        try { localStorage.setItem('cached_branding', JSON.stringify(r.data)); } catch (_) {}
+      }
     } catch (_) { }
   };
   useEffect(() => { refresh(); }, []);
@@ -10337,7 +10346,13 @@ const SuccessStoriesSection = ({ brand, T, INKL, MUTEL }) => {
 const LandingPage = ({ onOpenPortal }) => {
   const brand = useBranding();
   const { token, user } = useAuth();
-  const [plans, setPlans] = useState([]);
+  const [plans, setPlans] = useState(() => {
+    try {
+      const cached = localStorage.getItem('cached_workspace_plans');
+      if (cached) return JSON.parse(cached);
+    } catch (_) {}
+    return [];
+  });
   const [dq, setDq] = useState('');
   const [dResult, setDResult] = useState(null);
   const [dLoading, setDLoading] = useState(false);
@@ -10462,7 +10477,12 @@ const LandingPage = ({ onOpenPortal }) => {
 
   useEffect(() => {
     (async () => {
-      try { const res = await axios.get(`${API_URL}/products`); setPlans(res.data.workspace || []); } catch (_) { }
+      try {
+        const res = await axios.get(`${API_URL}/products`);
+        const wp = res.data.workspace || [];
+        setPlans(wp);
+        try { localStorage.setItem('cached_workspace_plans', JSON.stringify(wp)); } catch (_) {}
+      } catch (_) { }
     })();
   }, []);
 
