@@ -10208,7 +10208,7 @@ app.get('/api/customer/ghl-phone/status', authenticateCustomer, async (req, res)
 // Customer: checkout GHL Business Phone (supports Stripe, Nicky, saved card, balance)
 app.post('/api/customer/ghl-phone/checkout', authenticateCustomer, async (req, res) => {
   try {
-    const { planId = 'ghl-phone-monthly', subdomain, method = 'stripe' } = req.body;
+    const { planId = 'ghl-phone-monthly', subdomain, method = 'stripe', businessEmail, domain: reqDomain } = req.body;
     const me = await Customer.findById(req.customerId);
     if (!me) return res.status(404).json({ error: 'Customer not found' });
 
@@ -10223,7 +10223,9 @@ app.post('/api/customer/ghl-phone/checkout', authenticateCustomer, async (req, r
       status: { $in: ['active', 'paid', 'completed', 'test_paid'] }
     }).sort({ createdAt: -1 }) || await WorkspaceOrder.findOne({ customerId: req.customerId }).sort({ createdAt: -1 });
 
-    const primaryDomain = (latestWo?.organization?.domain || me.domain || '').toLowerCase().trim();
+    const providedEmail = (businessEmail || '').trim();
+    const providedDomain = (reqDomain || (providedEmail && providedEmail.includes('@') ? providedEmail.split('@')[1] : '') || '').trim().toLowerCase();
+    const primaryDomain = (providedDomain || latestWo?.organization?.domain || me.domain || '').toLowerCase().trim();
     const cleanSubdomain = (subdomain || (primaryDomain ? `phone.${primaryDomain}` : '')).toLowerCase().trim();
 
     const ghlSettings = await GhlSettings.findOne({ singleton: 'main' });
@@ -10236,7 +10238,7 @@ app.post('/api/customer/ghl-phone/checkout', authenticateCustomer, async (req, r
       desiredAdminUsername: latestWo?.organization?.desiredAdminUsername || 'admin',
       firstName: latestWo?.contact?.firstName || me.firstName || 'Valued',
       lastName: latestWo?.contact?.lastName || me.lastName || 'Customer',
-      email: latestWo?.contact?.email || me.businessEmail || '',
+      email: providedEmail || latestWo?.contact?.email || me.businessEmail || '',
       alternateEmail: latestWo?.contact?.alternateEmail || '',
       phone: latestWo?.contact?.phone || me.phone || '',
       streetAddress: latestWo?.organization?.streetAddress || me.address || '',
@@ -10250,7 +10252,7 @@ app.post('/api/customer/ghl-phone/checkout', authenticateCustomer, async (req, r
     const orderNumber = `GHL-P-${Date.now()}`;
     const phoneOrder = await GhlBusinessPhoneOrder.create({
       customerId: me._id,
-      customerEmail: me.businessEmail,
+      customerEmail: providedEmail || me.businessEmail,
       orderNumber,
       domain: primaryDomain,
       subdomain: cleanSubdomain,

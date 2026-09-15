@@ -9319,28 +9319,46 @@ const CustomerVoice = () => {
 const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [customerDomains, setCustomerDomains] = useState([]);
+  const [selectedDomain, setSelectedDomain] = useState('');
+  const [customDomainInput, setCustomDomainInput] = useState('');
+  const [businessEmail, setBusinessEmail] = useState('');
   const [selectedPlanId, setSelectedPlanId] = useState('ghl_phone_monthly');
-  const [subdomain, setSubdomain] = useState('');
-  const [aRecordConfirmed, setARecordConfirmed] = useState(false);
-  const [copiedIp, setCopiedIp] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
   const loadStatus = async () => {
     try {
       setLoading(true);
-      const [statusRes, plansRes] = await Promise.all([
+      const [statusRes, plansRes, domainsRes] = await Promise.all([
         axios.get(`${API_URL}/customer/ghl-phone/status`).catch(() => ({ data: null })),
         axios.get(`${API_URL}/ghl-phone/plans`).catch(() => ({ data: { plans: [] } })),
+        axios.get(`${API_URL}/customer/my-domains`).catch(() => ({ data: { domains: [] } })),
       ]);
+
       if (statusRes?.data) {
         setData(statusRes.data);
-        if (statusRes.data.order?.subdomain) {
-          setSubdomain(statusRes.data.order.subdomain);
-        } else if (statusRes.data.domain) {
-          setSubdomain(`phone.${statusRes.data.domain}`);
-        }
       }
+
+      // Collect all customer domains from my-domains and workspace status
+      const list = (domainsRes?.data?.domains || [])
+        .map(d => (d.domainName || d.domain || '').toLowerCase().trim())
+        .filter(Boolean);
+
+      if (statusRes?.data?.workspaceDomain && !list.includes(statusRes.data.workspaceDomain.toLowerCase())) {
+        list.unshift(statusRes.data.workspaceDomain.toLowerCase());
+      }
+      if (statusRes?.data?.domain && !list.includes(statusRes.data.domain.toLowerCase())) {
+        list.unshift(statusRes.data.domain.toLowerCase());
+      }
+
+      setCustomerDomains(list);
+      if (list.length > 0) {
+        setSelectedDomain(list[0]);
+      } else if (statusRes?.data?.workspaceDomain) {
+        setSelectedDomain(statusRes.data.workspaceDomain);
+      }
+
       if (plansRes?.data?.plans?.length) {
         setSelectedPlanId(plansRes.data.plans[0].id);
       }
@@ -9355,22 +9373,18 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
     loadStatus();
   }, []);
 
-  const copyIp = (ip) => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(ip);
-      setCopiedIp(true);
-      setTimeout(() => setCopiedIp(false), 2000);
-    }
-  };
+  const hasWorkspace = !!(data?.hasActiveWorkspace || data?.hasWorkspace);
+  const isEmailValid = !!(businessEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(businessEmail.trim()));
+  const isRequirementMet = hasWorkspace || isEmailValid;
+  const effectiveDomain = (selectedDomain || customDomainInput || (isEmailValid ? businessEmail.trim().split('@')[1] : '')).toLowerCase().trim();
 
   const handleCheckout = async (method) => {
-    const cleanSub = (subdomain || '').trim().toLowerCase();
-    if (!cleanSub) {
-      setMsg('Please enter a subdomain (e.g. phone.yourdomain.com).');
+    if (!effectiveDomain && !isEmailValid) {
+      setMsg('Please connect a domain or enter your business email.');
       return;
     }
-    if (!aRecordConfirmed) {
-      setMsg('Please confirm you have added the A Record to your DNS settings.');
+    if (!isRequirementMet) {
+      setMsg('Please set up Google Workspace OR enter your business email to proceed.');
       return;
     }
     setBusy(true);
@@ -9378,7 +9392,9 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
     try {
       const res = await axios.post(`${API_URL}/customer/ghl-phone/checkout`, {
         planId: selectedPlanId,
-        subdomain: cleanSub,
+        domain: effectiveDomain,
+        businessEmail: isEmailValid ? businessEmail.trim() : (data?.customerEmail || ''),
+        subdomain: effectiveDomain ? `phone.${effectiveDomain}` : '',
         method,
       });
       if (res.data?.checkoutUrl) {
@@ -9397,7 +9413,6 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
   };
 
   const cardStyle = { background: '#fff', borderRadius: 14, padding: 22, border: '1px solid #e2e8f0', marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' };
-  const serverIp = data?.serverIp || '147.93.109.19';
   const order = data?.order;
   const isExpired = order && (order.status === 'expired' || (order.expiresAt && new Date(order.expiresAt).getTime() <= Date.now()));
   const isActive = order && !isExpired && ['paid', 'active', 'test_paid'].includes(order.status);
@@ -9414,7 +9429,7 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
             📞 GHL Business Phone
           </h2>
           <p style={{ color: '#64748b', margin: '4px 0 0', fontSize: 13.5 }}>
-            Dedicated Business Phone Number for your company, fully connected to your Google Workspace.
+            Dedicated Business Phone Number for your company, fully connected to your business suite.
           </p>
         </div>
         {isActive && (
@@ -9471,9 +9486,9 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
             </div>
 
             <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0' }}>
-              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Subdomain</div>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Domain</div>
               <div style={{ fontSize: 14, fontWeight: 700, color: '#4338ca', marginTop: 4, wordBreak: 'break-all' }}>
-                {order.subdomain || '—'}
+                {order.domain || order.subdomain || '—'}
               </div>
             </div>
 
@@ -9518,111 +9533,213 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
       {/* Purchase / Repurchase Flow */}
       {(!isActive || isExpired) && (
         <div>
-          {/* Step 1: Subdomain & A Record */}
+          {/* Step 1: Domain Check & Selection */}
           <div style={cardStyle}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
               <div style={{ width: 28, height: 28, borderRadius: 999, background: '#6e46eb', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>1</div>
-              <h3 style={{ margin: 0, fontSize: 16 }}>Setup Subdomain by Adding A Record</h3>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Your Domain</h3>
             </div>
-            <p style={{ color: '#64748b', fontSize: 13.5, marginTop: 0 }}>
-              Add an <strong>A Record</strong> in your domain DNS manager (e.g. Cloudflare, Namecheap, GoDaddy) pointing your subdomain to our voice routing gateway:
+            <p style={{ color: '#64748b', fontSize: 13.5, margin: '0 0 14px' }}>
+              We fetch and link your business phone line to your company domain.
             </p>
 
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 16, marginBottom: 16 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12, marginBottom: 14 }}>
-                <div>
-                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>RECORD TYPE</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginTop: 2 }}>A</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>HOST / NAME</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginTop: 2 }}>phone <span style={{ fontSize: 11, color: '#94a3b8' }}>(or prefix)</span></div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>POINTS TO (SERVER IP)</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                    <code style={{ fontSize: 14, fontWeight: 700, color: '#6e46eb', background: '#f1f5f9', padding: '2px 6px', borderRadius: 4 }}>{serverIp}</code>
-                    <button
-                      type="button"
-                      onClick={() => copyIp(serverIp)}
-                      style={{ background: '#e2e8f0', border: 'none', borderRadius: 4, padding: '2px 6px', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
+            {customerDomains.length > 0 ? (
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                <div style={{ flex: 1, minWidth: 240 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#475569', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
+                    Connected Domain
+                  </label>
+                  {customerDomains.length === 1 ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 16, fontWeight: 700, color: '#0f172a' }}>{customerDomains[0]}</span>
+                      <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 99, fontSize: 12, fontWeight: 600 }}>✓ Active</span>
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedDomain}
+                      onChange={(e) => setSelectedDomain(e.target.value)}
+                      style={{ width: '100%', height: 38, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 10px', fontSize: 14, fontWeight: 600 }}
                     >
-                      {copiedIp ? '✓' : 'Copy'}
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>TTL</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginTop: 2 }}>Auto / 3600</div>
-                </div>
-              </div>
-
-              <div>
-                <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6, color: '#1e293b' }}>
-                  Your Phone Subdomain *
-                </label>
-                <input
-                  value={subdomain}
-                  onChange={(e) => setSubdomain(e.target.value)}
-                  placeholder="phone.yourcompany.com"
-                  style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 13.5 }}
-                />
-              </div>
-            </div>
-
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13.5, fontWeight: 500, color: '#0f172a' }}>
-              <input
-                type="checkbox"
-                checked={aRecordConfirmed}
-                onChange={(e) => setARecordConfirmed(e.target.checked)}
-                style={{ width: 17, height: 17, accentColor: '#6e46eb', cursor: 'pointer' }}
-              />
-              <span>I have added the A Record for my subdomain in DNS settings.</span>
-            </label>
-          </div>
-
-          {/* Step 2: Google Workspace Verification */}
-          <div style={cardStyle}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <div style={{ width: 28, height: 28, borderRadius: 999, background: '#6e46eb', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>2</div>
-              <h3 style={{ margin: 0, fontSize: 16 }}>Google Workspace Link</h3>
-            </div>
-            {data?.hasWorkspace ? (
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '12px 16px', color: '#166534', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontWeight: 700 }}>✓</span>
-                <span style={{ fontSize: 13.5, fontWeight: 600 }}>
-                  Active Google Workspace detected on domain: <strong>{data.domain}</strong>
-                </span>
-              </div>
-            ) : (
-              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '14px 16px', color: '#92600a' }}>
-                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-                  ⚠️ Google Workspace Required
-                </div>
-                <div style={{ fontSize: 13, marginBottom: 10 }}>
-                  Please purchase and configure your Google Workspace domain before activating your Business Phone.
+                      {customerDomains.map(d => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
                 <button
                   type="button"
-                  onClick={() => onSetupWorkspace ? onSetupWorkspace(data?.domain || '') : (onNavigate && onNavigate('order'))}
-                  className="btn btn-primary"
-                  style={{ background: '#d97706', border: 'none', padding: '7px 16px', fontSize: 13 }}
+                  onClick={() => onNavigate && onNavigate('domains')}
+                  className="btn btn-secondary"
+                  style={{ fontSize: 12.5, padding: '7px 14px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
                 >
-                  Buy Google Workspace First →
+                  🌐 Buy / Manage Domains
                 </button>
+              </div>
+            ) : (
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#92600a', fontSize: 14 }}>No registered domain found in your account yet</div>
+                    <div style={{ color: '#a16207', fontSize: 13, marginTop: 2 }}>You can purchase a new domain or enter your existing domain below.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate && onNavigate('domains')}
+                    className="btn btn-primary"
+                    style={{ background: '#d97706', border: 'none', padding: '8px 16px', fontSize: 13, fontWeight: 700 }}
+                  >
+                    🌐 Buy Domain →
+                  </button>
+                </div>
+                <div>
+                  <label style={{ fontSize: 12.5, fontWeight: 600, color: '#78350f', display: 'block', marginBottom: 4 }}>
+                    Or enter your existing registered domain:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="yourcompany.com"
+                    value={customDomainInput}
+                    onChange={(e) => setCustomDomainInput(e.target.value)}
+                    style={{ width: '100%', maxWidth: 360, height: 38, borderRadius: 8, border: '1px solid #fcd34d', padding: '0 12px', fontSize: 13.5 }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Step 2: Google Workspace OR Enter Business Email */}
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 999, background: '#6e46eb', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>2</div>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Account Verification</h3>
+            </div>
+            <p style={{ color: '#64748b', fontSize: 13.5, margin: '0 0 16px' }}>
+              To proceed to plan selection, either have <strong>Google Workspace</strong> active OR enter your <strong>Business Email</strong>. Either option unlocks the next step!
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+              {/* Option A: Google Workspace */}
+              <div style={{
+                border: hasWorkspace ? '2px solid #10b981' : '1px solid #e2e8f0',
+                borderRadius: 12,
+                padding: 16,
+                background: hasWorkspace ? '#f0fdf4' : '#fafafa',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
+              }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 14, color: '#0f172a' }}>
+                      <GoogleWorkspaceIcon size={18} />
+                      <span>Option A: Google Workspace</span>
+                    </div>
+                    {hasWorkspace && (
+                      <span style={{ background: '#10b981', color: '#fff', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99 }}>
+                        VERIFIED ✓
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ fontSize: 13, color: hasWorkspace ? '#166534' : '#64748b', margin: '0 0 12px', lineHeight: 1.4 }}>
+                    {hasWorkspace
+                      ? `Active Google Workspace detected on your domain (${effectiveDomain || 'connected'}).`
+                      : 'Setup Google Workspace for your domain with business Gmail, Docs, Drive, and Admin controls.'}
+                  </p>
+                </div>
+                {!hasWorkspace && (
+                  <button
+                    type="button"
+                    onClick={() => onSetupWorkspace ? onSetupWorkspace(effectiveDomain) : (onNavigate && onNavigate('order'))}
+                    className="btn btn-primary"
+                    style={{ background: '#4f46e5', border: 'none', padding: '8px 16px', fontSize: 13, fontWeight: 700, width: '100%' }}
+                  >
+                    Setup Google Workspace →
+                  </button>
+                )}
+              </div>
+
+              {/* Option B: Enter Business Email (Side Option) */}
+              <div style={{
+                border: isEmailValid ? '2px solid #10b981' : '1px solid #e2e8f0',
+                borderRadius: 12,
+                padding: 16,
+                background: isEmailValid ? '#f0fdf4' : '#fafafa',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
+              }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 14, color: '#0f172a' }}>
+                      <span style={{ fontSize: 18 }}>✉️</span>
+                      <span>Option B: Enter Business Email</span>
+                    </div>
+                    {isEmailValid && (
+                      <span style={{ background: '#10b981', color: '#fff', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99 }}>
+                        VERIFIED ✓
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ fontSize: 13, color: isEmailValid ? '#166534' : '#64748b', margin: '0 0 10px', lineHeight: 1.4 }}>
+                    Already have a professional business email address? Enter it here to verify instantly.
+                  </p>
+                  <input
+                    type="email"
+                    value={businessEmail}
+                    onChange={(e) => setBusinessEmail(e.target.value)}
+                    placeholder="name@yourcompany.com"
+                    style={{
+                      width: '100%',
+                      height: 38,
+                      borderRadius: 8,
+                      border: isEmailValid ? '1px solid #86efac' : '1px solid #cbd5e1',
+                      padding: '0 12px',
+                      fontSize: 13.5,
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+                {isEmailValid ? (
+                  <div style={{ fontSize: 12, color: '#166534', fontWeight: 600, marginTop: 8 }}>
+                    ✓ Business email ready: {businessEmail.trim()}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 8 }}>
+                    Type your full business email (e.g. alex@yourdomain.com)
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Requirement Met / Unmet Indicator */}
+            {isRequirementMet ? (
+              <div style={{ marginTop: 14, background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 10, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8, color: '#065f46', fontWeight: 600, fontSize: 13.5 }}>
+                <span>✓</span>
+                <span>Verification requirement fulfilled ({hasWorkspace ? 'Google Workspace active' : 'Business email entered'})! You can now choose your plan below.</span>
+              </div>
+            ) : (
+              <div style={{ marginTop: 14, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8, color: '#92600a', fontSize: 13 }}>
+                <span>ℹ️</span>
+                <span>Complete either Option A (Google Workspace) OR Option B (Business Email) to unlock the plan selection and checkout below.</span>
               </div>
             )}
           </div>
 
           {/* Step 3: Choose Price Plan */}
-          <div style={cardStyle}>
+          <div style={{ ...cardStyle, opacity: isRequirementMet ? 1 : 0.6, transition: 'opacity 0.2s ease' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <div style={{ width: 28, height: 28, borderRadius: 999, background: '#6e46eb', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>3</div>
+              <div style={{ width: 28, height: 28, borderRadius: 999, background: isRequirementMet ? '#6e46eb' : '#94a3b8', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>3</div>
               <h3 style={{ margin: 0, fontSize: 16 }}>Choose Your Price Plan</h3>
             </div>
             <p style={{ color: '#64748b', fontSize: 13.5, marginTop: 0 }}>
               Select between $50 monthly or $100 one-time. Both plans can be active for up to 2 months.
             </p>
+
+            {!isRequirementMet && (
+              <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: 10, padding: 12, marginBottom: 14, color: '#64748b', fontSize: 13, textAlign: 'center' }}>
+                🔒 Complete Step 2 above to select a plan and continue to payment.
+              </div>
+            )}
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 20 }}>
               {[
@@ -9647,20 +9764,20 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
                 return (
                   <div
                     key={p.id}
-                    onClick={() => setSelectedPlanId(p.id)}
+                    onClick={() => isRequirementMet && setSelectedPlanId(p.id)}
                     style={{
-                      border: sel ? '2px solid #6e46eb' : '1px solid #e2e8f0',
+                      border: sel && isRequirementMet ? '2px solid #6e46eb' : '1px solid #e2e8f0',
                       borderRadius: 12,
                       padding: 18,
-                      background: sel ? '#f5f3ff' : '#fff',
-                      cursor: 'pointer',
+                      background: sel && isRequirementMet ? '#f5f3ff' : '#fff',
+                      cursor: isRequirementMet ? 'pointer' : 'not-allowed',
                       transition: 'all 0.15s ease',
                       position: 'relative'
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                       <span style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>{p.name}</span>
-                      <span style={{ background: sel ? '#6e46eb' : '#f1f5f9', color: sel ? '#fff' : '#64748b', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99 }}>
+                      <span style={{ background: sel && isRequirementMet ? '#6e46eb' : '#f1f5f9', color: sel && isRequirementMet ? '#fff' : '#64748b', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99 }}>
                         {p.badge}
                       </span>
                     </div>
@@ -9668,8 +9785,8 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
                       {p.price} <span style={{ fontSize: 12, fontWeight: 500, color: '#64748b' }}>{p.cadence}</span>
                     </div>
                     <p style={{ margin: 0, fontSize: 12.5, color: '#64748b', lineHeight: 1.4 }}>{p.desc}</p>
-                    <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: sel ? '#6e46eb' : '#94a3b8' }}>
-                      {sel ? '✓ Selected Plan' : 'Click to select'}
+                    <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: sel && isRequirementMet ? '#6e46eb' : '#94a3b8' }}>
+                      {sel && isRequirementMet ? '✓ Selected Plan' : (isRequirementMet ? 'Click to select' : 'Locked')}
                     </div>
                   </div>
                 );
@@ -9685,18 +9802,34 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
                 <button
                   type="button"
                   onClick={() => handleCheckout('stripe')}
-                  disabled={busy}
+                  disabled={busy || !isRequirementMet}
                   className="btn btn-primary"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 20px', fontSize: 13 }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '9px 20px',
+                    fontSize: 13,
+                    opacity: isRequirementMet ? 1 : 0.5,
+                    cursor: isRequirementMet ? 'pointer' : 'not-allowed'
+                  }}
                 >
                   {busy ? 'Processing…' : <><CardIcon size={15} /><span>Pay with Card (Stripe)</span></>}
                 </button>
                 <button
                   type="button"
                   onClick={() => handleCheckout('nicky')}
-                  disabled={busy}
+                  disabled={busy || !isRequirementMet}
                   className="btn btn-secondary"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 20px', fontSize: 13 }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '9px 20px',
+                    fontSize: 13,
+                    opacity: isRequirementMet ? 1 : 0.5,
+                    cursor: isRequirementMet ? 'pointer' : 'not-allowed'
+                  }}
                 >
                   {busy ? 'Processing…' : <><CryptoIcon size={15} /><span>Pay with Crypto (Nicky)</span></>}
                 </button>
