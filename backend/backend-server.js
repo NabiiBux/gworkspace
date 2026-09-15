@@ -4037,7 +4037,7 @@ app.patch('/api/admin/tickets/:id/status', authenticateCustomer, requireAdmin, a
 });
 
 // ==================== PAYMENTS ====================
-const FRONTEND_URL = process.env.PORTAL_URL || process.env.CORS_ORIGIN || 'https://portal.gnbmentor.com';
+const FRONTEND_URL = (process.env.PORTAL_URL || process.env.CORS_ORIGIN || 'https://portal.gnbmentor.com').replace(/\/+$/, '');
 
 // Customer: create a checkout for an order (method = 'stripe' | 'nicky')
 app.post('/api/customer/checkout', authenticateCustomer, async (req, res) => {
@@ -10212,7 +10212,9 @@ app.post('/api/customer/ghl-phone/checkout', authenticateCustomer, async (req, r
     const me = await Customer.findById(req.customerId);
     if (!me) return res.status(404).json({ error: 'Customer not found' });
 
-    const isOneTime = planId === 'ghl-phone-onetime';
+    const normalizedPlan = String(planId || '').toLowerCase().trim();
+    const isOneTime = normalizedPlan.includes('onetime') || normalizedPlan.includes('one-time') || normalizedPlan === '100';
+    const effectivePlanId = isOneTime ? 'ghl-phone-onetime' : 'ghl-phone-monthly';
     const planPrice = isOneTime ? 100.00 : 50.00;
     const planName = isOneTime ? 'GHL Business Phone (One-Time - 2 Months)' : 'GHL Business Phone (Monthly - 2 Months)';
     const pricingType = isOneTime ? 'one-time' : 'monthly';
@@ -10293,8 +10295,9 @@ app.post('/api/customer/ghl-phone/checkout', authenticateCustomer, async (req, r
     await phoneOrder.save();
 
     const orderDesc = `${planName}: ${cleanSubdomain || primaryDomain || 'Business Phone'}`;
-    const successUrl = `${FRONTEND_URL}/?payment=success&pid=${payment._id}&type=business_phone`;
-    const cancelUrl = `${FRONTEND_URL}/?payment=cancelled&pid=${payment._id}&type=business_phone`;
+    const baseUrl = (FRONTEND_URL || 'https://portal.gnbmentor.com').replace(/\/+$/, '');
+    const successUrl = `${baseUrl}/?payment=success&pid=${payment._id}&type=business_phone`;
+    const cancelUrl = `${baseUrl}/?payment=cancelled&pid=${payment._id}&type=business_phone`;
 
     // 1. Account credit balance payment
     if (method === 'balance') {

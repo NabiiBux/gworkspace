@@ -518,6 +518,21 @@ const BrandingProvider = ({ children }) => {
   return <BrandingContext.Provider value={{ ...branding, refresh }}>{children}</BrandingContext.Provider>;
 };
 
+// Safely replace browser history URL without throwing SecurityError on malformed pathnames (e.g. "//")
+const safeReplaceHistory = (preserveQuery = false) => {
+  try {
+    if (typeof window === 'undefined' || !window.history || !window.history.replaceState) return;
+    let path = window.location.pathname || '/';
+    // Collapse any double or repeated slashes (e.g. "//" -> "/") to prevent protocol-relative URL interpretation
+    path = path.replace(/\/+/g, '/');
+    if (!path.startsWith('/')) path = '/' + path;
+    const target = preserveQuery ? (path + (window.location.search || '')) : path;
+    window.history.replaceState({}, '', target);
+  } catch (err) {
+    console.warn('safeReplaceHistory error ignored:', err);
+  }
+};
+
 const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -532,7 +547,7 @@ const AuthProvider = ({ children }) => {
     if (m) {
       const t = decodeURIComponent(m[1]);
       localStorage.setItem('token', t);
-      window.history.replaceState({}, '', window.location.pathname + window.location.search);
+      safeReplaceHistory(true);
       setToken(t);
     }
   }, []);
@@ -928,7 +943,7 @@ const CustomerAuthFlow = ({ isModal = false, onClose = null, domainInfo = null, 
     const m = (window.location.hash || '').match(/[#&]sso_error=([^&]+)/);
     if (m) {
       setError(decodeURIComponent(m[1]));
-      window.history.replaceState({}, '', window.location.pathname + window.location.search);
+      safeReplaceHistory(true);
     }
   }, []);
 
@@ -6321,8 +6336,15 @@ const CustomerPortal = ({ onViewStorefront }) => {
 
     if (payStatus === 'cancelled') {
       setPayBanner('Payment was cancelled. You can try again anytime.');
-      // Clean the URL
-      window.history.replaceState({}, '', window.location.pathname);
+      if (paramType === 'business_phone' || paramType === 'ghl_business_phone') {
+        setSection('business-phone');
+      } else if (paramType === 'workspace') {
+        setSection('order');
+      } else if (paramType === 'domain' || paramType === 'domain_transfer') {
+        setSection('domains');
+      }
+      // Safely clean the URL
+      safeReplaceHistory(false);
       return;
     }
     if (payStatus === 'success' && pid) {
@@ -6350,12 +6372,12 @@ const CustomerPortal = ({ onViewStorefront }) => {
             } else {
               setPayBanner('✓ Payment confirmed — your order is being set up. Thank you!');
             }
-            window.history.replaceState({}, '', window.location.pathname);
+            safeReplaceHistory(false);
             return;
           }
           if (r.data.cancelled) {
             setPayBanner('This payment was cancelled. You can order again anytime.');
-            window.history.replaceState({}, '', window.location.pathname);
+            safeReplaceHistory(false);
             return;
           }
           attempt++;
@@ -6369,7 +6391,7 @@ const CustomerPortal = ({ onViewStorefront }) => {
               setSection('business-phone');
             }
             setPayBanner('Your payment is still confirming. Your order will activate automatically once confirmed — check back shortly or contact support.');
-            window.history.replaceState({}, '', window.location.pathname);
+            safeReplaceHistory(false);
           }
         } catch (_) {
           attempt++;
@@ -6383,7 +6405,7 @@ const CustomerPortal = ({ onViewStorefront }) => {
               setSection('business-phone');
             }
             setPayBanner('We couldn\'t confirm the payment automatically. If you paid, your order will activate soon — contact support if needed.');
-            window.history.replaceState({}, '', window.location.pathname);
+            safeReplaceHistory(false);
           }
         }
       };
@@ -6392,15 +6414,15 @@ const CustomerPortal = ({ onViewStorefront }) => {
       const dom = paramDomain || purchasedDomain;
       setPurchasedDomain(dom);
       setSection('domain-workspace-setup');
-      window.history.replaceState({}, '', window.location.pathname);
+      safeReplaceHistory(false);
     } else if (payStatus === 'success' && paramType === 'workspace') {
       setPayBanner('🎉 Google Workspace purchased! Now choose your GHL Business Phone plan below.');
       setSection('business-phone');
-      window.history.replaceState({}, '', window.location.pathname);
+      safeReplaceHistory(false);
     } else if (payStatus === 'success' && (paramType === 'business_phone' || paramType === 'ghl_business_phone')) {
       setPayBanner('🎉 Order successful! Please contact admin for activation of phone number.');
       setSection('business-phone');
-      window.history.replaceState({}, '', window.location.pathname);
+      safeReplaceHistory(false);
     }
   }, []);
 
@@ -9323,9 +9345,34 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
   const [selectedDomain, setSelectedDomain] = useState('');
   const [customDomainInput, setCustomDomainInput] = useState('');
   const [businessEmail, setBusinessEmail] = useState('');
-  const [selectedPlanId, setSelectedPlanId] = useState('ghl_phone_monthly');
+  const [selectedPlanId, setSelectedPlanId] = useState('ghl-phone-monthly');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+
+  const GHL_PLANS = [
+    {
+      id: 'ghl-phone-monthly',
+      name: 'Monthly Plan',
+      price: '$50',
+      amount: 50,
+      cadence: '/ month',
+      desc: 'Can be purchased up to 2 months. Monthly billing with automatic 2-month expiration.',
+      badge: 'Popular',
+    },
+    {
+      id: 'ghl-phone-onetime',
+      name: 'One-Time Plan',
+      price: '$100',
+      amount: 100,
+      cadence: 'one time',
+      desc: 'Prepay for the full 2 months access upfront with no recurring bill.',
+      badge: 'Full 2 Months',
+    }
+  ];
+
+  const isOneTimeSelected = ['ghl-phone-onetime', 'ghl_phone_onetime', 'onetime', 'one-time', '100'].includes(String(selectedPlanId || '').toLowerCase().trim());
+  const activePlanId = isOneTimeSelected ? 'ghl-phone-onetime' : 'ghl-phone-monthly';
+  const activePlanPrice = isOneTimeSelected ? 100 : 50;
 
   const loadStatus = async () => {
     try {
@@ -9360,7 +9407,11 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
       }
 
       if (plansRes?.data?.plans?.length) {
-        setSelectedPlanId(plansRes.data.plans[0].id);
+        setSelectedPlanId(prev => {
+          const prevLower = String(prev || '').toLowerCase();
+          const wasOneTime = prevLower.includes('onetime') || prevLower.includes('one-time') || prevLower === '100';
+          return wasOneTime ? 'ghl-phone-onetime' : (plansRes.data.plans[0]?.id || 'ghl-phone-monthly');
+        });
       }
     } catch (e) {
       console.error(e);
@@ -9391,7 +9442,7 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
     setMsg('');
     try {
       const res = await axios.post(`${API_URL}/customer/ghl-phone/checkout`, {
-        planId: selectedPlanId,
+        planId: activePlanId,
         domain: effectiveDomain,
         businessEmail: isEmailValid ? businessEmail.trim() : (data?.customerEmail || ''),
         subdomain: effectiveDomain ? `phone.${effectiveDomain}` : '',
@@ -9742,25 +9793,8 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
             )}
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 20 }}>
-              {[
-                {
-                  id: 'ghl_phone_monthly',
-                  name: 'Monthly Plan',
-                  price: '$50',
-                  cadence: '/ month',
-                  desc: 'Can be purchased up to 2 months. Monthly billing with automatic 2-month expiration.',
-                  badge: 'Popular',
-                },
-                {
-                  id: 'ghl_phone_onetime',
-                  name: 'One-Time Plan',
-                  price: '$100',
-                  cadence: 'one time',
-                  desc: 'Prepay for the full 2 months access upfront with no recurring bill.',
-                  badge: 'Full 2 Months',
-                }
-              ].map(p => {
-                const sel = selectedPlanId === p.id;
+              {GHL_PLANS.map(p => {
+                const sel = p.id === 'ghl-phone-onetime' ? isOneTimeSelected : !isOneTimeSelected;
                 return (
                   <div
                     key={p.id}
@@ -9786,7 +9820,7 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
                     </div>
                     <p style={{ margin: 0, fontSize: 12.5, color: '#64748b', lineHeight: 1.4 }}>{p.desc}</p>
                     <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: sel && isRequirementMet ? '#6e46eb' : '#94a3b8' }}>
-                      {sel && isRequirementMet ? '✓ Selected Plan' : (isRequirementMet ? 'Click to select' : 'Locked')}
+                      {sel && isRequirementMet ? `✓ Selected ($${p.amount})` : (isRequirementMet ? `Click to choose $${p.amount}` : 'Locked')}
                     </div>
                   </div>
                 );
@@ -9796,7 +9830,7 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
             {/* Step 4: Checkout */}
             <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
               <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 10, color: '#0f172a' }}>
-                Complete Payment Checkout:
+                Complete Payment Checkout ({isOneTimeSelected ? '$100 One-Time' : '$50 Monthly'}):
               </div>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 <button
@@ -9814,7 +9848,7 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
                     cursor: isRequirementMet ? 'pointer' : 'not-allowed'
                   }}
                 >
-                  {busy ? 'Processing…' : <><CardIcon size={15} /><span>Pay with Card (Stripe)</span></>}
+                  {busy ? 'Processing…' : <><CardIcon size={15} /><span>Pay ${activePlanPrice} with Card (Stripe)</span></>}
                 </button>
                 <button
                   type="button"
@@ -9831,7 +9865,7 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
                     cursor: isRequirementMet ? 'pointer' : 'not-allowed'
                   }}
                 >
-                  {busy ? 'Processing…' : <><CryptoIcon size={15} /><span>Pay with Crypto (Nicky)</span></>}
+                  {busy ? 'Processing…' : <><CryptoIcon size={15} /><span>Pay ${activePlanPrice} with Crypto (Nicky)</span></>}
                 </button>
               </div>
               <p style={{ color: '#64748b', fontSize: 12, marginTop: 10, marginBottom: 0 }}>
@@ -10094,7 +10128,7 @@ const CustomerSettings = () => {
     if (v === 'success') { setVerifyMsg('✓ Your email has been confirmed.'); setEmailVerified(true); }
     else if (v === 'expired') setVerifyMsg('That confirmation link has expired. Please send a new one.');
     else setVerifyMsg('We could not confirm the email. Please try again.');
-    window.history.replaceState({}, '', window.location.pathname);
+    safeReplaceHistory(false);
   }, []);
 
   const set = (k) => (e) => setProfile({ ...profile, [k]: e.target.value });
