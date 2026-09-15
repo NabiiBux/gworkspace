@@ -1983,6 +1983,7 @@ const Dashboard = () => {
     { key: 'tickets', label: 'Tickets', icon: <NavIcons.Tickets size={18} />, bg: '#ffe4e6', border: '#fecdd3' },
     { key: 'payments', label: 'Payments', icon: <NavIcons.Payments size={18} />, bg: '#faf5ff', border: '#f3e8ff' },
     { key: 'voice', label: 'Voice', icon: <NavIcons.Voice size={18} />, bg: '#f0fdf4', border: '#dcfce7' },
+    { key: 'ghl-phone', label: 'GHL Business Phone', icon: <NavIcons.Voice size={18} />, bg: '#ecfdf5', border: '#a7f3d0' },
     { key: 'emails', label: 'Emails', icon: <NavIcons.AdminEmails size={18} />, bg: '#f0f9ff', border: '#e0f2fe' },
     { key: 'domains-ssl', label: 'Domains & SSL', icon: <NavIcons.SSL size={18} />, bg: '#f0fdf4', border: '#dcfce7' },
     { key: 'voice-monitor', label: 'Abuse Monitor', icon: <NavIcons.AdminMonitor size={18} />, bg: '#fef2f2', border: '#fecaca' },
@@ -2078,6 +2079,7 @@ const Dashboard = () => {
         {activeSection === 'tickets' && <AdminTicketsSection />}
         {activeSection === 'payments' && <AdminPaymentsSection />}
         {activeSection === 'voice' && <AdminVoiceSection />}
+        {activeSection === 'ghl-phone' && <AdminGhlBusinessPhone />}
         {activeSection === 'emails' && <AdminEmailsSection />}
         {activeSection === 'domains-ssl' && <AdminDomainsSslSection />}
         {activeSection === 'voice-monitor' && <AdminVoiceMonitorSection />}
@@ -4796,6 +4798,465 @@ const AdminVoiceSection = () => {
   );
 };
 
+// ==================== ADMIN: GHL BUSINESS PHONE ====================
+const AdminGhlBusinessPhone = () => {
+  const [tab, setTab] = useState('orders'); // 'orders' | 'workspace_crm' | 'settings'
+  const [orders, setOrders] = useState([]);
+  const [wsOrders, setWsOrders] = useState([]);
+  const [settings, setSettings] = useState({ apiKey: '', locationId: '', serverIp: '147.93.109.19', autoPushOnPayment: false });
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState('');
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [pushingId, setPushingId] = useState('');
+  const [activatingId, setActivatingId] = useState('');
+  const [activeNumberInput, setActiveNumberInput] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
+
+  const card = { background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 20, border: '1px solid #e2e8f0' };
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [ordRes, wsRes, setRes] = await Promise.all([
+        axios.get(`${API_URL}/admin/ghl-phone/orders`).catch(() => ({ data: { orders: [] } })),
+        axios.get(`${API_URL}/admin/workspace-orders`).catch(() => ({ data: { orders: [] } })),
+        axios.get(`${API_URL}/admin/ghl-phone/settings`).catch(() => ({ data: { settings: {} } })),
+      ]);
+      setOrders(ordRes.data?.orders || []);
+      const rawWs = wsRes.data;
+      setWsOrders(Array.isArray(rawWs) ? rawWs : (rawWs?.orders || []));
+      if (setRes.data?.settings) setSettings(setRes.data.settings);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const pushOrderToGhl = async (orderId) => {
+    setPushingId(orderId);
+    setMsg('');
+    try {
+      const res = await axios.post(`${API_URL}/admin/ghl-phone/${orderId}/push-ghl`);
+      setMsg(`✓ ${res.data.message || 'Pushed successfully to GoHighLevel Contacts!'}`);
+      loadData();
+    } catch (e) {
+      setMsg(`✗ ${e?.response?.data?.error || 'Failed to push to GoHighLevel.'}`);
+    } finally {
+      setPushingId('');
+    }
+  };
+
+  const pushWsOrderToGhl = async (orderId) => {
+    setPushingId(orderId);
+    setMsg('');
+    try {
+      const res = await axios.post(`${API_URL}/admin/workspace-orders/${orderId}/push-ghl`);
+      setMsg(`✓ ${res.data.message || 'Workspace contact pushed to HighLevel CRM!'}`);
+      loadData();
+    } catch (e) {
+      setMsg(`✗ ${e?.response?.data?.error || 'Failed to push to HighLevel.'}`);
+    } finally {
+      setPushingId('');
+    }
+  };
+
+  const activatePhone = async (orderId) => {
+    const num = activeNumberInput.trim();
+    if (!num) {
+      alert('Please enter a phone number (e.g. +1 555-0199).');
+      return;
+    }
+    try {
+      await axios.post(`${API_URL}/admin/ghl-phone/${orderId}/activate`, { assignedPhoneNumber: num });
+      setMsg(`✓ Activated phone number ${num} for this order.`);
+      setActivatingId('');
+      setActiveNumberInput('');
+      loadData();
+    } catch (e) {
+      setMsg(`✗ ${e?.response?.data?.error || 'Failed to activate phone number.'}`);
+    }
+  };
+
+  const saveSettings = async () => {
+    setSavingSettings(true);
+    setMsg('');
+    try {
+      await axios.post(`${API_URL}/admin/ghl-phone/settings`, settings);
+      setMsg('✓ HighLevel & Phone settings saved successfully.');
+    } catch (e) {
+      setMsg(`✗ ${e?.response?.data?.error || 'Failed to save settings.'}`);
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const filteredOrders = orders.filter(o => {
+    if (filterStatus === 'all') return true;
+    if (filterStatus === 'pending') return o.phoneStatus === 'pending_activation';
+    if (filterStatus === 'activated') return o.phoneStatus === 'activated';
+    if (filterStatus === 'expired') return o.isExpired || o.status === 'expired';
+    return true;
+  });
+
+  return (
+    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '10px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h2 style={{ margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            📞 GHL Business Phone Management
+          </h2>
+          <p style={{ margin: 0, color: '#64748b', fontSize: 13 }}>
+            Manage dedicated business phone orders, HighLevel CRM one-click push, and line activations.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => setTab('orders')}
+            className={`btn ${tab === 'orders' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ fontSize: 13, padding: '7px 14px' }}
+          >
+            Phone Orders ({orders.length})
+          </button>
+          <button
+            onClick={() => setTab('workspace_crm')}
+            className={`btn ${tab === 'workspace_crm' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ fontSize: 13, padding: '7px 14px' }}
+          >
+            Workspace Form CRM ({wsOrders.length})
+          </button>
+          <button
+            onClick={() => setTab('settings')}
+            className={`btn ${tab === 'settings' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ fontSize: 13, padding: '7px 14px' }}
+          >
+            HighLevel Settings
+          </button>
+        </div>
+      </div>
+
+      {msg && (
+        <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 16, background: msg.startsWith('✓') ? '#dcfce7' : '#fee2e2', color: msg.startsWith('✓') ? '#166534' : '#991b1b', fontWeight: 600, fontSize: 13 }}>
+          {msg}
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Loading data…</div>
+      ) : tab === 'orders' ? (
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+            <h3 style={{ margin: 0, fontSize: 16 }}>Business Phone Orders &amp; Subscriptions</h3>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Filter:</span>
+              {['all', 'pending', 'activated', 'expired'].map(st => (
+                <button
+                  key={st}
+                  onClick={() => setFilterStatus(st)}
+                  style={{
+                    padding: '3px 10px',
+                    borderRadius: 99,
+                    border: '1px solid #e2e8f0',
+                    background: filterStatus === st ? '#6e46eb' : '#f8fafc',
+                    color: filterStatus === st ? '#fff' : '#64748b',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    textTransform: 'capitalize'
+                  }}
+                >
+                  {st}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredOrders.length === 0 ? (
+            <p style={{ color: '#94a3b8', margin: 0 }}>No business phone orders found matching criteria.</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>
+                    <th style={{ padding: '8px 6px' }}>Order #</th>
+                    <th>Customer / Email</th>
+                    <th>Subdomain</th>
+                    <th>Plan</th>
+                    <th>Status</th>
+                    <th>Expiry (2-Mo)</th>
+                    <th>Phone Number</th>
+                    <th>HighLevel CRM</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredOrders.map(o => {
+                    const isExp = o.isExpired || o.status === 'expired';
+                    return (
+                      <tr key={o.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '10px 6px', fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>
+                          {o.orderNumber}
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 600, color: '#0f172a' }}>{o.customerName || '—'}</div>
+                          <div style={{ fontSize: 11, color: '#64748b' }}>{o.customerEmail || '—'}</div>
+                        </td>
+                        <td>
+                          <code style={{ fontSize: 12, background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, color: '#4338ca' }}>
+                            {o.subdomain || '—'}
+                          </code>
+                        </td>
+                        <td>
+                          <span style={{ fontWeight: 600 }}>{o.pricingType === 'one-time' ? '$100 One-Time' : '$50/mo'}</span>
+                        </td>
+                        <td>
+                          {isExp ? (
+                            <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 700 }}>EXPIRED</span>
+                          ) : (
+                            <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 700 }}>PAID</span>
+                          )}
+                        </td>
+                        <td>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>{o.expiresAt ? new Date(o.expiresAt).toLocaleDateString() : '2 Months'}</div>
+                          <div style={{ fontSize: 11, color: isExp ? '#b91c1c' : '#64748b' }}>
+                            {isExp ? 'Plan Ended' : `${o.daysRemaining != null ? o.daysRemaining : '—'} days left`}
+                          </div>
+                        </td>
+                        <td>
+                          {o.phoneStatus === 'activated' ? (
+                            <span style={{ color: '#166534', fontWeight: 700, fontSize: 13 }}>
+                              📞 {o.assignedPhoneNumber}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#d97706', fontSize: 12, fontWeight: 600 }}>
+                              ⏳ Pending Activation
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          {o.ghlContactId ? (
+                            <div>
+                              <span style={{ background: '#ecfdf5', color: '#059669', padding: '2px 6px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
+                                ✓ Pushed
+                              </span>
+                              <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>ID: {o.ghlContactId.slice(0, 10)}…</div>
+                            </div>
+                          ) : (
+                            <span style={{ color: '#94a3b8', fontSize: 12 }}>Not pushed</span>
+                          )}
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            {activatingId === o.id ? (
+                              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                <input
+                                  value={activeNumberInput}
+                                  onChange={e => setActiveNumberInput(e.target.value)}
+                                  placeholder="+1 555-0199"
+                                  style={{ width: 110, height: 28, fontSize: 12, padding: '0 6px', borderRadius: 6, border: '1px solid #cbd5e1' }}
+                                />
+                                <button
+                                  onClick={() => activatePhone(o.id)}
+                                  className="btn btn-primary"
+                                  style={{ fontSize: 11, padding: '4px 8px' }}
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  onClick={() => setActivatingId('')}
+                                  className="btn btn-secondary"
+                                  style={{ fontSize: 11, padding: '4px 6px' }}
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => { setActivatingId(o.id); setActiveNumberInput(o.assignedPhoneNumber || ''); }}
+                                className="btn btn-secondary"
+                                style={{ fontSize: 11, padding: '4px 8px' }}
+                              >
+                                {o.phoneStatus === 'activated' ? 'Change #' : 'Activate #'}
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => pushOrderToGhl(o.id)}
+                              disabled={pushingId === o.id}
+                              className="btn btn-primary"
+                              style={{ fontSize: 11, padding: '4px 8px', background: '#059669', border: 'none' }}
+                              title="Push customer details directly to GoHighLevel Contacts"
+                            >
+                              {pushingId === o.id ? '…' : 'Push to GHL'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : tab === 'workspace_crm' ? (
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <h3 style={{ margin: '0 0 2px', fontSize: 16 }}>Google Workspace Form Data &amp; HighLevel Push</h3>
+              <p style={{ margin: 0, color: '#64748b', fontSize: 12 }}>
+                All collected Workspace registration form inputs. One-click pushes full contact, domain, and address to HighLevel CRM contacts.
+              </p>
+            </div>
+          </div>
+
+          {wsOrders.length === 0 ? (
+            <p style={{ color: '#94a3b8', margin: 0 }}>No Google Workspace customer records found.</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>
+                    <th style={{ padding: '8px 6px' }}>Order #</th>
+                    <th>Organization / Domain</th>
+                    <th>Contact Name</th>
+                    <th>Admin &amp; Alt Email</th>
+                    <th>Phone</th>
+                    <th>Address / Location</th>
+                    <th>HighLevel CRM</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {wsOrders.map(o => {
+                    const org = o.organization || {};
+                    const ct = o.contact || {};
+                    const addr = [org.streetAddress, org.city, org.state, org.zip].filter(Boolean).join(', ');
+                    return (
+                      <tr key={o.id || o.orderNumber} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '10px 6px', fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>
+                          {o.orderNumber}
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 700, color: '#0f172a' }}>{org.name || '—'}</div>
+                          <div style={{ color: '#4338ca', fontWeight: 600 }}>{o.domain || org.domain || '—'}</div>
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{[ct.firstName, ct.lastName].filter(Boolean).join(' ') || '—'}</div>
+                        </td>
+                        <td>
+                          <div style={{ color: '#0f172a', fontWeight: 500 }}>{ct.email || '—'}</div>
+                          {ct.alternateEmail && <div style={{ fontSize: 11, color: '#64748b' }}>Alt: {ct.alternateEmail}</div>}
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{ct.phone || '—'}</div>
+                        </td>
+                        <td>
+                          <div style={{ fontSize: 11.5, color: '#475569', maxWidth: 180 }}>{addr || '—'}</div>
+                        </td>
+                        <td>
+                          {o.ghlContactId ? (
+                            <span style={{ background: '#ecfdf5', color: '#059669', padding: '2px 6px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
+                              ✓ Pushed
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94a3b8', fontSize: 11 }}>Not pushed</span>
+                          )}
+                        </td>
+                        <td>
+                          <button
+                            onClick={() => pushWsOrderToGhl(o.id || o.orderNumber)}
+                            disabled={pushingId === (o.id || o.orderNumber)}
+                            className="btn btn-primary"
+                            style={{ fontSize: 11, padding: '4px 10px', background: '#059669', border: 'none', whiteSpace: 'nowrap' }}
+                          >
+                            {pushingId === (o.id || o.orderNumber) ? 'Pushing…' : '🚀 1-Click Push'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={card}>
+          <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>GoHighLevel &amp; Business Phone Settings</h3>
+          <p style={{ color: '#64748b', fontSize: 13, marginTop: 0, marginBottom: 18 }}>
+            Configure your GoHighLevel Location Access Token and Location ID to automatically create CRM Contacts upon customer checkout.
+          </p>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginBottom: 18 }}>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                HighLevel API Key / V2 Access Token *
+              </label>
+              <input
+                type="password"
+                value={settings.apiKey || ''}
+                onChange={e => setSettings({ ...settings, apiKey: e.target.value })}
+                placeholder="Bearer token or API key"
+                style={{ width: '100%', height: 38, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 10px', fontSize: 13 }}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                HighLevel Location / Sub-Account ID *
+              </label>
+              <input
+                value={settings.locationId || ''}
+                onChange={e => setSettings({ ...settings, locationId: e.target.value })}
+                placeholder="e.g. C2Axxxxxxxxx"
+                style={{ width: '100%', height: 38, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 10px', fontSize: 13 }}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                Subdomain Voice Server IP (for A-Records)
+              </label>
+              <input
+                value={settings.serverIp || '147.93.109.19'}
+                onChange={e => setSettings({ ...settings, serverIp: e.target.value })}
+                placeholder="147.93.109.19"
+                style={{ width: '100%', height: 38, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 10px', fontSize: 13 }}
+              />
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13.5, fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                checked={!!settings.autoPushOnPayment}
+                onChange={e => setSettings({ ...settings, autoPushOnPayment: e.target.checked })}
+                style={{ width: 16, height: 16, accentColor: '#6e46eb' }}
+              />
+              <span>Automatically push customer contacts to HighLevel CRM immediately upon payment</span>
+            </label>
+          </div>
+
+          <button
+            onClick={saveSettings}
+            disabled={savingSettings}
+            className="btn btn-primary"
+            style={{ padding: '8px 20px', fontSize: 13 }}
+          >
+            {savingSettings ? 'Saving…' : 'Save Settings'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const AdminPaymentsSection = () => {
   const [tab, setTab] = useState('settings'); // 'settings' | 'transactions'
   const [s, setS] = useState(null);
@@ -5872,12 +6333,20 @@ const CustomerPortal = ({ onViewStorefront }) => {
           const r = await axios.get(`${API_URL}/customer/payment-status/${pid}`);
           if (r.data.paid) {
             const isDomainOrder = paramType === 'domain' || paramType === 'domain_transfer' || r.data.orderType === 'domain' || r.data.orderType === 'domain_transfer';
+            const isWorkspaceOrder = paramType === 'workspace' || r.data.orderType === 'workspace';
+            const isPhoneOrder = paramType === 'business_phone' || paramType === 'ghl_business_phone' || r.data.orderType === 'ghl_business_phone';
             const dom = r.data.domain || paramDomain || purchasedDomain;
             if (isDomainOrder && dom) {
               setPurchasedDomain(dom);
               try { sessionStorage.setItem('justPurchasedDomain', dom); } catch (_) {}
               setPayBanner(`🎉 Domain ${dom} registered successfully! Now set up your Google Workspace below.`);
               setSection('domain-workspace-setup');
+            } else if (isWorkspaceOrder) {
+              setPayBanner('🎉 Google Workspace purchased! Now choose your GHL Business Phone plan below.');
+              setSection('business-phone');
+            } else if (isPhoneOrder) {
+              setPayBanner('🎉 Order successful! Please contact admin for activation of phone number.');
+              setSection('business-phone');
             } else {
               setPayBanner('✓ Payment confirmed — your order is being set up. Thank you!');
             }
@@ -5894,6 +6363,10 @@ const CustomerPortal = ({ onViewStorefront }) => {
           else {
             if ((paramType === 'domain' || paramType === 'domain_transfer') && (paramDomain || purchasedDomain)) {
               setSection('domain-workspace-setup');
+            } else if (paramType === 'workspace') {
+              setSection('business-phone');
+            } else if (paramType === 'business_phone' || paramType === 'ghl_business_phone') {
+              setSection('business-phone');
             }
             setPayBanner('Your payment is still confirming. Your order will activate automatically once confirmed — check back shortly or contact support.');
             window.history.replaceState({}, '', window.location.pathname);
@@ -5904,6 +6377,10 @@ const CustomerPortal = ({ onViewStorefront }) => {
           else {
             if ((paramType === 'domain' || paramType === 'domain_transfer') && (paramDomain || purchasedDomain)) {
               setSection('domain-workspace-setup');
+            } else if (paramType === 'workspace') {
+              setSection('business-phone');
+            } else if (paramType === 'business_phone' || paramType === 'ghl_business_phone') {
+              setSection('business-phone');
             }
             setPayBanner('We couldn\'t confirm the payment automatically. If you paid, your order will activate soon — contact support if needed.');
             window.history.replaceState({}, '', window.location.pathname);
@@ -5915,6 +6392,14 @@ const CustomerPortal = ({ onViewStorefront }) => {
       const dom = paramDomain || purchasedDomain;
       setPurchasedDomain(dom);
       setSection('domain-workspace-setup');
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (payStatus === 'success' && paramType === 'workspace') {
+      setPayBanner('🎉 Google Workspace purchased! Now choose your GHL Business Phone plan below.');
+      setSection('business-phone');
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (payStatus === 'success' && (paramType === 'business_phone' || paramType === 'ghl_business_phone')) {
+      setPayBanner('🎉 Order successful! Please contact admin for activation of phone number.');
+      setSection('business-phone');
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, []);
@@ -5929,6 +6414,7 @@ const CustomerPortal = ({ onViewStorefront }) => {
     { key: 'ssl', label: 'SSL certificates', icon: <NavIcons.SSL size={20} />, bg: '#f0fdf4', border: '#dcfce7' },
     { key: 'hosting', label: 'Hosting', icon: <NavIcons.Hosting size={20} />, bg: '#eff6ff', border: '#dbeafe' },
     { key: 'voice', label: 'Google Voice', icon: <NavIcons.Voice size={20} />, bg: '#f0fdf4', border: '#dcfce7' },
+    { key: 'business-phone', label: 'GHL Business Phone', icon: <NavIcons.Voice size={20} />, bg: '#ecfdf5', border: '#a7f3d0' },
     { key: 'payments', label: 'Payments', icon: <NavIcons.Payments size={20} />, bg: '#faf5ff', border: '#f3e8ff' },
     { key: 'balance', label: 'Balance', icon: <NavIcons.Balance size={20} />, bg: '#fffbeb', border: '#fef3c7' },
     { key: 'support', label: 'Support', icon: <NavIcons.Support size={20} />, bg: '#fff1f2', border: '#ffe4e6' },
@@ -6083,6 +6569,7 @@ const CustomerPortal = ({ onViewStorefront }) => {
               initialDomain={purchasedDomain}
               initialStep={workspaceStartStep}
               onBackToDomainSetup={() => setSection('domain-workspace-setup')}
+              onProceedToBusinessPhone={() => setSection('business-phone')}
             />
           )}
           {section === 'import' && <CustomerWorkspaceImport />}
@@ -6097,6 +6584,15 @@ const CustomerPortal = ({ onViewStorefront }) => {
           {section === 'ssl' && <CustomerSsl />}
           {section === 'hosting' && <CustomerHosting initialDomain={purchasedDomain} />}
           {section === 'voice' && <CustomerVoice />}
+          {section === 'business-phone' && (
+            <CustomerBusinessPhone
+              onNavigate={setSection}
+              onSetupWorkspace={(dom) => {
+                setPurchasedDomain(dom);
+                setSection('order');
+              }}
+            />
+          )}
           {section === 'addons' && <CustomerAddons initialDomain={purchasedDomain} />}
           {section === 'payments' && <CustomerPayments />}
           {section === 'balance' && <CustomerBalance />}
@@ -6146,6 +6642,18 @@ const CustomerOverview = ({ onNavigate, onSetupWorkspace = null }) => {
   const activeDomains = domains.filter(d => d.status === 'registered' || d.status === 'test_paid');
   const activeHosting = hosting.filter(h => h.status === 'active' || h.status === 'test_paid');
 
+  // Check if customer has an active workspace subscription but has NOT purchased a business phone
+  const hasWorkspace = subs.some(s => {
+    const sku = (s.skuId || s.skuName || '').toLowerCase();
+    const isPhone = sku.includes('ghl') || sku.includes('business-phone') || sku.includes('phone');
+    return !isPhone && (s.status || '').toUpperCase() === 'ACTIVE';
+  });
+  const hasBusinessPhone = subs.some(s => {
+    const sku = (s.skuId || s.skuName || '').toLowerCase();
+    return sku.includes('ghl') || sku.includes('business-phone') || sku.includes('phone');
+  });
+  const showGetBusinessPhone = hasWorkspace && !hasBusinessPhone;
+
   const card = { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' };
   const pill = (color, bg) => ({ background: bg, color, padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600 });
 
@@ -6161,6 +6669,16 @@ const CustomerOverview = ({ onNavigate, onSetupWorkspace = null }) => {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {showGetBusinessPhone && (
+            <button
+              onClick={() => onNavigate('business-phone')}
+              className="btn"
+              style={{ padding: '10px 20px', fontSize: 14, fontWeight: 700, background: '#059669', color: '#fff', display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: '0 2px 6px rgba(5,150,105,0.25)' }}
+            >
+              <NavIcons.Voice size={18} />
+              Get Business Phone
+            </button>
+          )}
           <button
             onClick={() => onNavigate('order')}
             className="btn btn-primary"
@@ -6201,6 +6719,36 @@ const CustomerOverview = ({ onNavigate, onSetupWorkspace = null }) => {
         </div>
       )}
 
+      {/* If customer has active Google Workspace but has NOT purchased a Business Phone */}
+      {showGetBusinessPhone && (
+        <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 14, padding: 18, marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: '#d1fae5', border: '1px solid #a7f3d0', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#059669', flexShrink: 0 }}>
+              <NavIcons.Voice size={22} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, color: '#065f46', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>Get Business Phone for your Workspace</span>
+                <span style={{ background: '#10b981', color: '#fff', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Recommended</span>
+              </div>
+              <div style={{ color: '#047857', fontSize: 13.5 }}>
+                You already have Google Workspace! Complete your business suite with a dedicated GHL Business Phone line — unlimited calls, SMS, IVR &amp; web/mobile apps.
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={() => onNavigate('business-phone')}
+              className="btn btn-primary"
+              style={{ padding: '8px 20px', fontSize: 13.5, background: '#059669', display: 'inline-flex', alignItems: 'center', gap: 7, fontWeight: 700, boxShadow: '0 2px 6px rgba(5,150,105,0.2)' }}
+            >
+              <NavIcons.Voice size={16} />
+              Get Business Phone
+            </button>
+          </div>
+        </div>
+      )}
+
       {draft && (
         <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 14, padding: 18, marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
           <div>
@@ -6220,6 +6768,14 @@ const CustomerOverview = ({ onNavigate, onSetupWorkspace = null }) => {
 
       {/* Quick Action Cards Bar */}
       <div className="quick-action-bar">
+        {showGetBusinessPhone && (
+          <button onClick={() => onNavigate('business-phone')} className="quick-action-btn" style={{ borderColor: '#a7f3d0' }}>
+            <span style={{ width: 34, height: 34, borderRadius: 10, background: '#ecfdf5', border: '1px solid #a7f3d0', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: '#059669' }}>
+              <NavIcons.Voice size={18} />
+            </span>
+            <span style={{ fontWeight: 600, color: '#065f46' }}>Get Business Phone</span>
+          </button>
+        )}
         <button onClick={() => onNavigate('order')} className="quick-action-btn">
           <span style={{ width: 34, height: 34, borderRadius: 10, background: '#f5f3ff', border: '1px solid #ede9fe', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <GoogleWorkspaceIcon size={18} />
@@ -8008,6 +8564,19 @@ const CustomerSubscriptions = () => {
   const hasSubs = data?.subscriptions && data.subscriptions.length > 0;
   const hasDomains = domains.length > 0;
 
+  // Check if customer already has Workspace but has not purchased Business Phone
+  const userSubs = data?.subscriptions || [];
+  const hasWorkspaceSub = userSubs.some(s => {
+    const sku = (s.skuId || s.skuName || '').toLowerCase();
+    const isPhone = sku.includes('ghl') || sku.includes('business-phone') || sku.includes('phone');
+    return !isPhone && (s.status || '').toUpperCase() === 'ACTIVE';
+  });
+  const hasPhoneSub = userSubs.some(s => {
+    const sku = (s.skuId || s.skuName || '').toLowerCase();
+    return sku.includes('ghl') || sku.includes('business-phone') || sku.includes('phone');
+  });
+  const showGetBusinessPhone = hasWorkspaceSub && !hasPhoneSub;
+
   return (
     <div className="section">
       <h2>📊 My Subscriptions</h2>
@@ -8067,6 +8636,34 @@ const CustomerSubscriptions = () => {
         </div>
       )}
 
+      {/* Get Business Phone Banner for Workspace customers without phone */}
+      {showGetBusinessPhone && (
+        <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 12, padding: '16px 18px', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: '#d1fae5', border: '1px solid #a7f3d0', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#059669', flexShrink: 0 }}>
+              <NavIcons.Voice size={22} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#065f46', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>Get Business Phone for your Workspace</span>
+                <span style={{ background: '#10b981', color: '#fff', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Recommended</span>
+              </div>
+              <div style={{ fontSize: 13, color: '#047857' }}>
+                You have active Google Workspace! Upgrade your setup with a dedicated GHL Business Phone line — unlimited calls, SMS, IVR &amp; web/mobile apps.
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={() => { window.location.hash = 'business-phone'; }}
+            className="btn btn-primary"
+            style={{ padding: '9px 20px', fontSize: 13.5, background: '#059669', display: 'inline-flex', alignItems: 'center', gap: 7, fontWeight: 700, boxShadow: '0 2px 6px rgba(5,150,105,0.2)' }}
+          >
+            <NavIcons.Voice size={16} />
+            Get Business Phone
+          </button>
+        </div>
+      )}
+
       {/* Google Workspace + add-on subscriptions (each billed separately) */}
       <h3 style={{ marginTop: 8 }}>Subscriptions</h3>
       {data?.domain && <p style={{ color: '#5b6075', marginTop: 0 }}>Domain: <strong>{data.domain}</strong>{data.account ? ` · ${data.account.toUpperCase()} account` : ''}</p>}
@@ -8084,13 +8681,27 @@ const CustomerSubscriptions = () => {
               const soon = d !== null && d !== undefined && d <= 7;
               const overdue = d !== null && d !== undefined && d < 0;
               const nm = (s.skuName || '').toLowerCase();
-              const isPrimary = nm.includes('workspace') || s.category === 'workspace';
+              const isPhone = s.skuId === 'ghl-business-phone' || s.category === 'business_phone';
+              const isPrimary = !isPhone && (nm.includes('workspace') || s.category === 'workspace');
               return (
                 <tr key={i}>
-                  <td style={{ fontWeight: 600 }}>{s.skuName}</td>
-                  <td>{isPrimary ? <span style={{ fontSize: 12, background: '#e0f2f1', color: '#6e46eb', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>Primary</span> : <span style={{ fontSize: 12, background: '#f3f4f6', color: '#6b7280', padding: '2px 8px', borderRadius: 99 }}>Add-on</span>}</td>
+                  <td style={{ fontWeight: 600 }}>
+                    <div>{s.skuName}</div>
+                    {s.subdomain ? <div style={{ fontSize: 11, color: '#4338ca', fontWeight: 500 }}>{s.subdomain}</div> : null}
+                  </td>
                   <td>
-                    {isPrimary && s.status === 'ACTIVE' ? (() => {
+                    {isPhone ? (
+                      <span style={{ fontSize: 12, background: '#ecfdf5', color: '#059669', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>Business Phone (2-Mo)</span>
+                    ) : isPrimary ? (
+                      <span style={{ fontSize: 12, background: '#e0f2f1', color: '#6e46eb', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>Primary</span>
+                    ) : (
+                      <span style={{ fontSize: 12, background: '#f3f4f6', color: '#6b7280', padding: '2px 8px', borderRadius: 99 }}>Add-on</span>
+                    )}
+                  </td>
+                  <td>
+                    {isPhone ? (
+                      <span style={{ fontWeight: 600 }}>1 Line</span>
+                    ) : isPrimary && s.status === 'ACTIVE' ? (() => {
                       const cur = s.seats || 1;
                       const val = seatDraft[s.skuId] ?? cur;   // live total; defaults to current, sticks after changes
                       const added = Math.max(0, val - cur);
@@ -8117,17 +8728,37 @@ const CustomerSubscriptions = () => {
                     )}
                   </td>
                   <td>
-                    {s.needsDomainVerification ? (
+                    {isPhone ? (
+                      s.isExpired || s.status === 'EXPIRED' ? (
+                        <div>
+                          <span style={{ display: 'inline-block', background: '#fee2e2', color: '#b91c1c', padding: '2px 8px', borderRadius: 99, fontSize: 12, fontWeight: 700 }}>
+                            Expired (2-Month Limit)
+                          </span>
+                          <div style={{ fontSize: 11, color: '#b42318', marginTop: 4, maxWidth: 220, lineHeight: 1.35 }}>
+                            Plan expired after 2 months. Repurchase to reactivate service.
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <span style={{ display: 'inline-block', background: s.phoneStatus === 'activated' ? '#dcfce7' : '#fef3c7', color: s.phoneStatus === 'activated' ? '#166534' : '#92600a', padding: '2px 8px', borderRadius: 99, fontSize: 12, fontWeight: 600 }}>
+                            {s.phoneStatus === 'activated' ? 'Active' : 'Pending Activation'}
+                          </span>
+                          <div style={{ fontSize: 11, color: s.phoneStatus === 'activated' ? '#166534' : '#92600a', marginTop: 4, maxWidth: 240, lineHeight: 1.35 }}>
+                            {s.activationNote || (s.phoneStatus === 'activated' ? `Assigned: ${s.assignedPhoneNumber}` : 'Order successful. Contact admin for activation of phone number.')}
+                          </div>
+                        </div>
+                      )
+                    ) : s.needsDomainVerification ? (
                       <span style={{ display: 'inline-block', background: '#fef3c7', color: '#92600a', padding: '2px 8px', borderRadius: 99, fontSize: 12, fontWeight: 600 }}>Pending verification</span>
                     ) : (
                       <span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span>
                     )}
-                    {s.needsDomainVerification && (
+                    {!isPhone && s.needsDomainVerification && (
                       <div style={{ fontSize: 11, color: '#92600a', marginTop: 4, maxWidth: 260, lineHeight: 1.35 }}>
                         Complete domain verification: open your <strong>Google Admin console</strong>, copy the verification record, and add it at your domain host (Namecheap, etc.). Google activates this subscription automatically once verified.
                       </div>
                     )}
-                    {s.suspendedByGoogle && (
+                    {!isPhone && s.suspendedByGoogle && (
                       <div style={{ fontSize: 11, color: '#b42318', marginTop: 4, maxWidth: 220, lineHeight: 1.35 }}>
                         ⚠️ Suspended by Google — a payment can’t reactivate this. {s.activationNote || 'Please contact support to resolve it with Google.'}
                       </div>
@@ -8187,9 +8818,21 @@ const CustomerSubscriptions = () => {
                     </div>
                   </td>
                   <td>
-                    {s.cycleStatus === 'paid'
-                      ? <span style={{ fontSize: 12, color: '#6b7280' }}>Paid</span>
-                      : <button className="btn btn-primary" style={{ fontSize: 12, padding: '5px 14px' }} onClick={() => renew(s)}>Renew</button>}
+                    {isPhone ? (
+                      s.isExpired || s.status === 'EXPIRED' ? (
+                        <button className="btn btn-primary" style={{ fontSize: 12, padding: '5px 14px', background: '#dc2626', border: 'none' }} onClick={() => { window.location.hash = 'business-phone'; }}>
+                          Repurchase
+                        </button>
+                      ) : (
+                        <button className="btn btn-secondary" style={{ fontSize: 12, padding: '5px 14px' }} onClick={() => { window.location.hash = 'business-phone'; }}>
+                          Manage
+                        </button>
+                      )
+                    ) : s.cycleStatus === 'paid' ? (
+                      <span style={{ fontSize: 12, color: '#6b7280' }}>Paid</span>
+                    ) : (
+                      <button className="btn btn-primary" style={{ fontSize: 12, padding: '5px 14px' }} onClick={() => renew(s)}>Renew</button>
+                    )}
                   </td>
                 </tr>
               );
@@ -8668,6 +9311,403 @@ const CustomerVoice = () => {
           Need help? <a href="https://knowledge.workspace.google.com/admin/voice/assign-voice-numbers-to-users" target="_blank" rel="noreferrer">Google's guide to assigning numbers</a>.
         </p>
       </div>
+    </div>
+  );
+};
+
+// ==================== CUSTOMER: GHL BUSINESS PHONE ====================
+const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedPlanId, setSelectedPlanId] = useState('ghl_phone_monthly');
+  const [subdomain, setSubdomain] = useState('');
+  const [aRecordConfirmed, setARecordConfirmed] = useState(false);
+  const [copiedIp, setCopiedIp] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const loadStatus = async () => {
+    try {
+      setLoading(true);
+      const [statusRes, plansRes] = await Promise.all([
+        axios.get(`${API_URL}/customer/ghl-phone/status`).catch(() => ({ data: null })),
+        axios.get(`${API_URL}/ghl-phone/plans`).catch(() => ({ data: { plans: [] } })),
+      ]);
+      if (statusRes?.data) {
+        setData(statusRes.data);
+        if (statusRes.data.order?.subdomain) {
+          setSubdomain(statusRes.data.order.subdomain);
+        } else if (statusRes.data.domain) {
+          setSubdomain(`phone.${statusRes.data.domain}`);
+        }
+      }
+      if (plansRes?.data?.plans?.length) {
+        setSelectedPlanId(plansRes.data.plans[0].id);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadStatus();
+  }, []);
+
+  const copyIp = (ip) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(ip);
+      setCopiedIp(true);
+      setTimeout(() => setCopiedIp(false), 2000);
+    }
+  };
+
+  const handleCheckout = async (method) => {
+    const cleanSub = (subdomain || '').trim().toLowerCase();
+    if (!cleanSub) {
+      setMsg('Please enter a subdomain (e.g. phone.yourdomain.com).');
+      return;
+    }
+    if (!aRecordConfirmed) {
+      setMsg('Please confirm you have added the A Record to your DNS settings.');
+      return;
+    }
+    setBusy(true);
+    setMsg('');
+    try {
+      const res = await axios.post(`${API_URL}/customer/ghl-phone/checkout`, {
+        planId: selectedPlanId,
+        subdomain: cleanSub,
+        method,
+      });
+      if (res.data?.checkoutUrl) {
+        window.location.href = res.data.checkoutUrl;
+      } else if (res.data?.paid) {
+        setMsg('🎉 Order successful! Please contact admin for activation of phone number.');
+        loadStatus();
+      } else {
+        setMsg('Could not initialize checkout. Please try again.');
+      }
+    } catch (e) {
+      setMsg(e?.response?.data?.error || 'Checkout failed. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cardStyle = { background: '#fff', borderRadius: 14, padding: 22, border: '1px solid #e2e8f0', marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' };
+  const serverIp = data?.serverIp || '147.93.109.19';
+  const order = data?.order;
+  const isExpired = order && (order.status === 'expired' || (order.expiresAt && new Date(order.expiresAt).getTime() <= Date.now()));
+  const isActive = order && !isExpired && ['paid', 'active', 'test_paid'].includes(order.status);
+
+  if (loading) {
+    return <div className="loading" style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Loading GHL Business Phone…</div>;
+  }
+
+  return (
+    <div style={{ maxWidth: 860, margin: '0 auto', paddingBottom: 30 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, marginBottom: 18, flexWrap: 'wrap' }}>
+        <div>
+          <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10, fontSize: 22 }}>
+            📞 GHL Business Phone
+          </h2>
+          <p style={{ color: '#64748b', margin: '4px 0 0', fontSize: 13.5 }}>
+            Dedicated Business Phone Number for your company, fully connected to your Google Workspace.
+          </p>
+        </div>
+        {isActive && (
+          <button
+            onClick={() => onNavigate && onNavigate('hosting')}
+            className="btn btn-primary"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#0284c7', border: 'none', padding: '9px 18px', fontSize: 13, fontWeight: 700 }}
+          >
+            <span>🚀 Continue to Hosting Plan →</span>
+          </button>
+        )}
+      </div>
+
+      {msg && (
+        <div style={{ padding: '12px 16px', borderRadius: 10, marginBottom: 18, background: msg.startsWith('🎉') || msg.startsWith('✓') ? '#dcfce7' : '#fef2f2', color: msg.startsWith('🎉') || msg.startsWith('✓') ? '#166534' : '#b42318', fontWeight: 600, fontSize: 14 }}>
+          {msg}
+        </div>
+      )}
+
+      {/* Active Phone State */}
+      {isActive && (
+        <div style={cardStyle}>
+          <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 10, padding: '14px 18px', marginBottom: 18, color: '#065f46' }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>🎉</span>
+              <span>Order successful! Please contact admin for activation of phone number.</span>
+            </div>
+            <div style={{ fontSize: 13, color: '#047857', lineHeight: 1.4 }}>
+              Your business phone order has been received. Our admin team will provision and route your official business number shortly.
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 18 }}>
+            <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Plan Type</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginTop: 4 }}>
+                {order.pricingType === 'one-time' ? '$100 One-Time (2 Months)' : '$50 / Month (Up to 2 Months)'}
+              </div>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Phone Status</div>
+              <div style={{ marginTop: 4 }}>
+                {order.phoneStatus === 'activated' ? (
+                  <span style={{ display: 'inline-block', background: '#dcfce7', color: '#166534', padding: '3px 10px', borderRadius: 99, fontSize: 12.5, fontWeight: 700 }}>
+                    ✓ Active: {order.assignedPhoneNumber || 'Assigned'}
+                  </span>
+                ) : (
+                  <span style={{ display: 'inline-block', background: '#fef3c7', color: '#92600a', padding: '3px 10px', borderRadius: 99, fontSize: 12.5, fontWeight: 700 }}>
+                    ⏳ Pending Admin Activation
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Subdomain</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#4338ca', marginTop: 4, wordBreak: 'break-all' }}>
+                {order.subdomain || '—'}
+              </div>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Plan Duration</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginTop: 4 }}>
+                {data.daysRemaining != null ? `${data.daysRemaining} days left` : '2 Months'}
+                {order.expiresAt && <div style={{ fontSize: 11, fontWeight: 500, color: '#64748b' }}>Expires: {new Date(order.expiresAt).toLocaleDateString()}</div>}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <div style={{ fontWeight: 700, color: '#1e40af', fontSize: 14 }}>Next Step: Set up your Web &amp; Email Hosting Plan</div>
+              <div style={{ color: '#2563eb', fontSize: 13 }}>Attach superfast web hosting to your new Google Workspace domain.</div>
+            </div>
+            <button
+              onClick={() => onNavigate && onNavigate('hosting')}
+              className="btn btn-primary"
+              style={{ background: '#2563eb', border: 'none', padding: '8px 18px', fontWeight: 700, fontSize: 13 }}
+            >
+              Continue to Hosting Plan →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Expired State Notice */}
+      {isExpired && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12, padding: 18, marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <span style={{ background: '#b91c1c', color: '#fff', padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 700 }}>EXPIRED</span>
+            <strong style={{ color: '#991b1b', fontSize: 15 }}>Your previous 2-month Business Phone plan has expired</strong>
+          </div>
+          <p style={{ margin: '0 0 10px', color: '#b91c1c', fontSize: 13.5 }}>
+            Plans can be used for up to 2 months. To reactivate your phone number or configure a new line, follow the checkout steps below:
+          </p>
+        </div>
+      )}
+
+      {/* Purchase / Repurchase Flow */}
+      {(!isActive || isExpired) && (
+        <div>
+          {/* Step 1: Subdomain & A Record */}
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 999, background: '#6e46eb', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>1</div>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Setup Subdomain by Adding A Record</h3>
+            </div>
+            <p style={{ color: '#64748b', fontSize: 13.5, marginTop: 0 }}>
+              Add an <strong>A Record</strong> in your domain DNS manager (e.g. Cloudflare, Namecheap, GoDaddy) pointing your subdomain to our voice routing gateway:
+            </p>
+
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12, marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>RECORD TYPE</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginTop: 2 }}>A</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>HOST / NAME</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginTop: 2 }}>phone <span style={{ fontSize: 11, color: '#94a3b8' }}>(or prefix)</span></div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>POINTS TO (SERVER IP)</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                    <code style={{ fontSize: 14, fontWeight: 700, color: '#6e46eb', background: '#f1f5f9', padding: '2px 6px', borderRadius: 4 }}>{serverIp}</code>
+                    <button
+                      type="button"
+                      onClick={() => copyIp(serverIp)}
+                      style={{ background: '#e2e8f0', border: 'none', borderRadius: 4, padding: '2px 6px', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
+                    >
+                      {copiedIp ? '✓' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>TTL</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginTop: 2 }}>Auto / 3600</div>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6, color: '#1e293b' }}>
+                  Your Phone Subdomain *
+                </label>
+                <input
+                  value={subdomain}
+                  onChange={(e) => setSubdomain(e.target.value)}
+                  placeholder="phone.yourcompany.com"
+                  style={{ width: '100%', height: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 12px', fontSize: 13.5 }}
+                />
+              </div>
+            </div>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13.5, fontWeight: 500, color: '#0f172a' }}>
+              <input
+                type="checkbox"
+                checked={aRecordConfirmed}
+                onChange={(e) => setARecordConfirmed(e.target.checked)}
+                style={{ width: 17, height: 17, accentColor: '#6e46eb', cursor: 'pointer' }}
+              />
+              <span>I have added the A Record for my subdomain in DNS settings.</span>
+            </label>
+          </div>
+
+          {/* Step 2: Google Workspace Verification */}
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 999, background: '#6e46eb', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>2</div>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Google Workspace Link</h3>
+            </div>
+            {data?.hasWorkspace ? (
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '12px 16px', color: '#166534', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontWeight: 700 }}>✓</span>
+                <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+                  Active Google Workspace detected on domain: <strong>{data.domain}</strong>
+                </span>
+              </div>
+            ) : (
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '14px 16px', color: '#92600a' }}>
+                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+                  ⚠️ Google Workspace Required
+                </div>
+                <div style={{ fontSize: 13, marginBottom: 10 }}>
+                  Please purchase and configure your Google Workspace domain before activating your Business Phone.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onSetupWorkspace ? onSetupWorkspace(data?.domain || '') : (onNavigate && onNavigate('order'))}
+                  className="btn btn-primary"
+                  style={{ background: '#d97706', border: 'none', padding: '7px 16px', fontSize: 13 }}
+                >
+                  Buy Google Workspace First →
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Step 3: Choose Price Plan */}
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 999, background: '#6e46eb', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>3</div>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Choose Your Price Plan</h3>
+            </div>
+            <p style={{ color: '#64748b', fontSize: 13.5, marginTop: 0 }}>
+              Select between $50 monthly or $100 one-time. Both plans can be active for up to 2 months.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 20 }}>
+              {[
+                {
+                  id: 'ghl_phone_monthly',
+                  name: 'Monthly Plan',
+                  price: '$50',
+                  cadence: '/ month',
+                  desc: 'Can be purchased up to 2 months. Monthly billing with automatic 2-month expiration.',
+                  badge: 'Popular',
+                },
+                {
+                  id: 'ghl_phone_onetime',
+                  name: 'One-Time Plan',
+                  price: '$100',
+                  cadence: 'one time',
+                  desc: 'Prepay for the full 2 months access upfront with no recurring bill.',
+                  badge: 'Full 2 Months',
+                }
+              ].map(p => {
+                const sel = selectedPlanId === p.id;
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => setSelectedPlanId(p.id)}
+                    style={{
+                      border: sel ? '2px solid #6e46eb' : '1px solid #e2e8f0',
+                      borderRadius: 12,
+                      padding: 18,
+                      background: sel ? '#f5f3ff' : '#fff',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      position: 'relative'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>{p.name}</span>
+                      <span style={{ background: sel ? '#6e46eb' : '#f1f5f9', color: sel ? '#fff' : '#64748b', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99 }}>
+                        {p.badge}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>
+                      {p.price} <span style={{ fontSize: 12, fontWeight: 500, color: '#64748b' }}>{p.cadence}</span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: 12.5, color: '#64748b', lineHeight: 1.4 }}>{p.desc}</p>
+                    <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: sel ? '#6e46eb' : '#94a3b8' }}>
+                      {sel ? '✓ Selected Plan' : 'Click to select'}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Step 4: Checkout */}
+            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 10, color: '#0f172a' }}>
+                Complete Payment Checkout:
+              </div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => handleCheckout('stripe')}
+                  disabled={busy}
+                  className="btn btn-primary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 20px', fontSize: 13 }}
+                >
+                  {busy ? 'Processing…' : <><CardIcon size={15} /><span>Pay with Card (Stripe)</span></>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCheckout('nicky')}
+                  disabled={busy}
+                  className="btn btn-secondary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 20px', fontSize: 13 }}
+                >
+                  {busy ? 'Processing…' : <><CryptoIcon size={15} /><span>Pay with Crypto (Nicky)</span></>}
+                </button>
+              </div>
+              <p style={{ color: '#64748b', fontSize: 12, marginTop: 10, marginBottom: 0 }}>
+                Upon payment confirmation, you will see <em>"Order successful, please contact admin for activation of phone number."</em>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -11410,7 +12450,7 @@ const US_STATES = [
   ['DC', 'District of Columbia'],
 ];
 
-function WorkspaceOrderFlow({ initialDomain = '', initialStep = 1, onBackToDomainSetup = null }) {
+function WorkspaceOrderFlow({ initialDomain = '', initialStep = 1, onBackToDomainSetup = null, onProceedToBusinessPhone = null }) {
   const [step, setStep] = useState(initialStep || 1);
   const [plans, setPlans] = useState(null);
   const [plansError, setPlansError] = useState('');
@@ -12011,6 +13051,31 @@ function WorkspaceOrderFlow({ initialDomain = '', initialStep = 1, onBackToDomai
               After payment you'll return here. Your Workspace (admin account + subscription) is created automatically —
               then you'll finish by verifying your domain inside your Google Admin console to activate Gmail.
             </p>
+          </div>
+
+          <div style={{ marginTop: 20, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: 18, textAlign: 'left' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+              <span style={{ fontSize: 22 }}>📞</span>
+              <div>
+                <strong style={{ color: '#166534', fontSize: 15, display: 'block' }}>Next Step: Get your GHL Business Phone Number</strong>
+                <div style={{ fontSize: 13, color: '#15803d', marginTop: 2 }}>
+                  Add a business phone number to your new Google Workspace ($50 monthly or $100 one-time, valid for 2 months).
+                </div>
+              </div>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onProceedToBusinessPhone) onProceedToBusinessPhone();
+                  else window.location.hash = 'business-phone';
+                }}
+                className="wof-btn"
+                style={{ background: '#059669', color: '#fff', border: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
+              >
+                <span>Get GHL Business Phone Number →</span>
+              </button>
+            </div>
           </div>
         </section>
       )}

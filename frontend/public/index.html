@@ -5,6 +5,41 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0F766E" />
 
+    <!-- Suppress third-party browser extension errors (e.g. MetaMask in sandboxed preview iframes) -->
+    <script>
+      (function() {
+        function shouldIgnore(err) {
+          if (!err) return false;
+          var msg = (typeof err === 'string' ? err : (err.message || err.description || String(err))).toLowerCase();
+          return msg.indexOf('metamask') !== -1 ||
+                 msg.indexOf('failed to connect to metamask') !== -1 ||
+                 msg.indexOf('extension context invalidated') !== -1 ||
+                 msg.indexOf('chrome-extension://') !== -1 ||
+                 msg.indexOf('moz-extension://') !== -1;
+        }
+
+        window.addEventListener('unhandledrejection', function(event) {
+          if (event && shouldIgnore(event.reason)) {
+            event.preventDefault();
+            if (typeof event.stopImmediatePropagation === 'function') {
+              event.stopImmediatePropagation();
+            }
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('error', function(event) {
+          if (event && (shouldIgnore(event.message) || shouldIgnore(event.error))) {
+            event.preventDefault();
+            if (typeof event.stopImmediatePropagation === 'function') {
+              event.stopImmediatePropagation();
+            }
+            return true;
+          }
+        }, true);
+      })();
+    </script>
+
     <!-- Preconnect to Google Fonts to eliminate DNS and SSL handshake latency -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
