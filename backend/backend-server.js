@@ -284,7 +284,7 @@ const PaymentSchema = new mongoose.Schema({
   domain: String,
   orderNumber: String,       // human-facing reference (e.g. RN-... for renewals) for admin retry/lookup
   orderId: mongoose.Schema.Types.ObjectId,
-  orderType: { type: String, enum: ['workspace', 'domain', 'domain_transfer', 'workspace_transfer', 'ssl', 'hosting', 'addon', 'seat_change', 'voice_change', 'ghl_business_phone', 'business_phone'], default: 'workspace' },
+  orderType: { type: String, enum: ['workspace', 'domain', 'domain_transfer', 'workspace_transfer', 'ssl', 'hosting', 'addon', 'seat_change', 'voice_change', 'ghl_business_phone', 'business_phone', 'google_voice', 'voice'], default: 'workspace' },
   amount: Number,            // total charged (subtotal + tax)
   subtotal: Number,          // pre-tax amount
   tax: Number,               // tax portion
@@ -805,7 +805,7 @@ const GhlBusinessPhoneOrderSchema = new mongoose.Schema(
     durationMonths: { type: Number, default: 2 }, // Up to 2 months
     status: {
       type: String,
-      enum: ['pending_payment', 'paid', 'active', 'expired', 'cancelled', 'test_paid'],
+      enum: ['pending_payment', 'paid', 'active', 'expired', 'suspended', 'cancelled', 'test_paid'],
       default: 'pending_payment',
     },
     phoneStatus: {
@@ -819,6 +819,9 @@ const GhlBusinessPhoneOrderSchema = new mongoose.Schema(
     paymentMethod: { type: String, enum: ['stripe', 'nicky', 'saved_card', 'balance'], default: 'stripe' },
     paymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment' },
     workspaceOrderId: { type: mongoose.Schema.Types.ObjectId, ref: 'WorkspaceOrder' },
+    notified5DaysBefore: { type: Boolean, default: false },
+    notifiedSuspension: { type: Boolean, default: false },
+    suspendedAt: Date,
 
     // Preserved Google Workspace form data reused for GoHighLevel
     formData: {
@@ -848,6 +851,38 @@ const GhlBusinessPhoneOrderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 const GhlBusinessPhoneOrder = mongoose.model('GhlBusinessPhoneOrder', GhlBusinessPhoneOrderSchema);
+
+// Google Voice Business Plans ($30 Starter, $45 Standard, $55 Premier)
+const GoogleVoiceOrderSchema = new mongoose.Schema(
+  {
+    customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true, index: true },
+    customerEmail: { type: String, default: '' },
+    orderNumber: { type: String, unique: true },
+    domain: { type: String, default: '' },
+    businessEmail: { type: String, default: '' },
+    planId: { type: String, enum: ['voice-starter', 'voice-standard', 'voice-premier'], default: 'voice-starter' },
+    planName: { type: String, default: 'Google Voice Starter' },
+    billingCycle: { type: String, default: 'monthly' },
+    price: { type: Number, default: 30.0 },
+    durationMonths: { type: Number, default: 1 }, // Monthly (30 days)
+    status: {
+      type: String,
+      enum: ['pending_payment', 'paid', 'active', 'expired', 'suspended', 'cancelled', 'test_paid'],
+      default: 'pending_payment',
+    },
+    purchasedAt: Date,
+    expiresAt: Date, // 30 days from purchase / renewal
+    paymentMethod: { type: String, enum: ['stripe', 'nicky', 'saved_card', 'balance'], default: 'stripe' },
+    paymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment' },
+    workspaceOrderId: { type: mongoose.Schema.Types.ObjectId, ref: 'WorkspaceOrder' },
+    notified5DaysBefore: { type: Boolean, default: false },
+    notifiedSuspension: { type: Boolean, default: false },
+    suspendedAt: Date,
+    adminNote: { type: String, default: '' },
+  },
+  { timestamps: true }
+);
+const GoogleVoiceOrder = mongoose.models.GoogleVoiceOrder || mongoose.model('GoogleVoiceOrder', GoogleVoiceOrderSchema);
 
 // GoHighLevel Admin Settings
 const GhlSettingsSchema = new mongoose.Schema(
@@ -4950,9 +4985,138 @@ async function markPaidAndProvision(payment) {
         }
       } catch (_) {}
 
+      // Send Resend confirmation email for GHL Business Phone order success / renewal
+      try {
+        const targetEmail = phoneOrder?.customerEmail || me?.businessEmail || payment.customerEmail;
+        if (targetEmail) {
+          const formattedExp = expiresAt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+          const planTitle = phoneOrder?.planName || 'GHL Business Phone';
+          const planCost = phoneOrder?.price ? `$${Number(phoneOrder.price).toFixed(2)}` : `$${Number(payment.amount || 50).toFixed(2)}`;
+          const lineDomain = phoneOrder?.subdomain || phoneOrder?.domain || payment.domain || 'your company domain';
+          const html = emailShell(
+            'GHL Business Phone Order Confirmed',
+            `<p>Hello,</p>
+            <p>Your payment has been received and your <strong>${planTitle}</strong> plan is now confirmed for <strong>${lineDomain}</strong>.</p>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin:16px 0;">
+              <p style="margin:4px 0;"><strong>Plan:</strong> ${planTitle} (${planCost})</p>
+              <p style="margin:4px 0;"><strong>Domain / Subdomain:</strong> ${lineDomain}</p>
+              <p style="margin:4px 0;"><strong>Expiration Date:</strong> ${formattedExp} (2 Months Access)</p>
+              <p style="margin:4px 0;"><strong>Phone Status:</strong> Pending Admin Phone Number Activation</p>
+            </div>
+            <p><strong>Next Step:</strong> Your order is successful! Please contact admin for activation of your business phone number.</p>
+            <p style="color:#6b7280;font-size:13px;">We will send a renewal reminder email to your inbox 5 days before your plan expires.</p>`
+          );
+          await sendEmail(targetEmail, `✓ Order Confirmed: ${planTitle} · ${lineDomain}`, html);
+          console.log(`[Resend Email] GHL phone confirmation sent to ${targetEmail}`);
+        }
+      } catch (mailErr) {
+        console.error('Failed to send GHL Phone confirmation email:', mailErr.message);
+      }
+
       console.log('GHL BUSINESS PHONE order marked as paid:', phoneOrder?.orderNumber || payment.orderNumber);
     } catch (e) {
       console.error('GHL BUSINESS PHONE provisioning error:', e.message);
+    }
+    return;
+  }
+
+  // GOOGLE VOICE orders: activate the Google Voice subscription, set 1-month (30-day) expiry, send Resend email
+  if (payment.orderType === 'google_voice' || (payment.orderType === 'voice' && !payment.addonSku)) {
+    try {
+      let voiceOrder = null;
+      if (payment.orderId) {
+        voiceOrder = await GoogleVoiceOrder.findById(payment.orderId);
+      }
+      if (!voiceOrder) {
+        voiceOrder = await GoogleVoiceOrder.findOne({
+          customerId: payment.customerId,
+          $or: [{ paymentId: payment._id }, { status: 'pending_payment' }]
+        }).sort({ createdAt: -1 });
+      }
+
+      const now = new Date();
+      // Monthly duration (30 days) — if already active and not expired, extend from existing expiry date
+      let baseDate = now;
+      if (voiceOrder && voiceOrder.expiresAt && new Date(voiceOrder.expiresAt).getTime() > now.getTime()) {
+        baseDate = new Date(voiceOrder.expiresAt);
+      }
+      const expiresAt = new Date(baseDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+      if (voiceOrder) {
+        voiceOrder.status = payment.isTest ? 'test_paid' : 'paid';
+        voiceOrder.purchasedAt = now;
+        voiceOrder.expiresAt = expiresAt;
+        voiceOrder.paymentId = payment._id;
+        voiceOrder.paymentMethod = payment.method;
+        voiceOrder.notified5DaysBefore = false;
+        voiceOrder.notifiedSuspension = false;
+        await voiceOrder.save();
+      }
+
+      // Also create or update Subscription record so it shows in customer subscriptions
+      try {
+        const subId = voiceOrder ? `voice-${voiceOrder._id}` : `voice-${payment._id}`;
+        await Subscription.findOneAndUpdate(
+          { customerId: payment.customerId, type: 'voice' },
+          {
+            customerId: payment.customerId,
+            orderId: voiceOrder?._id || payment.orderId,
+            subscriptionId: subId,
+            type: 'voice',
+            plan: voiceOrder?.planName || 'Google Voice',
+            seats: 1,
+            monthlyPrice: voiceOrder?.price || payment.amount || 30,
+            status: 'active',
+            domain: voiceOrder?.domain || payment.domain || '',
+            autoRenew: true,
+            nextBillingDate: expiresAt,
+            expiresAt: expiresAt,
+            updatedAt: now,
+          },
+          { upsert: true, new: true }
+        );
+      } catch (subErr) {
+        console.error('Error updating Subscription for Google Voice:', subErr);
+      }
+
+      // Send Resend confirmation email for Google Voice order success / renewal
+      try {
+        const targetEmail = voiceOrder?.customerEmail || me?.businessEmail || payment.customerEmail;
+        if (targetEmail) {
+          const formattedExp = expiresAt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+          const planTitle = voiceOrder?.planName || 'Google Voice Plan';
+          const planCost = voiceOrder?.price ? `$${Number(voiceOrder.price).toFixed(2)}` : `$${Number(payment.amount || 30).toFixed(2)}`;
+          const lineDomain = voiceOrder?.domain || payment.domain || 'your company domain';
+          const isRenew = baseDate.getTime() > now.getTime();
+          const html = emailShell(
+            isRenew ? 'Google Voice Subscription Renewed' : 'Google Voice Subscription Activated',
+            `<p>Hello,</p>
+            <p>Your payment has been received and your <strong>${planTitle}</strong> subscription is now <strong>active</strong> for <strong>${lineDomain}</strong>.</p>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin:16px 0;">
+              <p style="margin:4px 0;"><strong>Plan:</strong> ${planTitle} (${planCost}/month)</p>
+              <p style="margin:4px 0;"><strong>Domain:</strong> ${lineDomain}</p>
+              <p style="margin:4px 0;"><strong>Expiration / Next Renewal:</strong> ${formattedExp}</p>
+              <p style="margin:4px 0;"><strong>Billing Cycle:</strong> Monthly</p>
+            </div>
+            <p><strong>Next Steps in your Google Admin Console:</strong></p>
+            <ol style="padding-left:20px;margin:10px 0;line-height:1.6;">
+              <li>Log in to your Google Admin console at <a href="https://admin.google.com/ac/apps/voice" target="_blank">admin.google.com</a></li>
+              <li>Go to <strong>Apps → Google Workspace → Google Voice</strong></li>
+              <li>Add a <strong>Voice location</strong> (service address required for emergency calling)</li>
+              <li>Assign a <strong>Voice license</strong> and phone number to each user</li>
+            </ol>
+            <p style="color:#6b7280;font-size:13px;">A renewal reminder will be automatically sent to your email 5 days prior to expiration.</p>`
+          );
+          await sendEmail(targetEmail, `${isRenew ? 'Subscription Renewed' : '✓ Service Activated'}: ${planTitle} · ${lineDomain}`, html);
+          console.log(`[Resend Email] Google Voice confirmation sent to ${targetEmail}`);
+        }
+      } catch (mailErr) {
+        console.error('Failed to send Google Voice confirmation email:', mailErr.message);
+      }
+
+      console.log('GOOGLE VOICE order marked as paid:', voiceOrder?.orderNumber || payment.orderNumber);
+    } catch (e) {
+      console.error('GOOGLE VOICE provisioning error:', e.message);
     }
     return;
   }
@@ -6095,12 +6259,174 @@ async function syncAndCheckNonWorkspaceSubscriptions(opts = {}) {
         }
       }
     }
+    // 6. Check Expiring Google Voice and GHL Business Phone orders directly
+    try {
+      await checkExpiringVoiceAndGhlPhoneOrders(dryRun, results);
+    } catch (phoneCheckErr) {
+      console.error('Error during Google Voice / GHL Phone expiration check:', phoneCheckErr.message);
+    }
   } catch (outerErr) {
     console.error('Non-workspace billing cycle check failed:', outerErr.message);
     results.error = outerErr.message;
   }
 
   return results;
+}
+
+// Check 5-day expiration & suspension for Google Voice and GHL Business Phone
+async function checkExpiringVoiceAndGhlPhoneOrders(dryRun = false, results = { notified5Days: [], warned: [] }) {
+  const now = new Date();
+  const portalUrl = (FRONTEND_URL || 'https://portal.gnbmentor.com').replace(/\/+$/, '');
+
+  // 1. Google Voice Orders
+  try {
+    const voiceOrders = await GoogleVoiceOrder.find({
+      status: { $in: ['paid', 'active', 'test_paid'] },
+      expiresAt: { $exists: true, $ne: null }
+    });
+
+    for (const vo of voiceOrders) {
+      const expTime = new Date(vo.expiresAt).getTime();
+      const daysToDue = (expTime - now.getTime()) / (1000 * 60 * 60 * 24);
+      const recipient = vo.customerEmail || (await emailForDomain(vo.domain));
+
+      // 5-day renewal reminder
+      if (daysToDue <= 5 && daysToDue > 0 && !vo.notified5DaysBefore) {
+        vo.notified5DaysBefore = true;
+        if (!dryRun) await vo.save();
+
+        if (recipient && !dryRun) {
+          try {
+            const formattedExp = new Date(vo.expiresAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+            const html = emailShell(
+              '⚠️ Google Voice Renewal Reminder: 5 Days Remaining',
+              `<p>Hello,</p>
+              <p>This is a reminder that your <strong>${vo.planName || 'Google Voice'}</strong> plan for <strong>${vo.domain || 'your domain'}</strong> will expire in <strong>${Math.ceil(daysToDue)} days</strong> on <strong>${formattedExp}</strong>.</p>
+              <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px;margin:16px 0;color:#92400e;">
+                <p style="margin:4px 0;"><strong>Plan:</strong> ${vo.planName || 'Google Voice'} ($${Number(vo.price || 30).toFixed(2)}/mo)</p>
+                <p style="margin:4px 0;"><strong>Expiration Date:</strong> ${formattedExp}</p>
+                <p style="margin:4px 0;"><strong>Status:</strong> Active (Renewal Required Soon)</p>
+              </div>
+              <p><strong>Warning:</strong> If not renewed before the expiration date, your phone lines and services will be suspended.</p>
+              <p><a href="${portalUrl}/#voice" style="background:#6e46eb;color:#fff;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:bold;">Renew Google Voice Now →</a></p>`
+            );
+            await sendEmail(recipient, `⚠️ Renewal Reminder: ${vo.planName || 'Google Voice'} expires in ${Math.ceil(daysToDue)} days`, html);
+            console.log(`[Resend 5-Day Voice Renewal] Sent to ${recipient} for ${vo.domain}`);
+            results.notified5Days?.push(`Google Voice (${vo.domain}) → ${recipient}`);
+          } catch (mailErr) {
+            console.error(`Failed to send Voice 5-day renewal notice to ${recipient}:`, mailErr.message);
+          }
+        }
+      }
+
+      // Past expiration -> Suspended warning
+      if (daysToDue <= 0 && !vo.notifiedSuspension) {
+        vo.status = 'suspended';
+        vo.suspendedAt = now;
+        vo.notifiedSuspension = true;
+        if (!dryRun) await vo.save();
+
+        if (recipient && !dryRun) {
+          try {
+            const html = emailShell(
+              '🚨 Service Suspended: Google Voice Plan Expired',
+              `<p>Hello,</p>
+              <p>Your <strong>${vo.planName || 'Google Voice'}</strong> subscription for <strong>${vo.domain || 'your domain'}</strong> has expired and your service is now <strong>suspended</strong>.</p>
+              <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;margin:16px 0;color:#991b1b;">
+                <p style="margin:4px 0;"><strong>Plan:</strong> ${vo.planName || 'Google Voice'} ($${Number(vo.price || 30).toFixed(2)}/mo)</p>
+                <p style="margin:4px 0;"><strong>Domain:</strong> ${vo.domain}</p>
+                <p style="margin:4px 0;"><strong>Status:</strong> SUSPENDED</p>
+              </div>
+              <p>To reactivate your phone service immediately, please log in to your customer portal and renew your monthly subscription.</p>
+              <p><a href="${portalUrl}/#voice" style="background:#dc2626;color:#fff;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:bold;">Reactivate Google Voice →</a></p>`
+            );
+            await sendEmail(recipient, `🚨 Service Suspended: Google Voice for ${vo.domain}`, html);
+            console.log(`[Resend Voice Suspension Warning] Sent to ${recipient} for ${vo.domain}`);
+            results.warned?.push(`Google Voice suspended (${vo.domain}) → ${recipient}`);
+          } catch (mailErr) {
+            console.error(`Failed to send Voice suspension warning to ${recipient}:`, mailErr.message);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error checking Google Voice orders:', err.message);
+  }
+
+  // 2. GHL Business Phone Orders
+  try {
+    const ghlOrders = await GhlBusinessPhoneOrder.find({
+      status: { $in: ['paid', 'active', 'test_paid'] },
+      expiresAt: { $exists: true, $ne: null }
+    });
+
+    for (const go of ghlOrders) {
+      const expTime = new Date(go.expiresAt).getTime();
+      const daysToDue = (expTime - now.getTime()) / (1000 * 60 * 60 * 24);
+      const recipient = go.customerEmail || (await emailForDomain(go.domain));
+
+      // 5-day renewal reminder
+      if (daysToDue <= 5 && daysToDue > 0 && !go.notified5DaysBefore) {
+        go.notified5DaysBefore = true;
+        if (!dryRun) await go.save();
+
+        if (recipient && !dryRun) {
+          try {
+            const formattedExp = new Date(go.expiresAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+            const html = emailShell(
+              '⚠️ GHL Business Phone Renewal Reminder: 5 Days Remaining',
+              `<p>Hello,</p>
+              <p>This is a reminder that your <strong>${go.planName || 'GHL Business Phone'}</strong> plan for <strong>${go.subdomain || go.domain || 'your domain'}</strong> will expire in <strong>${Math.ceil(daysToDue)} days</strong> on <strong>${formattedExp}</strong>.</p>
+              <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px;margin:16px 0;color:#92400e;">
+                <p style="margin:4px 0;"><strong>Plan:</strong> ${go.planName || 'GHL Business Phone'} ($${Number(go.price || 50).toFixed(2)})</p>
+                <p style="margin:4px 0;"><strong>Expiration Date:</strong> ${formattedExp}</p>
+                <p style="margin:4px 0;"><strong>Status:</strong> Active (Renewal Required Soon)</p>
+              </div>
+              <p><strong>Warning:</strong> If not renewed before the expiration date, your phone lines and services will be suspended.</p>
+              <p><a href="${portalUrl}/#business-phone" style="background:#6e46eb;color:#fff;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:bold;">Renew GHL Business Phone Now →</a></p>`
+            );
+            await sendEmail(recipient, `⚠️ Renewal Reminder: ${go.planName || 'GHL Business Phone'} expires in ${Math.ceil(daysToDue)} days`, html);
+            console.log(`[Resend 5-Day GHL Phone Renewal] Sent to ${recipient} for ${go.domain}`);
+            results.notified5Days?.push(`GHL Phone (${go.domain}) → ${recipient}`);
+          } catch (mailErr) {
+            console.error(`Failed to send GHL Phone 5-day renewal notice to ${recipient}:`, mailErr.message);
+          }
+        }
+      }
+
+      // Past expiration -> Suspended warning
+      if (daysToDue <= 0 && !go.notifiedSuspension) {
+        go.status = 'suspended';
+        go.suspendedAt = now;
+        go.notifiedSuspension = true;
+        if (!dryRun) await go.save();
+
+        if (recipient && !dryRun) {
+          try {
+            const html = emailShell(
+              '🚨 Service Suspended: GHL Business Phone Plan Expired',
+              `<p>Hello,</p>
+              <p>Your <strong>${go.planName || 'GHL Business Phone'}</strong> subscription for <strong>${go.subdomain || go.domain || 'your domain'}</strong> has expired and your phone line is now <strong>suspended</strong>.</p>
+              <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;margin:16px 0;color:#991b1b;">
+                <p style="margin:4px 0;"><strong>Plan:</strong> ${go.planName || 'GHL Business Phone'}</p>
+                <p style="margin:4px 0;"><strong>Domain / Subdomain:</strong> ${go.subdomain || go.domain}</p>
+                <p style="margin:4px 0;"><strong>Status:</strong> SUSPENDED</p>
+              </div>
+              <p>To reactivate your business phone service immediately, please log in to your customer portal and renew your plan.</p>
+              <p><a href="${portalUrl}/#business-phone" style="background:#dc2626;color:#fff;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:bold;">Reactivate Business Phone →</a></p>`
+            );
+            await sendEmail(recipient, `🚨 Service Suspended: GHL Business Phone for ${go.subdomain || go.domain}`, html);
+            console.log(`[Resend GHL Phone Suspension Warning] Sent to ${recipient} for ${go.domain}`);
+            results.warned?.push(`GHL Phone suspended (${go.domain}) → ${recipient}`);
+          } catch (mailErr) {
+            console.error(`Failed to send GHL Phone suspension warning to ${recipient}:`, mailErr.message);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error checking GHL Business Phone orders:', err.message);
+  }
 }
 
 // Auth: either an admin JWT, or ?secret=<JWT_SECRET> so it can be run straight
@@ -10427,6 +10753,375 @@ app.post('/api/customer/ghl-phone/checkout', authenticateCustomer, async (req, r
   }
 });
 
+// ==================== GOOGLE VOICE INTEGRATION ====================
+// Public / Customer: get Google Voice price plans ($30 Starter, $45 Standard, $55 Premier)
+app.get('/api/google-voice/plans', async (req, res) => {
+  res.json({
+    plans: [
+      {
+        id: 'voice-starter',
+        name: 'Starter',
+        price: 30.00,
+        monthlyPrice: 30.00,
+        billingCycle: 'monthly',
+        features: [
+          'Up to 10 users / locations',
+          'Free calling to US & Canada',
+          'SMS messaging (US only)',
+          'Voicemail transcription & call forwarding'
+        ],
+        badge: 'Starter',
+        desc: 'For small teams and entrepreneurs.'
+      },
+      {
+        id: 'voice-standard',
+        name: 'Standard',
+        price: 45.00,
+        monthlyPrice: 45.00,
+        billingCycle: 'monthly',
+        features: [
+          'Unlimited users & domestic locations',
+          'Multi-level auto attendants (IVR)',
+          'Desk phone support & ring groups',
+          'eDiscovery for calls & voicemails'
+        ],
+        badge: 'Most Popular',
+        desc: 'For growing businesses with high call volume.'
+      },
+      {
+        id: 'voice-premier',
+        name: 'Premier',
+        price: 55.00,
+        monthlyPrice: 55.00,
+        billingCycle: 'monthly',
+        features: [
+          'Unlimited users & international locations',
+          'Advanced reporting & BigQuery export',
+          'Automatic call recording',
+          'Enterprise priority SLA & dedicated routing'
+        ],
+        badge: 'Enterprise',
+        desc: 'For advanced organizations with international operations.'
+      }
+    ]
+  });
+});
+
+// Customer: get current Google Voice subscription status, expiry, and domain checks
+app.get('/api/customer/google-voice/status', authenticateCustomer, async (req, res) => {
+  try {
+    const me = await Customer.findById(req.customerId);
+    if (!me) return res.status(404).json({ error: 'Customer not found' });
+
+    let order = await GoogleVoiceOrder.findOne({ customerId: req.customerId }).sort({ createdAt: -1 });
+    const now = Date.now();
+    let isExpired = false;
+    let daysRemaining = 0;
+    if (order) {
+      if (order.expiresAt) {
+        const expTime = new Date(order.expiresAt).getTime();
+        if (expTime <= now) {
+          isExpired = true;
+          if (order.status !== 'expired' && order.status !== 'suspended') {
+            order.status = 'suspended';
+            await order.save();
+          }
+        } else {
+          daysRemaining = Math.max(0, Math.ceil((expTime - now) / (1000 * 60 * 60 * 24)));
+        }
+      } else if (order.status === 'expired' || order.status === 'suspended') {
+        isExpired = true;
+      }
+    }
+
+    const latestWo = await WorkspaceOrder.findOne({
+      customerId: req.customerId,
+      status: { $in: ['active', 'paid', 'completed', 'test_paid'] }
+    }).sort({ createdAt: -1 }) || await WorkspaceOrder.findOne({ customerId: req.customerId }).sort({ createdAt: -1 });
+
+    const workspaceDomain = latestWo?.organization?.domain || me.domain || '';
+    const hasActiveWorkspace = !!(latestWo && ['active', 'paid', 'completed', 'test_paid'].includes(latestWo.status));
+
+    const plans = [
+      {
+        id: 'voice-starter',
+        name: 'Starter',
+        price: 30.00,
+        monthlyPrice: 30.00,
+        billingCycle: 'monthly',
+        features: [
+          'Up to 10 users / locations',
+          'Free calling to US & Canada',
+          'SMS messaging (US only)',
+          'Voicemail transcription & call forwarding'
+        ],
+        badge: 'Starter',
+        desc: 'For small teams and entrepreneurs.'
+      },
+      {
+        id: 'voice-standard',
+        name: 'Standard',
+        price: 45.00,
+        monthlyPrice: 45.00,
+        billingCycle: 'monthly',
+        features: [
+          'Unlimited users & domestic locations',
+          'Multi-level auto attendants (IVR)',
+          'Desk phone support & ring groups',
+          'eDiscovery for calls & voicemails'
+        ],
+        badge: 'Most Popular',
+        desc: 'For growing businesses with high call volume.'
+      },
+      {
+        id: 'voice-premier',
+        name: 'Premier',
+        price: 55.00,
+        monthlyPrice: 55.00,
+        billingCycle: 'monthly',
+        features: [
+          'Unlimited users & international locations',
+          'Advanced reporting & BigQuery export',
+          'Automatic call recording',
+          'Enterprise priority SLA & dedicated routing'
+        ],
+        badge: 'Enterprise',
+        desc: 'For advanced organizations with international operations.'
+      }
+    ];
+
+    res.json({
+      order: order ? {
+        id: order._id,
+        orderNumber: order.orderNumber,
+        domain: order.domain,
+        businessEmail: order.businessEmail,
+        planId: order.planId,
+        planName: order.planName,
+        billingCycle: order.billingCycle,
+        price: order.price,
+        durationMonths: order.durationMonths || 1,
+        status: order.status,
+        purchasedAt: order.purchasedAt,
+        expiresAt: order.expiresAt,
+        paymentMethod: order.paymentMethod,
+      } : null,
+      isExpired,
+      daysRemaining,
+      workspaceDomain,
+      hasActiveWorkspace,
+      customerEmail: me.businessEmail,
+      plans
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer: checkout Google Voice (supports Stripe, Nicky, balance, saved card)
+app.post('/api/customer/google-voice/checkout', authenticateCustomer, async (req, res) => {
+  try {
+    const { planId = 'voice-starter', method = 'stripe', businessEmail, domain: reqDomain } = req.body;
+    const me = await Customer.findById(req.customerId);
+    if (!me) return res.status(404).json({ error: 'Customer not found' });
+
+    let planPrice = 30.00;
+    let planName = 'Google Voice Starter';
+    let cleanPlanId = 'voice-starter';
+
+    const normalized = String(planId || '').toLowerCase().trim();
+    if (normalized.includes('premier') || normalized.includes('55')) {
+      cleanPlanId = 'voice-premier';
+      planPrice = 55.00;
+      planName = 'Google Voice Premier';
+    } else if (normalized.includes('standard') || normalized.includes('45')) {
+      cleanPlanId = 'voice-standard';
+      planPrice = 45.00;
+      planName = 'Google Voice Standard';
+    } else {
+      cleanPlanId = 'voice-starter';
+      planPrice = 30.00;
+      planName = 'Google Voice Starter';
+    }
+
+    const latestWo = await WorkspaceOrder.findOne({
+      customerId: req.customerId,
+      status: { $in: ['active', 'paid', 'completed', 'test_paid'] }
+    }).sort({ createdAt: -1 }) || await WorkspaceOrder.findOne({ customerId: req.customerId }).sort({ createdAt: -1 });
+
+    const providedEmail = (businessEmail || '').trim();
+    const providedDomain = (reqDomain || (providedEmail && providedEmail.includes('@') ? providedEmail.split('@')[1] : '') || '').trim().toLowerCase();
+    const primaryDomain = (providedDomain || latestWo?.organization?.domain || me.domain || '').toLowerCase().trim();
+
+    const orderNumber = `GV-${Date.now()}`;
+    const voiceOrder = await GoogleVoiceOrder.create({
+      customerId: me._id,
+      customerEmail: providedEmail || me.businessEmail,
+      orderNumber,
+      domain: primaryDomain,
+      businessEmail: providedEmail || me.businessEmail,
+      planId: cleanPlanId,
+      planName,
+      billingCycle: 'monthly',
+      price: planPrice,
+      durationMonths: 1,
+      status: 'pending_payment',
+      paymentMethod: method,
+      workspaceOrderId: latestWo?._id || null,
+    });
+
+    const taxed = await applyTaxAndFee(planPrice);
+    const amount = taxed.total;
+
+    const payment = await Payment.create({
+      customerId: me._id,
+      customerEmail: me.businessEmail,
+      domain: primaryDomain,
+      orderId: voiceOrder._id,
+      orderNumber,
+      orderType: 'google_voice',
+      amount,
+      subtotal: taxed.subtotal,
+      tax: taxed.tax,
+      fee: taxed.fee,
+      currency: 'USD',
+      method: ['nicky', 'saved_card', 'balance'].includes(method) ? method : 'stripe',
+      status: 'pending',
+    });
+
+    voiceOrder.paymentId = payment._id;
+    await voiceOrder.save();
+
+    const orderDesc = `${planName}: ${primaryDomain || 'Google Voice'}`;
+    const baseUrl = (FRONTEND_URL || 'https://portal.gnbmentor.com').replace(/\/+$/, '');
+    const successUrl = `${baseUrl}/?payment=success&pid=${payment._id}&type=google_voice`;
+    const cancelUrl = `${baseUrl}/?payment=cancelled&pid=${payment._id}&type=google_voice`;
+
+    // 1. Balance payment
+    if (method === 'balance') {
+      const balance = me.balance || 0;
+      if (balance < amount) {
+        return res.status(400).json({ error: `Insufficient account balance ($${balance.toFixed(2)} available, $${amount.toFixed(2)} needed).` });
+      }
+      me.balance -= amount;
+      await me.save();
+      try {
+        await BalanceTransaction.create({
+          customerId: me._id,
+          amount: -amount,
+          type: 'purchase',
+          description: `Payment for ${orderDesc}`,
+          balanceAfter: me.balance,
+          orderId: voiceOrder._id,
+          paymentId: payment._id,
+        });
+      } catch (_) {}
+      await markPaidAndProvision(payment);
+      return res.json({
+        paid: true,
+        orderId: voiceOrder._id,
+        orderNumber,
+        message: 'Your Google Voice order is successful! Please assign your phone numbers in Google Admin Console.',
+      });
+    }
+
+    // 2. Saved card off-session
+    if (method === 'saved_card') {
+      if (!me.savedPaymentMethodId || !me.stripeCustomerId) {
+        return res.status(400).json({ error: 'No saved card found on your account. Please select Card or Crypto to pay.' });
+      }
+      let stripe;
+      try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      try {
+        const pi = await stripe.paymentIntents.create({
+          amount: Math.round(amount * 100),
+          currency: 'usd',
+          customer: me.stripeCustomerId,
+          payment_method: me.savedPaymentMethodId,
+          off_session: true,
+          confirm: true,
+          description: orderDesc,
+          metadata: { paymentId: String(payment._id), orderId: String(voiceOrder._id), orderType: 'google_voice' },
+        });
+        payment.providerRef = pi.id;
+        await payment.save();
+        await markPaidAndProvision(payment);
+        return res.json({
+          paid: true,
+          orderId: voiceOrder._id,
+          orderNumber,
+          message: 'Your Google Voice order is successful! Please assign your phone numbers in Google Admin Console.',
+        });
+      } catch (cardErr) {
+        return res.status(400).json({ error: 'Card charge failed: ' + cardErr.message });
+      }
+    }
+
+    // 3. Stripe Checkout Session
+    if (method === 'stripe') {
+      let stripe;
+      try { stripe = await getStripeForMode(); } catch (e) { return res.status(500).json({ error: e.message }); }
+      const sd = await PaymentSettings.findOne({ singleton: 'main' });
+      payment.isTest = (sd?.stripeMode || 'test') !== 'live';
+      await payment.save();
+
+      const line_items = [{
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: `${planName} (Monthly)`,
+            description: `Google Voice business subscription for ${primaryDomain}. Monthly recurring renewal.`,
+          },
+          unit_amount: Math.round(taxed.subtotal * 100)
+        },
+        quantity: 1
+      }];
+      if (taxed.fee > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: 'Processing fee' }, unit_amount: Math.round(taxed.fee * 100) }, quantity: 1 });
+      if (taxed.tax > 0) line_items.push({ price_data: { currency: 'usd', product_data: { name: `${taxed.taxLabel} (${taxed.taxPercent}%)` }, unit_amount: Math.round(taxed.tax * 100) }, quantity: 1 });
+
+      const stripeCustomerId = await getOrCreateStripeCustomer(me, stripe);
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        customer: stripeCustomerId || undefined,
+        line_items,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        client_reference_id: String(payment._id),
+        metadata: { paymentId: String(payment._id), orderId: String(voiceOrder._id), orderType: 'google_voice' },
+      });
+      payment.providerRef = session.id;
+      payment.checkoutUrl = session.url;
+      await payment.save();
+      return res.json({ checkoutUrl: session.url, paymentId: payment._id, orderId: voiceOrder._id });
+    }
+
+    // 4. Nicky Crypto Payment
+    try {
+      const nicky = await createNickyPayment({
+        amount,
+        currency: 'USD',
+        description: orderDesc,
+        orderNumber,
+        reference: String(payment._id),
+        billDescription: orderDesc,
+        customerEmail: me.businessEmail,
+        customerName: me.firstName ? `${me.firstName} ${me.lastName || ''}`.trim() : me.businessEmail,
+        redirectUrl: successUrl,
+        cancelUrl,
+      });
+      payment.checkoutUrl = nicky.url;
+      payment.providerRef = nicky.nickyId || nicky.shortId || String(payment._id);
+      payment.providerShortId = nicky.shortId || null;
+      await payment.save();
+      return res.json({ checkoutUrl: nicky.url, paymentId: payment._id, orderId: voiceOrder._id });
+    } catch (e) {
+      return res.status(500).json({ error: 'Crypto checkout not available: ' + e.message });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Admin: list all GHL Business Phone orders & Google Workspace form intakes
 app.get('/api/admin/ghl-phone/orders', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
@@ -11302,9 +11997,9 @@ const DEFAULT_PRODUCTS = {
     { id: 'frontline', name: 'Frontline Starter', monthlyPrice: 6.00, features: ['Business email', 'Shared device support', 'Meet (100 participants)', 'For frontline workers'] },
   ],
   voice: [
-    { id: 'voice-starter', name: 'Voice Starter', monthlyPrice: 12.00, features: ['1 user / domain region', 'Voicemail & SMS', 'Call forwarding'] },
-    { id: 'voice-standard', name: 'Voice Standard', monthlyPrice: 24.00, features: ['Unlimited US regions', 'Multi-level auto attendant', 'Ring groups'] },
-    { id: 'voice-premier', name: 'Voice Premier', monthlyPrice: 36.00, features: ['Unlimited international', 'Advanced reporting', 'Desk phone support'] },
+    { id: 'voice-starter', name: 'Starter', price: 30.00, monthlyPrice: 30.00, billingCycle: 'monthly', features: ['Up to 10 users / locations', 'Free calling to US & Canada', 'SMS messaging (US only)', 'Voicemail transcription & call forwarding'], description: 'Starter plan for small businesses and teams' },
+    { id: 'voice-standard', name: 'Standard', price: 45.00, monthlyPrice: 45.00, billingCycle: 'monthly', features: ['Unlimited users & domestic locations', 'Multi-level auto attendants (IVR)', 'Desk phone support & ring groups', 'eDiscovery for calls & voicemails'], description: 'Standard plan for growing businesses' },
+    { id: 'voice-premier', name: 'Premier', price: 55.00, monthlyPrice: 55.00, billingCycle: 'monthly', features: ['Unlimited users & international locations', 'Advanced reporting & BigQuery export', 'Automatic call recording', 'Enterprise priority SLA & dedicated routing'], description: 'Premier enterprise tier with international reach' },
   ],
   businessPhone: [
     {
@@ -14091,6 +14786,8 @@ app.listen(PORT, HOST, () => {
   console.log(`☁️ Google Workspace configured: ${process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? 'Yes' : 'No'}`);
   // Start the daily midnight billing scheduler
   scheduleDailyBilling();
+  // Periodic 6h check for Google Voice & GHL phone 5-day expiration notices
+  setInterval(() => { checkExpiringVoiceAndGhlPhoneOrders().catch(() => {}); }, 6 * 60 * 60 * 1000);
   // Start the Nicky crypto payment poller
   scheduleNickyPolling();
   // Load Namecheap sandbox/live mode from settings

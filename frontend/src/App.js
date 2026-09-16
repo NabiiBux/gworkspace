@@ -522,14 +522,21 @@ const BrandingProvider = ({ children }) => {
 const safeReplaceHistory = (preserveQuery = false) => {
   try {
     if (typeof window === 'undefined' || !window.history || !window.history.replaceState) return;
-    let path = window.location.pathname || '/';
-    // Collapse any double or repeated slashes (e.g. "//" -> "/") to prevent protocol-relative URL interpretation
-    path = path.replace(/\/+/g, '/');
-    if (!path.startsWith('/')) path = '/' + path;
-    const target = preserveQuery ? (path + (window.location.search || '')) : path;
+    const url = new URL(window.location.href);
+    let p = (url.pathname || '/').replace(/\/+/g, '/');
+    if (!p.startsWith('/')) p = '/' + p;
+    url.pathname = p;
+    if (!preserveQuery) {
+      url.search = '';
+    }
+    const target = url.pathname + (preserveQuery ? url.search : '') + (url.hash || '');
     window.history.replaceState({}, '', target);
   } catch (err) {
-    console.warn('safeReplaceHistory error ignored:', err);
+    try {
+      window.history.replaceState({}, '', '/');
+    } catch (_) {
+      // Intentionally suppressed to prevent any unhandled runtime exceptions
+    }
   }
 };
 
@@ -6338,6 +6345,8 @@ const CustomerPortal = ({ onViewStorefront }) => {
       setPayBanner('Payment was cancelled. You can try again anytime.');
       if (paramType === 'business_phone' || paramType === 'ghl_business_phone') {
         setSection('business-phone');
+      } else if (paramType === 'google_voice' || paramType === 'voice') {
+        setSection('voice');
       } else if (paramType === 'workspace') {
         setSection('order');
       } else if (paramType === 'domain' || paramType === 'domain_transfer') {
@@ -6357,6 +6366,7 @@ const CustomerPortal = ({ onViewStorefront }) => {
             const isDomainOrder = paramType === 'domain' || paramType === 'domain_transfer' || r.data.orderType === 'domain' || r.data.orderType === 'domain_transfer';
             const isWorkspaceOrder = paramType === 'workspace' || r.data.orderType === 'workspace';
             const isPhoneOrder = paramType === 'business_phone' || paramType === 'ghl_business_phone' || r.data.orderType === 'ghl_business_phone';
+            const isVoiceOrder = paramType === 'google_voice' || paramType === 'voice' || r.data.orderType === 'google_voice' || r.data.orderType === 'voice';
             const dom = r.data.domain || paramDomain || purchasedDomain;
             if (isDomainOrder && dom) {
               setPurchasedDomain(dom);
@@ -6369,6 +6379,9 @@ const CustomerPortal = ({ onViewStorefront }) => {
             } else if (isPhoneOrder) {
               setPayBanner('🎉 Order successful! Please contact admin for activation of phone number.');
               setSection('business-phone');
+            } else if (isVoiceOrder) {
+              setPayBanner('🎉 Google Voice subscription activated! Please assign your phone numbers in Google Admin console.');
+              setSection('voice');
             } else {
               setPayBanner('✓ Payment confirmed — your order is being set up. Thank you!');
             }
@@ -6389,6 +6402,8 @@ const CustomerPortal = ({ onViewStorefront }) => {
               setSection('business-phone');
             } else if (paramType === 'business_phone' || paramType === 'ghl_business_phone') {
               setSection('business-phone');
+            } else if (paramType === 'google_voice' || paramType === 'voice') {
+              setSection('voice');
             }
             setPayBanner('Your payment is still confirming. Your order will activate automatically once confirmed — check back shortly or contact support.');
             safeReplaceHistory(false);
@@ -6403,6 +6418,8 @@ const CustomerPortal = ({ onViewStorefront }) => {
               setSection('business-phone');
             } else if (paramType === 'business_phone' || paramType === 'ghl_business_phone') {
               setSection('business-phone');
+            } else if (paramType === 'google_voice' || paramType === 'voice') {
+              setSection('voice');
             }
             setPayBanner('We couldn\'t confirm the payment automatically. If you paid, your order will activate soon — contact support if needed.');
             safeReplaceHistory(false);
@@ -6422,6 +6439,10 @@ const CustomerPortal = ({ onViewStorefront }) => {
     } else if (payStatus === 'success' && (paramType === 'business_phone' || paramType === 'ghl_business_phone')) {
       setPayBanner('🎉 Order successful! Please contact admin for activation of phone number.');
       setSection('business-phone');
+      safeReplaceHistory(false);
+    } else if (payStatus === 'success' && (paramType === 'google_voice' || paramType === 'voice')) {
+      setPayBanner('🎉 Google Voice subscription activated! Please assign your phone numbers in Google Admin console.');
+      setSection('voice');
       safeReplaceHistory(false);
     }
   }, []);
@@ -6605,7 +6626,15 @@ const CustomerPortal = ({ onViewStorefront }) => {
           )}
           {section === 'ssl' && <CustomerSsl />}
           {section === 'hosting' && <CustomerHosting initialDomain={purchasedDomain} />}
-          {section === 'voice' && <CustomerVoice />}
+          {section === 'voice' && (
+            <CustomerVoice
+              onNavigate={setSection}
+              onSetupWorkspace={(dom) => {
+                setPurchasedDomain(dom);
+                setSection('order');
+              }}
+            />
+          )}
           {section === 'business-phone' && (
             <CustomerBusinessPhone
               onNavigate={setSection}
@@ -9266,73 +9295,545 @@ const CustomerAddons = ({ initialDomain = '' }) => {
 };
 
 
-const CustomerVoice = () => {
-  const { user } = useAuth();
-  const [voice, setVoice] = useState(null);
+// ==================== CUSTOMER: GOOGLE VOICE ====================
+const CustomerVoice = ({ onNavigate, onSetupWorkspace }) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [customerDomains, setCustomerDomains] = useState([]);
+  const [selectedDomain, setSelectedDomain] = useState('');
+  const [customDomainInput, setCustomDomainInput] = useState('');
+  const [businessEmail, setBusinessEmail] = useState('');
+  const [selectedPlanId, setSelectedPlanId] = useState('voice-starter');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const VOICE_PLANS = [
+    {
+      id: 'voice-starter',
+      name: 'Starter',
+      price: '$30',
+      amount: 30,
+      cadence: '/ month',
+      desc: 'Up to 10 users / domestic locations, free calling to US & Canada, SMS, voicemail transcription & call forwarding.',
+      badge: 'Starter',
+    },
+    {
+      id: 'voice-standard',
+      name: 'Standard',
+      price: '$45',
+      amount: 45,
+      cadence: '/ month',
+      desc: 'Unlimited users & domestic locations, multi-level auto attendants (IVR), desk phone support & ring groups.',
+      badge: 'Popular',
+    },
+    {
+      id: 'voice-premier',
+      name: 'Premier',
+      price: '$55',
+      amount: 55,
+      cadence: '/ month',
+      desc: 'Unlimited users & international locations, advanced reporting, call recording, enterprise priority SLA & routing.',
+      badge: 'Premier',
+    },
+  ];
+
+  const activePlan = VOICE_PLANS.find(p => p.id === selectedPlanId) || VOICE_PLANS[0];
+
+  const loadStatus = async () => {
+    try {
+      setLoading(true);
+      const [statusRes, domainsRes] = await Promise.all([
+        axios.get(`${API_URL}/customer/google-voice/status`).catch(() => ({ data: null })),
+        axios.get(`${API_URL}/customer/my-domains`).catch(() => ({ data: { domains: [] } })),
+      ]);
+
+      if (statusRes?.data) {
+        setData(statusRes.data);
+      }
+
+      // Collect customer domains
+      const list = (domainsRes?.data?.domains || [])
+        .map(d => (d.domainName || d.domain || '').toLowerCase().trim())
+        .filter(Boolean);
+
+      if (statusRes?.data?.workspaceDomain && !list.includes(statusRes.data.workspaceDomain.toLowerCase())) {
+        list.unshift(statusRes.data.workspaceDomain.toLowerCase());
+      }
+      if (statusRes?.data?.domain && !list.includes(statusRes.data.domain.toLowerCase())) {
+        list.unshift(statusRes.data.domain.toLowerCase());
+      }
+
+      setCustomerDomains(list);
+      if (list.length > 0) {
+        setSelectedDomain(list[0]);
+      } else if (statusRes?.data?.workspaceDomain) {
+        setSelectedDomain(statusRes.data.workspaceDomain);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    (async () => { try { const r = await axios.get(`${API_URL}/customer/voice-eligibility`); setVoice(r.data); } catch (_) { setVoice({ approved: false }); } })();
+    loadStatus();
   }, []);
 
-  // Gate Voice ordering: must be admin-approved AND domain-verified.
-  if (voice && !voice.eligible) {
-    return (
-      <div className="section">
-        <h2>📞 Google Voice</h2>
-        <div style={{ background: voice.approved ? '#fffbea' : '#f8fafc', border: `1px solid ${voice.approved ? '#fde68a' : '#e2e8f0'}`, borderRadius: 12, padding: 24, maxWidth: 620 }}>
-          {!voice.approved ? (
-            <>
-              <h3 style={{ marginTop: 0 }}>Google Voice is not enabled for your account yet</h3>
-              <p style={{ color: '#5b6075' }}>Google Voice is available to approved Workspace customers. Please contact our Admin/support team to request access, and once approved you'll be able to add Google Voice here.</p>
-              <button onClick={() => { window.location.hash = 'support'; }} className="btn btn-primary">Contact support</button>
-            </>
-          ) : (
-            <>
-              <h3 style={{ marginTop: 0 }}>Google Voice unlocks with an active Workspace</h3>
-              <p style={{ color: '#5b6075' }}>Your account is <strong>approved</strong> for Google Voice. It becomes available once your Google Workspace subscription for the domain is active.</p>
-              <button onClick={() => { window.location.hash = 'addons'; }} className="btn btn-primary">Go to Add-ons</button>
-            </>
-          )}
-        </div>
-      </div>
-    );
+  const hasWorkspace = !!(data?.hasActiveWorkspace || data?.hasWorkspace);
+  const isEmailValid = !!(businessEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(businessEmail.trim()));
+  const isRequirementMet = hasWorkspace || isEmailValid;
+  const effectiveDomain = (selectedDomain || customDomainInput || (isEmailValid ? businessEmail.trim().split('@')[1] : '')).toLowerCase().trim();
+
+  const handleCheckout = async (method) => {
+    if (!effectiveDomain && !isEmailValid) {
+      setMsg('Please connect a domain or enter your business email.');
+      return;
+    }
+    if (!isRequirementMet) {
+      setMsg('Please set up Google Workspace OR enter your business email to proceed.');
+      return;
+    }
+    setBusy(true);
+    setMsg('');
+    try {
+      const res = await axios.post(`${API_URL}/customer/google-voice/checkout`, {
+        planId: activePlan.id,
+        domain: effectiveDomain,
+        businessEmail: isEmailValid ? businessEmail.trim() : (data?.customerEmail || ''),
+        method,
+      });
+      if (res.data?.checkoutUrl) {
+        window.location.href = res.data.checkoutUrl;
+      } else if (res.data?.paid) {
+        setMsg('🎉 Order successful! Google Voice subscription activated.');
+        loadStatus();
+      } else {
+        setMsg('Could not initialize checkout. Please try again.');
+      }
+    } catch (e) {
+      setMsg(e?.response?.data?.error || 'Checkout failed. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cardStyle = { background: '#fff', borderRadius: 14, padding: 22, border: '1px solid #e2e8f0', marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' };
+  const order = data?.order;
+  const isExpired = order && (order.status === 'expired' || order.status === 'suspended' || (order.expiresAt && new Date(order.expiresAt).getTime() <= Date.now()));
+  const isActive = order && !isExpired && ['paid', 'active', 'test_paid'].includes(order.status);
+  const daysRemaining = data?.daysRemaining;
+  const isExpiringSoon = isActive && daysRemaining != null && daysRemaining <= 5;
+
+  if (loading) {
+    return <div className="loading" style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Loading Google Voice…</div>;
   }
 
   return (
-    <div className="section">
-      <h2>📞 Google Voice</h2>
-      {voice?.eligible && (
-        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: '12px 16px', marginBottom: 16, color: '#166534', fontWeight: 600, fontSize: 14 }}>
-          ✓ Your account is approved and your domain is verified — you can add Google Voice.
+    <div style={{ maxWidth: 860, margin: '0 auto', paddingBottom: 30 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, marginBottom: 18, flexWrap: 'wrap' }}>
+        <div>
+          <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10, fontSize: 22 }}>
+            📞 Google Voice Plans
+          </h2>
+          <p style={{ color: '#64748b', margin: '4px 0 0', fontSize: 13.5 }}>
+            Official business phone numbers for Google Workspace with auto-attendants, SMS, and global calling.
+          </p>
         </div>
-      )}
-      <div style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 20, marginBottom: 16 }}>
-        <p style={{ marginTop: 0 }}>
-          Google Voice adds business phone numbers to your Workspace. Voice is available in supported countries
-          (US, Canada, UK, and parts of Europe). One Voice subscription per account.
-        </p>
-        <p style={{ marginBottom: 0, color: '#5b6075' }}>
-          To add Voice for your domain, open a support ticket and our team will provision it for you.
-        </p>
       </div>
 
-      <div style={{ background: '#fffbea', border: '1px solid #fde68a', borderRadius: 12, padding: 20 }}>
-        <h3 style={{ marginTop: 0 }}>📋 After Voice is active: assign your phone numbers</h3>
-        <p>Once your Voice subscription is active, phone numbers are assigned in <strong>your own Google Admin console</strong> (this step is required by Google and can't be done from this portal):</p>
-        <ol style={{ lineHeight: 1.8 }}>
-          <li>Go to your Google Admin console</li>
-          <li>Open <strong>Apps → Google Workspace → Google Voice</strong></li>
-          <li>Add a <strong>Voice location</strong> (service address — required for emergency calling)</li>
-          <li>Assign a <strong>Voice license</strong> to each user</li>
-          <li>Assign or request a <strong>phone number</strong> for each user</li>
-        </ol>
-        <a href="https://admin.google.com/ac/apps/voice" target="_blank" rel="noreferrer"
-          className="btn btn-primary" style={{ display: 'inline-block', marginTop: 8, textDecoration: 'none' }}>
-          Open Google Admin console →
-        </a>
-        <p style={{ marginBottom: 0, marginTop: 12, fontSize: 13, color: '#92600a' }}>
-          Need help? <a href="https://knowledge.workspace.google.com/admin/voice/assign-voice-numbers-to-users" target="_blank" rel="noreferrer">Google's guide to assigning numbers</a>.
-        </p>
-      </div>
+      {msg && (
+        <div style={{ padding: '12px 16px', borderRadius: 10, marginBottom: 18, background: msg.startsWith('🎉') || msg.startsWith('✓') ? '#dcfce7' : '#fef2f2', color: msg.startsWith('🎉') || msg.startsWith('✓') ? '#166534' : '#b42318', fontWeight: 600, fontSize: 14 }}>
+          {msg}
+        </div>
+      )}
+
+      {/* 5-Day Expiration Renewal Reminder Notice */}
+      {isExpiringSoon && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, padding: 18, marginBottom: 20, color: '#92400e' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <span style={{ background: '#d97706', color: '#fff', padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 700 }}>RENEWAL DUE SOON</span>
+            <strong style={{ fontSize: 15 }}>⚠️ Renewal Reminder: {daysRemaining} days remaining on your Google Voice plan</strong>
+          </div>
+          <p style={{ margin: '0 0 10px', fontSize: 13.5, lineHeight: 1.5 }}>
+            Your monthly Google Voice subscription expires on <strong>{order?.expiresAt ? new Date(order.expiresAt).toLocaleDateString() : 'soon'}</strong>. An automated reminder has been sent via Resend. Renew now below to prevent phone suspension.
+          </p>
+        </div>
+      )}
+
+      {/* Active Voice Subscription Display */}
+      {isActive && (
+        <div style={cardStyle}>
+          <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 10, padding: '14px 18px', marginBottom: 18, color: '#065f46' }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>✓</span>
+              <span>Active Google Voice Subscription ({order?.planName || 'Monthly'})</span>
+            </div>
+            <div style={{ fontSize: 13, color: '#047857', lineHeight: 1.4 }}>
+              Your Google Voice monthly subscription is active. Renewal notification emails are delivered automatically via Resend 5 days prior to expiration.
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 18 }}>
+            <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Plan Tier</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginTop: 4 }}>
+                {order?.planName || 'Google Voice'} (${Number(order?.price || 30).toFixed(2)}/mo)
+              </div>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Status</div>
+              <div style={{ marginTop: 4 }}>
+                <span style={{ display: 'inline-block', background: '#dcfce7', color: '#166534', padding: '3px 10px', borderRadius: 99, fontSize: 12.5, fontWeight: 700 }}>
+                  ✓ Active
+                </span>
+              </div>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Domain</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#4338ca', marginTop: 4, wordBreak: 'break-all' }}>
+                {order?.domain || '—'}
+              </div>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Billing Cycle &amp; Expiry</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: daysRemaining != null && daysRemaining <= 5 ? '#b45309' : '#0f172a', marginTop: 4 }}>
+                {daysRemaining != null ? `${daysRemaining} days left` : 'Monthly'}
+                {order?.expiresAt && <div style={{ fontSize: 11, fontWeight: 500, color: '#64748b' }}>Expires: {new Date(order.expiresAt).toLocaleDateString()}</div>}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ background: '#fffbea', border: '1px solid #fde68a', borderRadius: 12, padding: 18, marginTop: 14 }}>
+            <h4 style={{ margin: '0 0 8px', color: '#78350f', fontSize: 14 }}>📋 Assign your phone numbers in Google Admin Console</h4>
+            <p style={{ margin: '0 0 10px', fontSize: 13, color: '#92400e', lineHeight: 1.5 }}>
+              Once your Voice subscription is active, phone numbers are assigned directly in your Google Admin console:
+            </p>
+            <ol style={{ margin: '0 0 12px', paddingLeft: 20, fontSize: 12.5, color: '#92400e', lineHeight: 1.6 }}>
+              <li>Go to <strong>Apps → Google Workspace → Google Voice</strong></li>
+              <li>Add a <strong>Voice location</strong> (service address for emergency calling)</li>
+              <li>Assign a <strong>Voice license</strong> and choose or port phone numbers for each user</li>
+            </ol>
+            <a href="https://admin.google.com/ac/apps/voice" target="_blank" rel="noreferrer"
+              className="btn btn-primary" style={{ display: 'inline-block', fontSize: 13, fontWeight: 700, textDecoration: 'none', background: '#d97706', border: 'none', padding: '8px 16px', borderRadius: 8, color: '#fff' }}>
+              Open Google Admin console →
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* Expired / Suspended Notice */}
+      {isExpired && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12, padding: 18, marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <span style={{ background: '#b91c1c', color: '#fff', padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 700 }}>SUSPENDED</span>
+            <strong style={{ color: '#991b1b', fontSize: 15 }}>🚨 Service Suspended: Google Voice Plan Expired</strong>
+          </div>
+          <p style={{ margin: '0 0 10px', color: '#b91c1c', fontSize: 13.5 }}>
+            Your monthly Google Voice subscription has expired and your lines are currently suspended. Please renew below to reactivate your phone service immediately.
+          </p>
+        </div>
+      )}
+
+      {/* Purchase / Renew / Upgrade Flow */}
+      {(!isActive || isExpired || isExpiringSoon) && (
+        <div>
+          {/* Step 1: Domain Check & Selection */}
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 999, background: '#6e46eb', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>1</div>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Your Domain</h3>
+            </div>
+            <p style={{ color: '#64748b', fontSize: 13.5, margin: '0 0 14px' }}>
+              Select the domain for your Google Voice business phone licenses.
+            </p>
+
+            {customerDomains.length > 0 ? (
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                <div style={{ flex: 1, minWidth: 240 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#475569', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
+                    Connected Domain
+                  </label>
+                  {customerDomains.length === 1 ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 16, fontWeight: 700, color: '#0f172a' }}>{customerDomains[0]}</span>
+                      <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 99, fontSize: 12, fontWeight: 600 }}>✓ Active</span>
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedDomain}
+                      onChange={(e) => setSelectedDomain(e.target.value)}
+                      style={{ width: '100%', height: 38, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 10px', fontSize: 14, fontWeight: 600 }}
+                    >
+                      {customerDomains.map(d => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate && onNavigate('domains')}
+                  className="btn btn-secondary"
+                  style={{ fontSize: 12.5, padding: '7px 14px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                >
+                  🌐 Buy / Manage Domains
+                </button>
+              </div>
+            ) : (
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#92600a', fontSize: 14 }}>No registered domain found in your account yet</div>
+                    <div style={{ color: '#a16207', fontSize: 13, marginTop: 2 }}>You can purchase a new domain or enter your existing domain below.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate && onNavigate('domains')}
+                    className="btn btn-primary"
+                    style={{ background: '#d97706', border: 'none', padding: '8px 16px', fontSize: 13, fontWeight: 700 }}
+                  >
+                    🌐 Buy Domain →
+                  </button>
+                </div>
+                <div>
+                  <label style={{ fontSize: 12.5, fontWeight: 600, color: '#78350f', display: 'block', marginBottom: 4 }}>
+                    Or enter your existing registered domain:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="yourcompany.com"
+                    value={customDomainInput}
+                    onChange={(e) => setCustomDomainInput(e.target.value)}
+                    style={{ width: '100%', maxWidth: 360, height: 38, borderRadius: 8, border: '1px solid #fcd34d', padding: '0 12px', fontSize: 13.5 }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Step 2: Google Workspace OR Enter Business Email */}
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 999, background: '#6e46eb', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>2</div>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Account Verification</h3>
+            </div>
+            <p style={{ color: '#64748b', fontSize: 13.5, margin: '0 0 16px' }}>
+              To proceed to plan selection, either have <strong>Google Workspace</strong> active OR enter your <strong>Business Email</strong>. Either option unlocks the next step!
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+              {/* Option A: Google Workspace */}
+              <div style={{
+                border: hasWorkspace ? '2px solid #10b981' : '1px solid #e2e8f0',
+                borderRadius: 12,
+                padding: 16,
+                background: hasWorkspace ? '#f0fdf4' : '#fafafa',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
+              }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 14, color: '#0f172a' }}>
+                      <GoogleWorkspaceIcon size={18} />
+                      <span>Option A: Google Workspace</span>
+                    </div>
+                    {hasWorkspace && (
+                      <span style={{ background: '#10b981', color: '#fff', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99 }}>
+                        VERIFIED ✓
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ fontSize: 13, color: hasWorkspace ? '#166534' : '#64748b', margin: '0 0 12px', lineHeight: 1.4 }}>
+                    {hasWorkspace
+                      ? `Active Google Workspace detected on your domain (${effectiveDomain || 'connected'}).`
+                      : 'Setup Google Workspace for your domain with business Gmail, Docs, Drive, and Admin controls.'}
+                  </p>
+                </div>
+                {!hasWorkspace && (
+                  <button
+                    type="button"
+                    onClick={() => onSetupWorkspace ? onSetupWorkspace(effectiveDomain) : (onNavigate && onNavigate('order'))}
+                    className="btn btn-primary"
+                    style={{ background: '#4f46e5', border: 'none', padding: '8px 16px', fontSize: 13, fontWeight: 700, width: '100%' }}
+                  >
+                    Setup Google Workspace →
+                  </button>
+                )}
+              </div>
+
+              {/* Option B: Enter Business Email */}
+              <div style={{
+                border: isEmailValid ? '2px solid #10b981' : '1px solid #e2e8f0',
+                borderRadius: 12,
+                padding: 16,
+                background: isEmailValid ? '#f0fdf4' : '#fafafa',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
+              }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 14, color: '#0f172a' }}>
+                      <span style={{ fontSize: 18 }}>✉️</span>
+                      <span>Option B: Enter Business Email</span>
+                    </div>
+                    {isEmailValid && (
+                      <span style={{ background: '#10b981', color: '#fff', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99 }}>
+                        VERIFIED ✓
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ fontSize: 13, color: isEmailValid ? '#166534' : '#64748b', margin: '0 0 10px', lineHeight: 1.4 }}>
+                    Enter your professional company email address to verify immediately:
+                  </p>
+                  <input
+                    type="email"
+                    value={businessEmail}
+                    onChange={(e) => setBusinessEmail(e.target.value)}
+                    placeholder="name@yourcompany.com"
+                    style={{
+                      width: '100%',
+                      height: 38,
+                      borderRadius: 8,
+                      border: isEmailValid ? '1px solid #86efac' : '1px solid #cbd5e1',
+                      padding: '0 12px',
+                      fontSize: 13.5,
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+                {isEmailValid ? (
+                  <div style={{ fontSize: 12, color: '#166534', fontWeight: 600, marginTop: 8 }}>
+                    ✓ Business email ready: {businessEmail.trim()}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 8 }}>
+                    Type your full business email (e.g. alex@yourdomain.com)
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Requirement Met Indicator */}
+            {isRequirementMet ? (
+              <div style={{ marginTop: 14, background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 10, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8, color: '#065f46', fontWeight: 600, fontSize: 13.5 }}>
+                <span>✓</span>
+                <span>Verification requirement fulfilled ({hasWorkspace ? 'Google Workspace active' : 'Business email entered'})! You can now choose your plan below.</span>
+              </div>
+            ) : (
+              <div style={{ marginTop: 14, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8, color: '#92600a', fontSize: 13 }}>
+                <span>ℹ️</span>
+                <span>Complete either Option A (Google Workspace) OR Option B (Business Email) to unlock the plan selection and checkout below.</span>
+              </div>
+            )}
+          </div>
+
+          {/* Step 3: Choose Price Plan */}
+          <div style={{ ...cardStyle, opacity: isRequirementMet ? 1 : 0.6, transition: 'opacity 0.2s ease' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 999, background: isRequirementMet ? '#6e46eb' : '#94a3b8', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>3</div>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Choose Your Google Voice Plan</h3>
+            </div>
+            <p style={{ color: '#64748b', fontSize: 13.5, marginTop: 0 }}>
+              Choose from Starter $30, Standard $45, or Premier $55. These plans are monthly subscriptions that expire every 30 days.
+            </p>
+
+            {/* Resend 5-Day Renewal Disclosure Banner */}
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 12.5, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>🔔</span>
+              <span><strong>Automated Renewal Alerts via Resend:</strong> A renewal reminder email is delivered 5 days before plan expiration, or you will receive a suspension warning if unpaid.</span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 20 }}>
+              {VOICE_PLANS.map(p => {
+                const sel = p.id === selectedPlanId;
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => setSelectedPlanId(p.id)}
+                    style={{
+                      border: sel && isRequirementMet ? '2px solid #6e46eb' : '1px solid #e2e8f0',
+                      borderRadius: 12,
+                      padding: 18,
+                      background: sel && isRequirementMet ? '#f5f3ff' : '#fff',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      position: 'relative'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>{p.name}</span>
+                      <span style={{ background: sel && isRequirementMet ? '#6e46eb' : '#f1f5f9', color: sel && isRequirementMet ? '#fff' : '#64748b', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99 }}>
+                        {p.badge}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>
+                      {p.price} <span style={{ fontSize: 12, fontWeight: 500, color: '#64748b' }}>{p.cadence}</span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: 12.5, color: '#64748b', lineHeight: 1.4 }}>{p.desc}</p>
+                    <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: sel && isRequirementMet ? '#6e46eb' : '#94a3b8' }}>
+                      {sel ? `✓ Selected ($${p.amount}/mo)` : `Click to select $${p.amount}/mo`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Step 4: Checkout */}
+            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 10, color: '#0f172a' }}>
+                Complete Payment Checkout ({activePlan.name} — {activePlan.price}/month):
+              </div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => handleCheckout('stripe')}
+                  disabled={busy || !isRequirementMet}
+                  className="btn btn-primary"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '9px 20px',
+                    fontSize: 13,
+                    opacity: isRequirementMet ? 1 : 0.5,
+                    cursor: isRequirementMet ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  {busy ? 'Processing…' : <><CardIcon size={15} /><span>Pay ${activePlan.amount} with Card (Stripe)</span></>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCheckout('nicky')}
+                  disabled={busy || !isRequirementMet}
+                  className="btn btn-secondary"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '9px 20px',
+                    fontSize: 13,
+                    opacity: isRequirementMet ? 1 : 0.5,
+                    cursor: isRequirementMet ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  {busy ? 'Processing…' : <><CryptoIcon size={15} /><span>Pay ${activePlan.amount} with Crypto (Nicky)</span></>}
+                </button>
+              </div>
+              {!isRequirementMet && (
+                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 8 }}>
+                  🔒 Verify via Google Workspace or enter Business Email in Step 2 to proceed to payment.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -9405,14 +9906,6 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
       } else if (statusRes?.data?.workspaceDomain) {
         setSelectedDomain(statusRes.data.workspaceDomain);
       }
-
-      if (plansRes?.data?.plans?.length) {
-        setSelectedPlanId(prev => {
-          const prevLower = String(prev || '').toLowerCase();
-          const wasOneTime = prevLower.includes('onetime') || prevLower.includes('one-time') || prevLower === '100';
-          return wasOneTime ? 'ghl-phone-onetime' : (plansRes.data.plans[0]?.id || 'ghl-phone-monthly');
-        });
-      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -9441,8 +9934,9 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
     setBusy(true);
     setMsg('');
     try {
+      const chosenPlanId = isOneTimeSelected ? 'ghl-phone-onetime' : 'ghl-phone-monthly';
       const res = await axios.post(`${API_URL}/customer/ghl-phone/checkout`, {
-        planId: activePlanId,
+        planId: chosenPlanId,
         domain: effectiveDomain,
         businessEmail: isEmailValid ? businessEmail.trim() : (data?.customerEmail || ''),
         subdomain: effectiveDomain ? `phone.${effectiveDomain}` : '',
@@ -9794,24 +10288,24 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 20 }}>
               {GHL_PLANS.map(p => {
-                const sel = p.id === 'ghl-phone-onetime' ? isOneTimeSelected : !isOneTimeSelected;
+                const sel = p.id === (isOneTimeSelected ? 'ghl-phone-onetime' : 'ghl-phone-monthly');
                 return (
                   <div
                     key={p.id}
-                    onClick={() => isRequirementMet && setSelectedPlanId(p.id)}
+                    onClick={() => setSelectedPlanId(p.id)}
                     style={{
-                      border: sel && isRequirementMet ? '2px solid #6e46eb' : '1px solid #e2e8f0',
+                      border: sel ? '2px solid #6e46eb' : '1px solid #e2e8f0',
                       borderRadius: 12,
                       padding: 18,
-                      background: sel && isRequirementMet ? '#f5f3ff' : '#fff',
-                      cursor: isRequirementMet ? 'pointer' : 'not-allowed',
+                      background: sel ? '#f5f3ff' : '#fff',
+                      cursor: 'pointer',
                       transition: 'all 0.15s ease',
                       position: 'relative'
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                       <span style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>{p.name}</span>
-                      <span style={{ background: sel && isRequirementMet ? '#6e46eb' : '#f1f5f9', color: sel && isRequirementMet ? '#fff' : '#64748b', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99 }}>
+                      <span style={{ background: sel ? '#6e46eb' : '#f1f5f9', color: sel ? '#fff' : '#64748b', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99 }}>
                         {p.badge}
                       </span>
                     </div>
@@ -9819,8 +10313,8 @@ const CustomerBusinessPhone = ({ onNavigate, onSetupWorkspace }) => {
                       {p.price} <span style={{ fontSize: 12, fontWeight: 500, color: '#64748b' }}>{p.cadence}</span>
                     </div>
                     <p style={{ margin: 0, fontSize: 12.5, color: '#64748b', lineHeight: 1.4 }}>{p.desc}</p>
-                    <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: sel && isRequirementMet ? '#6e46eb' : '#94a3b8' }}>
-                      {sel && isRequirementMet ? `✓ Selected ($${p.amount})` : (isRequirementMet ? `Click to choose $${p.amount}` : 'Locked')}
+                    <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: sel ? '#6e46eb' : '#64748b' }}>
+                      {sel ? `✓ Selected ($${p.amount})` : `Click to select $${p.amount}`}
                     </div>
                   </div>
                 );
