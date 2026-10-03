@@ -513,7 +513,12 @@ const BrandingProvider = ({ children }) => {
       if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
       link.href = branding.faviconDataUrl;
     }
-    if (branding.brandName) document.title = branding.brandName;
+    if (branding.brandName) {
+      const baseName = branding.brandName.trim();
+      document.title = baseName.includes('—') || baseName.length > 25
+        ? (baseName.length > 60 ? baseName.substring(0, 60) : baseName)
+        : `${baseName} — Google Workspace, Domains, SSL & Hosting`;
+    }
   }, [branding.faviconDataUrl, branding.brandName]);
   return <BrandingContext.Provider value={{ ...branding, refresh }}>{children}</BrandingContext.Provider>;
 };
