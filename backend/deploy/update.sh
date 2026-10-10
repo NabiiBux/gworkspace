@@ -40,10 +40,20 @@ MAPS="$(envval REACT_APP_GOOGLE_MAPS_API_KEY)"; [ -z "$MAPS" ] && MAPS="$(envval
 # CI=false so ESLint warnings (unused vars, hook deps) stay warnings and never
 # fail the build (a failed build leaves no index.html -> the ENOENT 404s).
 CI=false \
+NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}" \
 REACT_APP_GOOGLE_SIGNIN_CLIENT_ID="$SIGNIN" \
 REACT_APP_GOOGLE_MAPS_API_KEY="$MAPS" \
   npm run build --prefix frontend
 echo "    (signin client id ${SIGNIN:+set}${SIGNIN:-MISSING}; maps key ${MAPS:+set}${MAPS:-MISSING})"
+
+if [ ! -f frontend/build/index.html ]; then
+  echo "❌ Error: frontend/build/index.html was not generated!"
+  echo "    Checking memory status:"
+  free -m || true
+  echo "    If the process was killed due to low RAM, enable 2GB swap on your VPS:"
+  echo "    fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile"
+  exit 1
+fi
 
 echo "==> Backend syntax check…"
 node --check backend/backend-server.js

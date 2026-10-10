@@ -14875,6 +14875,7 @@ app.get('/api/health', (req, res) => {
 });
 
 const path = require('path');
+const fs = require('fs');
 // Serve static assets from frontend/build
 const frontendBuildPath = path.join(__dirname, '../frontend/build');
 
@@ -14911,6 +14912,37 @@ app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) {
     return next();
   }
+  const indexPath = path.join(frontendBuildPath, 'index.html');
+  if (!fs.existsSync(indexPath)) {
+    console.error(`[Static Server] frontend/build/index.html not found at ${indexPath}. Build the frontend with: npm run build:frontend`);
+    return res.status(503).send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GNB Mentor Portal — Building Frontend</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; max-width: 620px; width: 100%; box-shadow: 0 10px 25px rgba(0,0,0,0.4); text-align: center; }
+    h1 { font-size: 22px; margin-bottom: 12px; color: #38bdf8; }
+    p { color: #94a3b8; font-size: 14px; line-height: 1.6; margin-bottom: 16px; }
+    .cmd { background: #0b1120; padding: 14px 18px; border-radius: 8px; text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; color: #34d399; margin: 18px 0; overflow-x: auto; border: 1px solid #1e293b; line-height: 1.7; }
+    .note { font-size: 13px; color: #64748b; margin-top: 14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>⚙️ Frontend Build Initializing</h1>
+    <p>The backend API server is online, but the React bundle (<code>frontend/build/index.html</code>) has not finished building on the server.</p>
+    <div class="cmd">
+      # Run this in your VPS terminal to build the frontend:<br/>
+      cd /opt/gworkspace &amp;&amp; bash backend/deploy/update.sh
+    </div>
+    <p class="note">Once the build command completes, refresh this page to load the portal.</p>
+  </div>
+</body>
+</html>`);
+  }
   const p = req.path.toLowerCase();
   if (NOINDEX_PATHS.some((prefix) => p === prefix || p.startsWith(prefix + '/'))) {
     res.set('X-Robots-Tag', 'noindex, nofollow');
@@ -14919,7 +14951,12 @@ app.get('*', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
-  res.sendFile(path.join(frontendBuildPath, 'index.html'));
+  res.sendFile(indexPath, (err) => {
+    if (err && !res.headersSent) {
+      console.error('[res.sendFile error]:', err.message);
+      res.status(500).send('Error loading page. Please refresh.');
+    }
+  });
 });
 
 // Database offline / generic error handler
@@ -15024,7 +15061,7 @@ function scheduleNickyPolling() {
 }
 
 // ==================== SERVER START ====================
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 const HOST = '0.0.0.0';
 app.listen(PORT, HOST, () => {
   console.log('======================================================');
