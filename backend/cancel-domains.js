@@ -1,0 +1,360 @@
+/**
+ * Standalone Google Workspace Reseller Subscription Cancellation Script
+ *
+ * Designed to safely cancel subscriptions and stop recurring monthly reseller billing
+ * for specified customer domains via the Google Workspace Reseller API v1.
+ *
+ * Usage on VPS:
+ *   cd /opt/gworkspace/backend
+ *   node cancel-domains.js [optional domain1 domain2 ...]
+ *
+ * Defaults to:
+ *   daskacity.com relpvaa.com qenalora.com coloradohaven.shop
+ */
+
+const fs = require('fs');
+const path = require('path');
+const dotenv = require('dotenv');
+const { google } = require('googleapis');
+let mongoose;
+try {
+  mongoose = require('mongoose');
+} catch (_) {}
+
+// 1. Load Environment Variables from possible locations
+const envPaths = [
+  path.join(__dirname, '.env'),
+  path.join(__dirname, '../.env'),
+  '/opt/gworkspace/backend/.env',
+  '/opt/gworkspace/.env',
+];
+
+for (const p of envPaths) {
+  if (fs.existsSync(p)) {
+    dotenv.config({ path: p });
+  }
+}
+dotenv.config();
+
+const PROVISION_SCOPES = [
+  'https://www.googleapis.com/auth/apps.order',
+  'https://www.googleapis.com/auth/admin.directory.user',
+  'https://www.googleapis.com/auth/admin.directory.domain',
+  'https://www.googleapis.com/auth/siteverification',
+];
+
+// Target domains to cancel
+const TARGET_DOMAINS = process.argv.slice(2).length > 0
+  ? process.argv.slice(2).map(d => d.trim().toLowerCase())
+  : ['daskacity.com', 'relpvaa.com', 'qenalora.com', 'coloradohaven.shop'];
+
+console.log('===============================================================');
+console.log(' GOOGLE WORKSPACE RESELLER SUBSCRIPTION CANCELLATION TOOL');
+console.log('===============================================================');
+console.log('Target domains to cancel:');
+TARGET_DOMAINS.forEach((d, i) => console.log(`  ${i + 1}. ${d}`));
+console.log('===============================================================\n');
+
+function getServiceAccountAuth(account) {
+  const isUsa = account === 'usa';
+  const rawJson = isUsa
+    ? process.env.GOOGLE_SERVICE_ACCOUNT_JSON_USA
+    : process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+
+  if (!rawJson) return null;
+
+  let creds;
+  try {
+    creds = JSON.parse(rawJson);
+  } catch (err) {
+    return null;
+  }
+
+  const subject = isUsa
+    ? (process.env.RESELLER_ADMIN_EMAIL_USA || 'admin@artisandrywallaz.com')
+    : (process.env.RESELLER_ADMIN_EMAIL || 'admin@gnbmentor.com');
+
+  return new google.auth.JWT({
+    email: creds.client_email,
+    key: creds.private_key,
+    scopes: PROVISION_SCOPES,
+    subject,
+  });
+}
+
+function makeOAuthClient(account) {
+  const isUsa = account === 'usa';
+  const clientId = isUsa ? process.env.GOOGLE_OAUTH_CLIENT_ID_USA : process.env.GOOGLE_OAUTH_CLIENT_ID;
+  const clientSecret = isUsa ? process.env.GOOGLE_OAUTH_CLIENT_SECRET_USA : process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  const redirectUri = isUsa ? process.env.GOOGLE_OAUTH_REDIRECT_URI_USA : process.env.GOOGLE_OAUTH_REDIRECT_URI;
+  if (!clientId || !clientSecret) return null;
+  return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+}
+
+async function getAuth(account) {
+  // 1. Try Service Account with domain-wide delegation
+  const sa = getServiceAccountAuth(account);
+  if (sa) {
+    return { auth: sa, type: 'Service Account' };
+  }
+
+  // 2. Try MongoDB GoogleConnection
+  if (mongoose && mongoose.connection && mongoose.connection.readyState === 1) {
+    try {
+      const conn = await mongoose.connection.db.collection('googleconnections').findOne({ account });
+      if (conn && conn.refreshToken) {
+        const oauth = makeOAuthClient(account);
+        if (oauth) {
+          oauth.setCredentials({ refresh_token: conn.refreshToken });
+          return { auth: oauth, type: 'OAuth (MongoDB)' };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 3. Try local json fallback
+  try {
+    const jsonPath = path.join(__dirname, 'google_connections.json');
+    if (fs.existsSync(jsonPath)) {
+      const parsed = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+      if (parsed[account] && parsed[account].refreshToken) {
+        const oauth = makeOAuthClient(account);
+        if (oauth) {
+          oauth.setCredentials({ refresh_token: parsed[account].refreshToken });
+          return { auth: oauth, type: 'OAuth (local JSON)' };
+        }
+      }
+    }
+  } catch (_) {}
+
+  return null;
+}
+
+async function cancelSubscriptionsForDomain(reseller, account, domain) {
+  const results = [];
+  let subs = [];
+
+  // Step 1: Query subscriptions directly by domain
+  try {
+    const resp = await reseller.subscriptions.list({ customerId: domain });
+    subs = resp.data?.subscriptions || [];
+  } catch (err) {
+    // 404 or customer ID format error: try to look up customer first
+    try {
+      const custResp = await reseller.customers.get({ customerId: domain });
+      const custId = custResp.data?.customerId;
+      if (custId && custId !== domain) {
+        const resp2 = await reseller.subscriptions.list({ customerId: custId });
+        subs = resp2.data?.subscriptions || [];
+      }
+    } catch (_) {}
+  }
+
+  // Step 2: If no subs found directly, check global subscription list for matches
+  if (!subs.length) {
+    try {
+      let pageToken;
+      do {
+        const listResp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
+        const batch = listResp.data?.subscriptions || [];
+        for (const s of batch) {
+          const sDom = (s.customerDomain || s.customerId || '').toLowerCase();
+          if (sDom === domain) {
+            subs.push(s);
+          }
+        }
+        pageToken = listResp.data?.nextPageToken;
+      } while (pageToken && subs.length === 0);
+    } catch (_) {}
+  }
+
+  if (!subs.length) {
+    return results; // No subscriptions found in this account
+  }
+
+  console.log(`\nFound ${subs.length} subscription(s) for ${domain} in [${account.toUpperCase()}] account:`);
+
+  // Step 3: Cancel each subscription
+  for (const s of subs) {
+    const subId = s.subscriptionId;
+    const custId = s.customerId || domain;
+    const skuName = s.skuName || s.skuId;
+    const planName = s.plan?.planName || 'N/A';
+    const status = s.status;
+
+    console.log(`  -> Sub ID: ${subId} | SKU: ${skuName} | Plan: ${planName} | Status: ${status}`);
+
+    let actionTaken = '';
+    let success = false;
+    let detail = '';
+
+    // Action A: Call subscriptions.delete with deletionType: 'cancel'
+    try {
+      console.log(`     Executing: reseller.subscriptions.delete(customerId: ${custId}, subId: ${subId}, deletionType: 'cancel')...`);
+      await reseller.subscriptions.delete({
+        customerId: custId,
+        subscriptionId: subId,
+        deletionType: 'cancel',
+      });
+      actionTaken = 'DELETED_CANCEL';
+      success = true;
+      detail = 'Subscription cancelled immediately in Google Reseller API.';
+      console.log(`     ✅ SUCCESS: Cancelled subscription ${subId}`);
+    } catch (delErr) {
+      const errMsg = delErr?.errors?.[0]?.message || delErr?.message || String(delErr);
+      console.log(`     ⚠️  Delete returned: ${errMsg}`);
+
+      // Action B: If commitment blocks immediate deletion, change renewal to CANCEL and suspend
+      try {
+        console.log(`     Attempting renewal change to CANCEL...`);
+        await reseller.subscriptions.changeRenewal({
+          customerId: custId,
+          subscriptionId: subId,
+          requestBody: { renewalType: 'CANCEL' },
+        });
+        detail += 'Set renewalType to CANCEL. ';
+        console.log(`     ✅ Renewal set to CANCEL.`);
+      } catch (renErr) {
+        detail += `Renewal change: ${renErr.message}. `;
+      }
+
+      try {
+        console.log(`     Attempting suspension to stop billing/usage...`);
+        await reseller.subscriptions.suspend({
+          customerId: custId,
+          subscriptionId: subId,
+        });
+        actionTaken = 'SUSPENDED_NON_RENEWING';
+        success = true;
+        detail += 'Suspended subscription to stop active service.';
+        console.log(`     ✅ Subscription suspended.`);
+      } catch (suspErr) {
+        detail += `Suspend error: ${suspErr.message}. `;
+      }
+
+      if (!success) {
+        actionTaken = 'FAILED';
+        detail = errMsg;
+      }
+    }
+
+    results.push({
+      domain,
+      account,
+      subscriptionId: subId,
+      customerId: custId,
+      skuId: s.skuId,
+      skuName,
+      previousStatus: status,
+      actionTaken,
+      success,
+      detail,
+    });
+  }
+
+  return results;
+}
+
+async function cleanLocalDatabase(domain) {
+  if (!mongoose || !mongoose.connection || mongoose.connection.readyState !== 1) {
+    return;
+  }
+  try {
+    const db = mongoose.connection.db;
+
+    // SubBilling
+    const sbRes = await db.collection('subbillings').updateMany(
+      { domain },
+      { $set: { active: false, status: 'cancelled', autoRenew: false, updatedAt: new Date() } }
+    );
+
+    // Subscriptions
+    const subRes = await db.collection('subscriptions').updateMany(
+      { $or: [{ domain }, { customerDomain: domain }] },
+      { $set: { status: 'CANCELLED', autoRenew: false, updatedAt: new Date() } }
+    );
+
+    // ServiceBillingCycle
+    const sbcRes = await db.collection('servicebillingcycles').updateMany(
+      { domain },
+      { $set: { status: 'cancelled', active: false, updatedAt: new Date() } }
+    );
+
+    // WorkspaceOrders
+    const woRes = await db.collection('workspaceorders').updateMany(
+      { domain },
+      { $set: { status: 'cancelled', updatedAt: new Date() } }
+    );
+
+    console.log(`  [Database] Deactivated local billing tracking for ${domain} (${sbRes.modifiedCount} subbilling, ${subRes.modifiedCount} subs, ${sbcRes.modifiedCount} billing cycles).`);
+  } catch (dbErr) {
+    console.log(`  [Database] Warning during DB update: ${dbErr.message}`);
+  }
+}
+
+async function main() {
+  // Connect to DB if available
+  const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/workspace-reseller';
+  if (mongoose && mongoUri && !mongoUri.startsWith('#')) {
+    try {
+      console.log('Connecting to database...');
+      await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 4000 });
+      console.log('Connected to MongoDB.\n');
+    } catch (e) {
+      console.log(`MongoDB connection skipped (${e.message}). Proceeding directly with Google APIs...\n`);
+    }
+  }
+
+  const allSummary = [];
+
+  for (const acct of ['pk', 'usa']) {
+    console.log(`---------------------------------------------------------------`);
+    console.log(`Checking Reseller Account: ${acct.toUpperCase()}`);
+    console.log(`---------------------------------------------------------------`);
+
+    const authInfo = await getAuth(acct);
+    if (!authInfo) {
+      console.log(`Reseller account [${acct.toUpperCase()}] credentials not configured in environment.`);
+      continue;
+    }
+
+    console.log(`Using ${authInfo.type} authentication for [${acct.toUpperCase()}]`);
+    const reseller = google.reseller({ version: 'v1', auth: authInfo.auth });
+
+    for (const dom of TARGET_DOMAINS) {
+      const results = await cancelSubscriptionsForDomain(reseller, acct, dom);
+      if (results && results.length) {
+        allSummary.push(...results);
+        await cleanLocalDatabase(dom);
+      }
+    }
+  }
+
+  console.log('\n===============================================================');
+  console.log(' FINAL CANCELLATION REPORT');
+  console.log('===============================================================');
+
+  if (!allSummary.length) {
+    console.log('No active subscriptions found for the requested domains in the configured reseller accounts.');
+    console.log('Please verify:');
+    console.log('  1. Are you running this on the VPS where production credentials are loaded?');
+    console.log('  2. Were the domains already cancelled or under a different reseller account?');
+  } else {
+    for (const item of allSummary) {
+      const icon = item.success ? '✅' : '❌';
+      console.log(`${icon} Domain: ${item.domain.padEnd(22)} | Acct: ${item.account.toUpperCase()} | Sub: ${item.subscriptionId} | Result: ${item.actionTaken}`);
+      console.log(`   Details: ${item.detail}`);
+    }
+  }
+
+  console.log('===============================================================\n');
+
+  if (mongoose && mongoose.connection && mongoose.connection.readyState === 1) {
+    await mongoose.disconnect();
+  }
+}
+
+main().catch(err => {
+  console.error('Fatal execution error:', err);
+  process.exit(1);
+});

@@ -5,7 +5,8 @@
   "main": "backend-server.js",
   "scripts": {
     "start": "node backend-server.js",
-    "dev": "nodemon backend-server.js"
+    "dev": "nodemon backend-server.js",
+    "cancel-domains": "node cancel-domains.js"
   },
   "dependencies": {
     "axios": "^1.7.2",

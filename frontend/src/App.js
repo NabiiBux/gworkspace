@@ -2829,6 +2829,13 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
   const [attachMsg, setAttachMsg] = useState('');
   const [attachResults, setAttachResults] = useState(null);
 
+  // Bulk Cancel states
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelText, setCancelText] = useState('daskacity.com\nrelpvaa.com\nqenalora.com\ncoloradohaven.shop');
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelMsg, setCancelMsg] = useState('');
+  const [cancelResults, setCancelResults] = useState(null);
+
   const isUSA = account === 'USA';
 
   useEffect(() => { setPage(1); }, [account]);
@@ -2872,6 +2879,28 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
       setAttachMsg(e?.response?.data?.error || 'Bulk attachment failed.');
     } finally {
       setAttachBusy(false);
+    }
+  };
+
+  const runBulkCancel = async () => {
+    setCancelResults(null);
+    setCancelMsg('');
+    const domains = cancelText.split(/[\s,\n]+/).map(l => l.trim().toLowerCase()).filter(Boolean);
+    if (domains.length === 0) { setCancelMsg('Enter at least one domain to cancel.'); return; }
+
+    setCancelBusy(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/admin/subscriptions/cancel-domains`, { domains }, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      setCancelResults(response.data);
+      setCancelMsg(`✓ Processed cancellation for ${response.data.processedDomains?.length || domains.length} domain(s). (${response.data.resultsCount || 0} subscriptions processed in Google Reseller API)`);
+      fetchSubs();
+    } catch (e) {
+      setCancelMsg(e?.response?.data?.error || 'Cancellation request failed.');
+    } finally {
+      setCancelBusy(false);
     }
   };
 
@@ -3006,7 +3035,89 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
         <button className="btn btn-secondary" onClick={() => setShowBulk(!showBulk)}>
           {showBulk ? 'Close Bulk Attach' : '🔗 Bulk Attach Subscriptions'}
         </button>
+        <button className="btn btn-danger" onClick={() => setShowCancelModal(!showCancelModal)} style={{ background: '#b91c1c', color: '#fff', borderColor: '#b91c1c' }}>
+          {showCancelModal ? 'Close Cancel Tool' : '🛑 Cancel Subscriptions (Reseller API)'}
+        </button>
       </div>
+
+      {showCancelModal && (
+        <div style={{ background: '#fff', borderRadius: 12, padding: 20, border: '1px solid #fecaca', marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 20 }}>🛑</span>
+            <h3 style={{ margin: 0, color: '#991b1b' }}>Cancel Subscriptions via Google Reseller API</h3>
+          </div>
+          <p style={{ color: '#4b5563', fontSize: 13, marginTop: 4, marginBottom: 14, lineHeight: 1.5 }}>
+            Immediately cancels subscriptions in Google's Reseller billing system and halts recurring monthly charges. If Google blocks immediate cancellation due to an annual contract commitment, it automatically switches the renewal type to <strong>CANCEL</strong> and suspends the subscription.
+          </p>
+
+          <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 6, color: '#374151' }}>
+            Domains to Cancel (one per line or comma-separated):
+          </label>
+          <textarea
+            value={cancelText}
+            onChange={(e) => setCancelText(e.target.value)}
+            rows={4}
+            placeholder={"daskacity.com\nrelpvaa.com\nqenalora.com\ncoloradohaven.shop"}
+            style={{ width: '100%', borderRadius: 8, border: '1px solid #d1d5db', padding: 12, fontFamily: 'monospace', fontSize: 13, boxSizing: 'border-box' }}
+          />
+
+          <div style={{ display: 'flex', gap: 10, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={runBulkCancel}
+              disabled={cancelBusy}
+              className="btn btn-danger"
+              style={{ background: '#dc2626', color: '#fff', borderColor: '#dc2626', padding: '10px 20px', fontWeight: 600 }}
+            >
+              {cancelBusy ? 'Cancelling via Google API…' : `Cancel Subscriptions for ${cancelText.split(/[\s,\n]+/).filter(Boolean).length || ''} Domain(s)`}
+            </button>
+            <span style={{ fontSize: 12, color: '#6b7280' }}>
+              Checked against both PK and USA reseller accounts &amp; local billing tables.
+            </span>
+          </div>
+
+          {cancelMsg && (
+            <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, fontSize: 14, fontWeight: 500, backgroundColor: cancelMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', border: cancelMsg.startsWith('✓') ? '1px solid #bbf7d0' : '1px solid #fee2e2', color: cancelMsg.startsWith('✓') ? '#15803d' : '#b91c1c' }}>
+              {cancelMsg}
+            </div>
+          )}
+
+          {cancelResults && cancelResults.results && cancelResults.results.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, color: '#111827' }}>
+                Action Results ({cancelResults.results.length} subscriptions processed):
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ textAlign: 'left', color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>
+                      <th style={{ padding: '6px 0' }}>Domain</th>
+                      <th>Account</th>
+                      <th>Sub ID / SKU</th>
+                      <th>Action Taken</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cancelResults.results.map((r, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                        <td style={{ padding: '8px 0', fontWeight: 600 }}>{r.domain}</td>
+                        <td><span style={{ textTransform: 'uppercase', fontSize: 11, background: '#f3f4f6', padding: '2px 6px', borderRadius: 4 }}>{r.account}</span></td>
+                        <td>{r.skuName || r.skuId}</td>
+                        <td>
+                          <span style={{ color: r.success ? '#15803d' : '#b91c1c', fontWeight: 600 }}>
+                            {r.actionTaken}
+                          </span>
+                        </td>
+                        <td style={{ color: '#4b5563', fontSize: 12 }}>{r.detail}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {showBulk && (
         <div style={{ background: '#fff', borderRadius: 12, padding: 20, border: '1px solid #e2e8f0', marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>

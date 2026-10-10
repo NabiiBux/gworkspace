@@ -14554,6 +14554,141 @@ app.get('/api/admin/google/subscriptions', authenticateCustomer, async (req, res
   }
 });
 
+// Admin: cancel subscriptions for specific domains via Google Reseller API (stops recurring monthly charges)
+app.post('/api/admin/subscriptions/cancel-domains', authenticateCustomer, requireAdmin, async (req, res) => {
+  try {
+    const rawDomains = req.body?.domains || [];
+    const targetDomains = (Array.isArray(rawDomains) ? rawDomains : [rawDomains])
+      .map((d) => String(d).trim().toLowerCase())
+      .filter(Boolean);
+
+    if (!targetDomains.length) {
+      return res.status(400).json({ error: 'Please provide at least one domain to cancel.' });
+    }
+
+    const results = [];
+    const accounts = ['pk', 'usa'];
+
+    for (const acct of accounts) {
+      let auth;
+      try {
+        auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth();
+      } catch (authErr) {
+        continue;
+      }
+      const reseller = google.reseller({ version: 'v1', auth });
+
+      for (const domain of targetDomains) {
+        let subs = [];
+        try {
+          const resp = await reseller.subscriptions.list({ customerId: domain });
+          subs = resp.data?.subscriptions || [];
+        } catch (_) {
+          try {
+            const custResp = await reseller.customers.get({ customerId: domain });
+            const custId = custResp.data?.customerId;
+            if (custId && custId !== domain) {
+              const resp2 = await reseller.subscriptions.list({ customerId: custId });
+              subs = resp2.data?.subscriptions || [];
+            }
+          } catch (_) {}
+        }
+
+        if (!subs.length) {
+          try {
+            let pageToken;
+            do {
+              const listResp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
+              const batch = listResp.data?.subscriptions || [];
+              for (const s of batch) {
+                const sDom = (s.customerDomain || s.customerId || '').toLowerCase();
+                if (sDom === domain) subs.push(s);
+              }
+              pageToken = listResp.data?.nextPageToken;
+            } while (pageToken && subs.length === 0);
+          } catch (_) {}
+        }
+
+        for (const s of subs) {
+          const subId = s.subscriptionId;
+          const custId = s.customerId || domain;
+          const skuName = s.skuName || s.skuId;
+          let actionTaken = '';
+          let success = false;
+          let detail = '';
+
+          try {
+            await reseller.subscriptions.delete({
+              customerId: custId,
+              subscriptionId: subId,
+              deletionType: 'cancel',
+            });
+            actionTaken = 'DELETED_CANCEL';
+            success = true;
+            detail = 'Subscription cancelled immediately in Google Reseller API.';
+          } catch (delErr) {
+            const errMsg = delErr?.errors?.[0]?.message || delErr?.message || String(delErr);
+            try {
+              await reseller.subscriptions.changeRenewal({
+                customerId: custId,
+                subscriptionId: subId,
+                requestBody: { renewalType: 'CANCEL' },
+              });
+              detail += 'Set renewal to CANCEL. ';
+            } catch (_) {}
+
+            try {
+              await reseller.subscriptions.suspend({ customerId: custId, subscriptionId: subId });
+              actionTaken = 'SUSPENDED_NON_RENEWING';
+              success = true;
+              detail += 'Subscription suspended to stop active usage.';
+            } catch (suspErr) {
+              detail += `Suspend error: ${suspErr.message}`;
+            }
+
+            if (!success) {
+              actionTaken = 'FAILED';
+              detail = errMsg;
+            }
+          }
+
+          results.push({
+            domain,
+            account: acct,
+            subscriptionId: subId,
+            customerId: custId,
+            skuId: s.skuId,
+            skuName,
+            status: s.status,
+            actionTaken,
+            success,
+            detail,
+          });
+        }
+
+        // Clean up database records
+        try {
+          await Promise.allSettled([
+            SubBilling.updateMany({ domain }, { $set: { active: false, status: 'cancelled', autoRenew: false } }),
+            Subscription.updateMany({ $or: [{ domain }, { customerDomain: domain }] }, { $set: { status: 'CANCELLED', autoRenew: false } }),
+            ServiceBillingCycle.updateMany({ domain }, { $set: { status: 'cancelled', active: false } }),
+            WorkspaceOrder.updateMany({ domain }, { $set: { status: 'cancelled' } }),
+          ]);
+        } catch (_) {}
+      }
+    }
+
+    res.json({
+      ok: true,
+      processedDomains: targetDomains,
+      resultsCount: results.length,
+      results,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Internal error cancelling subscriptions' });
+  }
+});
+
 // Live dashboard stats from Google
 app.get('/api/admin/google/dashboard', authenticateCustomer, async (req, res) => {
   try {
