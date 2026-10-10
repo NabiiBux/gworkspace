@@ -174,67 +174,160 @@ async function cancelSubscriptionsForDomain(reseller, account, domain) {
 
   console.log(`\nFound ${subs.length} subscription(s) for ${domain} in [${account.toUpperCase()}] account:`);
 
-  // Step 3: Cancel each subscription
+  // Step 3: Cancel / Offload each subscription to stop all partner reseller billing
   for (const s of subs) {
     const subId = s.subscriptionId;
-    const custId = s.customerId || domain;
     const skuName = s.skuName || s.skuId;
     const planName = s.plan?.planName || 'N/A';
-    const status = s.status;
+    const status = s.status || 'UNKNOWN';
 
-    console.log(`  -> Sub ID: ${subId} | SKU: ${skuName} | Plan: ${planName} | Status: ${status}`);
+    // Candidate customer IDs: try unique customer ID (e.g. C0xxxx) and domain name
+    const candidateCustIds = [...new Set([s.customerId, domain, s.customerDomain].filter(Boolean))];
+    const primaryCustId = candidateCustIds[0] || domain;
+
+    console.log(`  -> Sub ID: ${subId} | SKU: ${skuName} | Plan: ${planName} | Status: ${status} | Cust: ${primaryCustId}`);
 
     let actionTaken = '';
     let success = false;
-    let detail = '';
+    const notes = [];
 
-    // Action A: Call subscriptions.delete with deletionType: 'cancel'
+    // Helper to attempt a reseller call across candidate customer IDs
+    const runResellerCall = async (fn) => {
+      let lastErr = null;
+      for (const cid of candidateCustIds) {
+        try {
+          return await fn(cid);
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+      throw lastErr;
+    };
+
+    // 1. Immediately disable auto-renewal so commitment plans never renew (changeRenewalSettings)
     try {
-      console.log(`     Executing: reseller.subscriptions.delete(customerId: ${custId}, subId: ${subId}, deletionType: 'cancel')...`);
-      await reseller.subscriptions.delete({
-        customerId: custId,
-        subscriptionId: subId,
-        deletionType: 'cancel',
-      });
-      actionTaken = 'DELETED_CANCEL';
-      success = true;
-      detail = 'Subscription cancelled immediately in Google Reseller API.';
-      console.log(`     ✅ SUCCESS: Cancelled subscription ${subId}`);
-    } catch (delErr) {
-      const errMsg = delErr?.errors?.[0]?.message || delErr?.message || String(delErr);
-      console.log(`     ⚠️  Delete returned: ${errMsg}`);
-
-      // Action B: If commitment blocks immediate deletion, change renewal to CANCEL and suspend
-      try {
-        console.log(`     Attempting renewal change to CANCEL...`);
-        await reseller.subscriptions.changeRenewal({
-          customerId: custId,
+      console.log(`     1. Setting renewalSettings to CANCEL (stops future commitment renewal)...`);
+      await runResellerCall((cid) =>
+        reseller.subscriptions.changeRenewalSettings({
+          customerId: cid,
           subscriptionId: subId,
           requestBody: { renewalType: 'CANCEL' },
-        });
-        detail += 'Set renewalType to CANCEL. ';
-        console.log(`     ✅ Renewal set to CANCEL.`);
-      } catch (renErr) {
-        detail += `Renewal change: ${renErr.message}. `;
-      }
+        })
+      );
+      notes.push('Auto-renew disabled (renewalType: CANCEL)');
+      console.log(`     ✅ Auto-renew set to CANCEL.`);
+    } catch (renErr) {
+      const renMsg = renErr?.errors?.[0]?.message || renErr?.message || String(renErr);
+      notes.push(`Renewal settings note: ${renMsg}`);
+      console.log(`     ℹ️  Renewal setting note: ${renMsg}`);
+    }
 
-      try {
-        console.log(`     Attempting suspension to stop billing/usage...`);
-        await reseller.subscriptions.suspend({
-          customerId: custId,
+    // 2. Attempt Google Reseller API official offload: deletionType: 'transfer_to_direct'
+    // This detaches the subscription from reseller billing and transitions the customer to direct Google billing.
+    try {
+      console.log(`     2. Attempting deletionType: 'transfer_to_direct' (releases reseller from billing)...`);
+      await runResellerCall((cid) =>
+        reseller.subscriptions.delete({
+          customerId: cid,
           subscriptionId: subId,
-        });
-        actionTaken = 'SUSPENDED_NON_RENEWING';
-        success = true;
-        detail += 'Suspended subscription to stop active service.';
-        console.log(`     ✅ Subscription suspended.`);
-      } catch (suspErr) {
-        detail += `Suspend error: ${suspErr.message}. `;
-      }
+          deletionType: 'transfer_to_direct',
+        })
+      );
+      actionTaken = 'TRANSFERRED_TO_DIRECT';
+      success = true;
+      notes.push('Transferred to Google direct billing. Reseller billing stopped immediately');
+      console.log(`     ✅ SUCCESS: Transferred to Google Direct. Partner billing cancelled.`);
+    } catch (transErr) {
+      const transMsg = transErr?.errors?.[0]?.message || transErr?.message || String(transErr);
+      notes.push(`Transfer to direct: ${transMsg}`);
+      console.log(`     ℹ️  Transfer to direct: ${transMsg}`);
+    }
 
-      if (!success) {
+    // 3. If transfer_to_direct was not accepted, try deletionType: 'suspend'
+    if (!success) {
+      try {
+        console.log(`     3. Attempting deletionType: 'suspend'...`);
+        await runResellerCall((cid) =>
+          reseller.subscriptions.delete({
+            customerId: cid,
+            subscriptionId: subId,
+            deletionType: 'suspend',
+          })
+        );
+        actionTaken = 'DELETED_SUSPENDED';
+        success = true;
+        notes.push('Subscription removed/suspended via delete');
+        console.log(`     ✅ SUCCESS: Subscription suspended via delete.`);
+      } catch (delSuspErr) {
+        const delSuspMsg = delSuspErr?.errors?.[0]?.message || delSuspErr?.message || String(delSuspErr);
+        notes.push(`Delete suspend: ${delSuspMsg}`);
+        console.log(`     ℹ️  Delete suspend: ${delSuspMsg}`);
+      }
+    }
+
+    // 4. If not yet resolved, attempt direct suspension or check if already suspended
+    if (!success) {
+      if (status === 'SUSPENDED') {
+        actionTaken = 'ALREADY_SUSPENDED';
+        success = true;
+        notes.push('Subscription was already SUSPENDED. Active services and billing halted');
+        console.log(`     ✅ Subscription is already SUSPENDED.`);
+      } else {
+        try {
+          console.log(`     4. Attempting reseller.subscriptions.suspend()...`);
+          await runResellerCall((cid) =>
+            reseller.subscriptions.suspend({
+              customerId: cid,
+              subscriptionId: subId,
+            })
+          );
+          actionTaken = 'SUSPENDED';
+          success = true;
+          notes.push('Suspended subscription to stop active service and billing');
+          console.log(`     ✅ SUCCESS: Subscription suspended.`);
+        } catch (suspErr) {
+          const suspMsg = suspErr?.errors?.[0]?.message || suspErr?.message || String(suspErr);
+          notes.push(`Suspend: ${suspMsg}`);
+          console.log(`     ℹ️  Suspend: ${suspMsg}`);
+          if (suspMsg.toLowerCase().includes('already suspended') || suspMsg.toLowerCase().includes('inactive')) {
+            actionTaken = 'ALREADY_SUSPENDED';
+            success = true;
+          }
+        }
+      }
+    }
+
+    // 5. Attempt seat reduction to 0 or 1 if flexible plan allows
+    try {
+      await runResellerCall((cid) =>
+        reseller.subscriptions.changeSeats({
+          customerId: cid,
+          subscriptionId: subId,
+          requestBody: { numberOfSeats: 0 },
+        })
+      );
+      notes.push('Seats reduced to 0');
+    } catch (_) {
+      try {
+        await runResellerCall((cid) =>
+          reseller.subscriptions.changeSeats({
+            customerId: cid,
+            subscriptionId: subId,
+            requestBody: { numberOfSeats: 1 },
+          })
+        );
+        notes.push('Seats reduced to 1');
+      } catch (_) {}
+    }
+
+    // 6. Final resolution
+    if (!success) {
+      if (notes.some((n) => n.includes('renewalType: CANCEL'))) {
+        actionTaken = 'NON_RENEWING_COMMITMENT';
+        success = true;
+        notes.push('Commitment renewal disabled. Service will terminate at commitment end');
+      } else {
         actionTaken = 'FAILED';
-        detail = errMsg;
       }
     }
 
@@ -242,13 +335,13 @@ async function cancelSubscriptionsForDomain(reseller, account, domain) {
       domain,
       account,
       subscriptionId: subId,
-      customerId: custId,
+      customerId: primaryCustId,
       skuId: s.skuId,
       skuName,
       previousStatus: status,
       actionTaken,
       success,
-      detail,
+      detail: notes.join('. '),
     });
   }
 
