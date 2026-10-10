@@ -14687,22 +14687,22 @@ app.post('/api/admin/subscriptions/cancel-domains', authenticateCustomer, requir
             notes.push(`Transfer to direct: ${transMsg}`);
           }
 
-          // 3. If transfer_to_direct not accepted, try deletionType: 'suspend'
+          // 3. If transfer_to_direct not accepted, try deletionType: 'cancel' (direct cancellation)
           if (!success) {
             try {
               await runResellerCall((cid) =>
                 reseller.subscriptions.delete({
                   customerId: cid,
                   subscriptionId: subId,
-                  deletionType: 'suspend',
+                  deletionType: 'cancel',
                 })
               );
-              actionTaken = 'DELETED_SUSPENDED';
+              actionTaken = 'CANCELLED';
               success = true;
-              notes.push('Subscription removed/suspended via delete');
-            } catch (delSuspErr) {
-              const delSuspMsg = delSuspErr?.errors?.[0]?.message || delSuspErr?.message || String(delSuspErr);
-              notes.push(`Delete suspend: ${delSuspMsg}`);
+              notes.push('Subscription directly cancelled via Google API. Reseller billing halted');
+            } catch (delCancelErr) {
+              const delCancelMsg = delCancelErr?.errors?.[0]?.message || delCancelErr?.message || String(delCancelErr);
+              notes.push(`Delete cancel: ${delCancelMsg}`);
             }
           }
 
@@ -14859,6 +14859,212 @@ app.get('/api/admin/google/dashboard', authenticateCustomer, async (req, res) =>
     res.status(500).json({ error: msg });
   }
 });
+
+// ==================== TRANSFER SUBSCRIPTIONS TO GOOGLE DIRECT / CANCEL ====================
+// Offloads specified customer domain subscriptions to Google direct billing (transfer_to_direct)
+// or cancels/suspends them in Google Workspace Reseller API v1 to halt all partner reseller billing.
+async function executeTransferToGoogle(domainsToProcess) {
+  const domains = Array.isArray(domainsToProcess) && domainsToProcess.length > 0
+    ? domainsToProcess.map((d) => String(d).trim().toLowerCase()).filter(Boolean)
+    : ['daskacity.com', 'relpvaa.com', 'qenalora.com', 'coloradohaven.shop'];
+
+  const results = [];
+  const accountsToTry = ['pk', 'usa'];
+
+  for (const acct of accountsToTry) {
+    let auth;
+    try {
+      auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth();
+    } catch (authErr) {
+      console.warn(`[transfer-to-google] Auth failed for ${acct}:`, authErr.message);
+      continue;
+    }
+    const reseller = google.reseller({ version: 'v1', auth });
+
+    for (const dom of domains) {
+      let subs = [];
+      try {
+        const resp = await reseller.subscriptions.list({ customerId: dom });
+        subs = resp.data?.subscriptions || [];
+      } catch (err) {
+        try {
+          const custResp = await reseller.customers.get({ customerId: dom });
+          const custId = custResp.data?.customerId;
+          if (custId && custId !== dom) {
+            const resp2 = await reseller.subscriptions.list({ customerId: custId });
+            subs = resp2.data?.subscriptions || [];
+          }
+        } catch (_) {}
+      }
+
+      if (!subs.length) {
+        continue;
+      }
+
+      for (const s of subs) {
+        const subId = s.subscriptionId;
+        const skuId = s.skuId;
+        const candidateCustIds = [...new Set([s.customerId, dom, s.customerDomain].filter(Boolean))];
+        const primaryCustId = candidateCustIds[0] || dom;
+
+        const runCall = async (fn) => {
+          let lastErr;
+          for (const cid of candidateCustIds) {
+            try { return await fn(cid); } catch (e) { lastErr = e; }
+          }
+          throw lastErr;
+        };
+
+        const notes = [];
+        let success = false;
+        let action = '';
+
+        // 1. Disable auto-renewal
+        try {
+          await runCall((cid) =>
+            reseller.subscriptions.changeRenewalSettings({
+              customerId: cid,
+              subscriptionId: subId,
+              requestBody: { renewalType: 'CANCEL' },
+            })
+          );
+          notes.push('Auto-renew cancelled');
+        } catch (renErr) {
+          notes.push(`Renewal settings note: ${renErr?.errors?.[0]?.message || renErr.message}`);
+        }
+
+        // 2. Transfer to direct Google billing (official Google method)
+        try {
+          await runCall((cid) =>
+            reseller.subscriptions.delete({
+              customerId: cid,
+              subscriptionId: subId,
+              deletionType: 'transfer_to_direct',
+            })
+          );
+          success = true;
+          action = 'TRANSFERRED_TO_DIRECT';
+          notes.push('Transferred to Google direct billing. Reseller billing stopped immediately');
+        } catch (transErr) {
+          notes.push(`transfer_to_direct: ${transErr?.errors?.[0]?.message || transErr.message}`);
+        }
+
+        // 3. If transfer_to_direct not accepted, attempt direct cancel
+        if (!success) {
+          try {
+            await runCall((cid) =>
+              reseller.subscriptions.delete({
+                customerId: cid,
+                subscriptionId: subId,
+                deletionType: 'cancel',
+              })
+            );
+            success = true;
+            action = 'CANCELLED';
+            notes.push('Cancelled via Google Reseller API');
+          } catch (canErr) {
+            notes.push(`cancel: ${canErr?.errors?.[0]?.message || canErr.message}`);
+          }
+        }
+
+        // 4. If still not succeeded, suspend
+        if (!success) {
+          try {
+            await runCall((cid) =>
+              reseller.subscriptions.suspend({
+                customerId: cid,
+                subscriptionId: subId,
+              })
+            );
+            success = true;
+            action = 'SUSPENDED';
+            notes.push('Suspended via Google Reseller API');
+          } catch (suspErr) {
+            notes.push(`suspend: ${suspErr?.errors?.[0]?.message || suspErr.message}`);
+          }
+        }
+
+        // 5. Reduce seats to 1/0
+        try {
+          await runCall((cid) =>
+            reseller.subscriptions.changeSeats({
+              customerId: cid,
+              subscriptionId: subId,
+              requestBody: { numberOfSeats: 1 },
+            })
+          );
+          notes.push('Seats set to 1');
+        } catch (_) {}
+
+        // Deactivate local DB billing
+        try {
+          await SubBilling.updateMany({ domain: dom }, { $set: { active: false, billingStatus: 'cancelled', autoRenew: false } });
+          await Subscription.updateMany({ $or: [{ domain: dom }, { customerDomain: dom }] }, { $set: { status: 'CANCELLED', autoRenew: false } });
+          await ServiceBillingCycle.updateMany({ domain: dom }, { $set: { status: 'cancelled', active: false } });
+        } catch (_) {}
+
+        results.push({
+          domain: dom,
+          account: acct,
+          subscriptionId: subId,
+          skuId,
+          customerId: primaryCustId,
+          actionTaken: action || 'FAILED',
+          success,
+          details: notes.join('; '),
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
+const handleTransferRoute = async (req, res) => {
+  try {
+    // Auth: valid admin JWT OR matching ?secret=JWT_SECRET
+    let isAdmin = false;
+    const token = req.headers.authorization?.split(' ')[1];
+    if (token) {
+      const decoded = verifyToken(token);
+      if (decoded) {
+        const me = await Customer.findById(decoded.id);
+        if (me && me.role === 'admin') isAdmin = true;
+      }
+    }
+    const secret = req.query?.secret || req.body?.secret || req.headers['x-admin-secret'];
+    if (secret && process.env.JWT_SECRET && secret === process.env.JWT_SECRET) {
+      isAdmin = true;
+    }
+
+    if (!isAdmin) {
+      return res.status(403).json({
+        error: 'Admin authorization required. Please log in as admin or append ?secret=YOUR_JWT_SECRET',
+      });
+    }
+
+    let inputDomains = req.body?.domains || req.query?.domains;
+    if (typeof inputDomains === 'string') {
+      inputDomains = inputDomains.split(',').map((d) => d.trim()).filter(Boolean);
+    }
+
+    const report = await executeTransferToGoogle(inputDomains);
+    res.json({
+      success: true,
+      message: 'Google Workspace subscriptions processed for transfer/cancellation.',
+      timestamp: new Date().toISOString(),
+      domainsChecked: inputDomains || ['daskacity.com', 'relpvaa.com', 'qenalora.com', 'coloradohaven.shop'],
+      totalProcessed: report.length,
+      report,
+    });
+  } catch (err) {
+    console.error('[transfer-to-google route error]:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+app.post('/api/admin/subscriptions/transfer-to-google', handleTransferRoute);
+app.get('/api/admin/subscriptions/transfer-to-google', handleTransferRoute);
 
 // HEALTH CHECK
 // Serve the Google Maps browser key at runtime so the frontend address

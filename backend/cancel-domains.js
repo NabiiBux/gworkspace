@@ -243,25 +243,25 @@ async function cancelSubscriptionsForDomain(reseller, account, domain) {
       console.log(`     ℹ️  Transfer to direct: ${transMsg}`);
     }
 
-    // 3. If transfer_to_direct was not accepted, try deletionType: 'suspend'
+    // 3. If transfer_to_direct was not accepted, try deletionType: 'cancel' (direct cancellation)
     if (!success) {
       try {
-        console.log(`     3. Attempting deletionType: 'suspend'...`);
+        console.log(`     3. Attempting deletionType: 'cancel' (cancel directly in Google API)...`);
         await runResellerCall((cid) =>
           reseller.subscriptions.delete({
             customerId: cid,
             subscriptionId: subId,
-            deletionType: 'suspend',
+            deletionType: 'cancel',
           })
         );
-        actionTaken = 'DELETED_SUSPENDED';
+        actionTaken = 'CANCELLED';
         success = true;
-        notes.push('Subscription removed/suspended via delete');
-        console.log(`     ✅ SUCCESS: Subscription suspended via delete.`);
-      } catch (delSuspErr) {
-        const delSuspMsg = delSuspErr?.errors?.[0]?.message || delSuspErr?.message || String(delSuspErr);
-        notes.push(`Delete suspend: ${delSuspMsg}`);
-        console.log(`     ℹ️  Delete suspend: ${delSuspMsg}`);
+        notes.push('Subscription directly cancelled via Google API. Reseller billing halted');
+        console.log(`     ✅ SUCCESS: Subscription cancelled via Google API.`);
+      } catch (delCancelErr) {
+        const delCancelMsg = delCancelErr?.errors?.[0]?.message || delCancelErr?.message || String(delCancelErr);
+        notes.push(`Delete cancel: ${delCancelMsg}`);
+        console.log(`     ℹ️  Delete cancel: ${delCancelMsg}`);
       }
     }
 

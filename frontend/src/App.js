@@ -3077,23 +3077,23 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
           {showBulk ? 'Close Bulk Attach' : '🔗 Bulk Attach Subscriptions'}
         </button>
         <button className="btn btn-danger" onClick={() => setShowCancelModal(!showCancelModal)} style={{ background: '#b91c1c', color: '#fff', borderColor: '#b91c1c' }}>
-          {showCancelModal ? 'Close Cancel Tool' : '🛑 Cancel Subscriptions (Reseller API)'}
+          {showCancelModal ? 'Close Transfer / Cancel Tool' : '🚀 Transfer / Cancel Subscriptions (Reseller API)'}
         </button>
       </div>
 
       {showCancelModal && (
         <div style={{ background: '#fff', borderRadius: 12, padding: 20, border: '1px solid #fecaca', marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <span style={{ fontSize: 20 }}>🛑</span>
-            <h3 style={{ margin: 0, color: '#991b1b' }}>Cancel Subscriptions via Google Reseller API</h3>
+            <span style={{ fontSize: 20 }}>🚀</span>
+            <h3 style={{ margin: 0, color: '#991b1b' }}>Transfer / Cancel Subscriptions via Google Reseller API</h3>
           </div>
           <p style={{ color: '#4b5563', fontSize: 13, marginTop: 4, marginBottom: 14, lineHeight: 1.5 }}>
-            Immediately cancels subscriptions in Google's Reseller billing system and halts recurring monthly charges. If Google blocks immediate cancellation due to an annual contract commitment, it automatically switches the renewal type to <strong>CANCEL</strong> and suspends the subscription.
+            Directly calls the Google Workspace Reseller API v1 with <code>transfer_to_direct</code> (Google's official "Transfer all to Google" action) to release your reseller account from monthly billing. If transfer is not supported for the subscription, it forcibly cancels and suspends the subscription in Google's API to eliminate all extra bills.
           </p>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
             <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', margin: 0 }}>
-              Domains to Cancel (one per line or comma-separated):
+              Domains to Transfer / Cancel (one per line or comma-separated):
             </label>
             <div style={{ display: 'flex', gap: 6 }}>
               <button
@@ -3127,10 +3127,10 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
               className="btn btn-danger"
               style={{ background: '#dc2626', color: '#fff', borderColor: '#dc2626', padding: '10px 20px', fontWeight: 600 }}
             >
-              {cancelBusy ? 'Cancelling via Google API…' : `Cancel Subscriptions for ${cancelText.split(/[\s,\n]+/).filter(Boolean).length || ''} Domain(s)`}
+              {cancelBusy ? 'Processing in Google API…' : `Transfer / Cancel for ${cancelText.split(/[\s,\n]+/).filter(Boolean).length || ''} Domain(s)`}
             </button>
             <span style={{ fontSize: 12, color: '#6b7280' }}>
-              Checked against both PK and USA reseller accounts &amp; local billing tables.
+              Releases partner billing in Google Partner Console &amp; local billing engine.
             </span>
           </div>
 
