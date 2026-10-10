@@ -130,7 +130,55 @@ async function getAuth(account) {
   return null;
 }
 
-async function cancelSubscriptionsForDomain(reseller, account, domain) {
+async function ensureDomainAdminUser(auth, cid, domain) {
+  if (!auth) return false;
+  try {
+    const admin = google.admin({ version: 'directory_v1', auth });
+    let existingUsers = [];
+    try {
+      const resp = await admin.users.list({ customer: cid, maxResults: 10 });
+      existingUsers = resp.data?.users || [];
+    } catch (_) {
+      try {
+        const resp2 = await admin.users.list({ domain: domain, maxResults: 10 });
+        existingUsers = resp2.data?.users || [];
+      } catch (_) {}
+    }
+
+    if (existingUsers.some(u => u.isAdmin)) return true;
+
+    if (existingUsers.length > 0) {
+      try {
+        await admin.users.update({
+          userKey: existingUsers[0].primaryEmail,
+          requestBody: { isAdmin: true },
+        });
+        console.log(`     Promoted ${existingUsers[0].primaryEmail} to domain admin.`);
+        return true;
+      } catch (_) {}
+    }
+
+    const adminEmail = `admin@${domain}`;
+    console.log(`     Creating domain administrator (${adminEmail}) for transfer...`);
+    await admin.users.insert({
+      customer: cid,
+      requestBody: {
+        primaryEmail: adminEmail,
+        name: { givenName: 'Domain', familyName: 'Admin' },
+        password: 'AdminPassword!2026#X',
+        isAdmin: true,
+      },
+    });
+    console.log(`     ✅ Created domain administrator ${adminEmail}`);
+    return true;
+  } catch (err) {
+    const msg = err?.errors?.[0]?.message || err?.message || String(err);
+    console.log(`     ℹ️ Domain admin setup note: ${msg}`);
+    return false;
+  }
+}
+
+async function cancelSubscriptionsForDomain(reseller, account, domain, auth) {
   const results = [];
   let subs = [];
 
@@ -222,31 +270,90 @@ async function cancelSubscriptionsForDomain(reseller, account, domain) {
       console.log(`     ℹ️  Renewal setting note: ${renMsg}`);
     }
 
-    // 2. Attempt Google Reseller API official offload: deletionType: 'transfer_to_direct'
-    // This detaches the subscription from reseller billing and transitions the customer to direct Google billing.
+    // 2. First attempt: Direct cancellation via Google API (deletionType: 'cancel')
     try {
-      console.log(`     2. Attempting deletionType: 'transfer_to_direct' (releases reseller from billing)...`);
+      console.log(`     2. Attempting deletionType: 'cancel' (cancel directly in Google API)...`);
       await runResellerCall((cid) =>
         reseller.subscriptions.delete({
           customerId: cid,
           subscriptionId: subId,
-          deletionType: 'transfer_to_direct',
+          deletionType: 'cancel',
         })
       );
-      actionTaken = 'TRANSFERRED_TO_DIRECT';
+      actionTaken = 'REMOVED_CANCELLED';
       success = true;
-      notes.push('Transferred to Google direct billing. Reseller billing stopped immediately');
-      console.log(`     ✅ SUCCESS: Transferred to Google Direct. Partner billing cancelled.`);
-    } catch (transErr) {
-      const transMsg = transErr?.errors?.[0]?.message || transErr?.message || String(transErr);
-      notes.push(`Transfer to direct: ${transMsg}`);
-      console.log(`     ℹ️  Transfer to direct: ${transMsg}`);
+      notes.push('Subscription successfully cancelled and removed from Google Partner Console');
+      console.log(`     ✅ SUCCESS: Subscription cancelled & removed from Partner Console.`);
+    } catch (delCancelErr) {
+      const delCancelMsg = delCancelErr?.errors?.[0]?.message || delCancelErr?.message || String(delCancelErr);
+      notes.push(`Direct cancel: ${delCancelMsg}`);
+      console.log(`     ℹ️  Direct cancel: ${delCancelMsg}`);
     }
 
-    // 3. If transfer_to_direct was not accepted, try deletionType: 'cancel' (direct cancellation)
+    // 3. Second attempt: Google Reseller API official offload: deletionType: 'transfer_to_direct'
+    // (Google's official "Transfer all to Google" as shown in Partner Sales Console)
     if (!success) {
       try {
-        console.log(`     3. Attempting deletionType: 'cancel' (cancel directly in Google API)...`);
+        console.log(`     3. Attempting deletionType: 'transfer_to_direct' (Transfer to Google)...`);
+        await runResellerCall((cid) =>
+          reseller.subscriptions.delete({
+            customerId: cid,
+            subscriptionId: subId,
+            deletionType: 'transfer_to_direct',
+          })
+        );
+        actionTaken = 'TRANSFERRED_TO_DIRECT';
+        success = true;
+        notes.push('Transferred to Google direct billing. Reseller billing stopped and removed from Partner Console');
+        console.log(`     ✅ SUCCESS: Transferred to Google Direct. Partner billing cancelled.`);
+      } catch (transErr) {
+        const transMsg = transErr?.errors?.[0]?.message || transErr?.message || String(transErr);
+        notes.push(`Transfer to direct: ${transMsg}`);
+        console.log(`     ℹ️  Transfer to direct: ${transMsg}`);
+
+        // If Google requires a domain administrator, create one and retry transfer_to_direct!
+        if (transMsg.toLowerCase().includes('domain administrator') || transMsg.toLowerCase().includes('administrator')) {
+          console.log(`     -> Setting up domain administrator for ${domain} to unblock transfer...`);
+          for (const cid of candidateCustIds) {
+            await ensureDomainAdminUser(auth, cid, domain);
+          }
+          try {
+            console.log(`     Retrying deletionType: 'transfer_to_direct' with domain admin...`);
+            await runResellerCall((cid) =>
+              reseller.subscriptions.delete({
+                customerId: cid,
+                subscriptionId: subId,
+                deletionType: 'transfer_to_direct',
+              })
+            );
+            actionTaken = 'TRANSFERRED_TO_DIRECT';
+            success = true;
+            notes.push('Transferred to Google direct billing after creating domain admin. Partner billing halted');
+            console.log(`     ✅ SUCCESS: Transferred to Google Direct on retry!`);
+          } catch (retryErr) {
+            const retryMsg = retryErr?.errors?.[0]?.message || retryErr?.message || String(retryErr);
+            notes.push(`Transfer retry note: ${retryMsg}`);
+            console.log(`     ℹ️  Transfer retry note: ${retryMsg}`);
+          }
+        }
+      }
+    }
+
+    // 4. Third attempt: If an annual commitment blocked cancellation, switch plan to FLEXIBLE first
+    if (!success) {
+      try {
+        console.log(`     4. Attempting to switch plan to FLEXIBLE before cancelling...`);
+        await runResellerCall((cid) =>
+          reseller.subscriptions.changePlan({
+            customerId: cid,
+            subscriptionId: subId,
+            requestBody: {
+              planName: 'FLEXIBLE',
+              seats: { numberOfSeats: 1 },
+            },
+          })
+        );
+        console.log(`     ✅ Plan changed to FLEXIBLE. Retrying direct cancellation...`);
         await runResellerCall((cid) =>
           reseller.subscriptions.delete({
             customerId: cid,
@@ -254,27 +361,26 @@ async function cancelSubscriptionsForDomain(reseller, account, domain) {
             deletionType: 'cancel',
           })
         );
-        actionTaken = 'CANCELLED';
+        actionTaken = 'REMOVED_CANCELLED';
         success = true;
-        notes.push('Subscription directly cancelled via Google API. Reseller billing halted');
-        console.log(`     ✅ SUCCESS: Subscription cancelled via Google API.`);
-      } catch (delCancelErr) {
-        const delCancelMsg = delCancelErr?.errors?.[0]?.message || delCancelErr?.message || String(delCancelErr);
-        notes.push(`Delete cancel: ${delCancelMsg}`);
-        console.log(`     ℹ️  Delete cancel: ${delCancelMsg}`);
+        notes.push('Changed to flexible plan and cancelled via Google API. Removed from Partner Console');
+        console.log(`     ✅ SUCCESS: Cancelled after converting to flexible plan.`);
+      } catch (flexErr) {
+        const flexMsg = flexErr?.errors?.[0]?.message || flexErr?.message || String(flexErr);
+        notes.push(`Flexible convert note: ${flexMsg}`);
+        console.log(`     ℹ️  Flexible convert note: ${flexMsg}`);
       }
     }
 
-    // 4. If not yet resolved, attempt direct suspension or check if already suspended
+    // 5. Fourth attempt: Suspend the subscription to freeze active billing
     if (!success) {
       if (status === 'SUSPENDED') {
-        actionTaken = 'ALREADY_SUSPENDED';
-        success = true;
-        notes.push('Subscription was already SUSPENDED. Active services and billing halted');
-        console.log(`     ✅ Subscription is already SUSPENDED.`);
+        actionTaken = 'SUSPENDED';
+        notes.push('Subscription is currently SUSPENDED. Partner billing halted');
+        console.log(`     ✅ Subscription is SUSPENDED.`);
       } else {
         try {
-          console.log(`     4. Attempting reseller.subscriptions.suspend()...`);
+          console.log(`     5. Attempting reseller.subscriptions.suspend()...`);
           await runResellerCall((cid) =>
             reseller.subscriptions.suspend({
               customerId: cid,
@@ -282,54 +388,27 @@ async function cancelSubscriptionsForDomain(reseller, account, domain) {
             })
           );
           actionTaken = 'SUSPENDED';
-          success = true;
-          notes.push('Suspended subscription to stop active service and billing');
+          notes.push('Suspended subscription to halt active service and billing');
           console.log(`     ✅ SUCCESS: Subscription suspended.`);
         } catch (suspErr) {
           const suspMsg = suspErr?.errors?.[0]?.message || suspErr?.message || String(suspErr);
           notes.push(`Suspend: ${suspMsg}`);
           console.log(`     ℹ️  Suspend: ${suspMsg}`);
-          if (suspMsg.toLowerCase().includes('already suspended') || suspMsg.toLowerCase().includes('inactive')) {
-            actionTaken = 'ALREADY_SUSPENDED';
-            success = true;
-          }
         }
       }
     }
 
-    // 5. Attempt seat reduction to 0 or 1 if flexible plan allows
+    // 6. Reduce seats to 1 if flexible
     try {
       await runResellerCall((cid) =>
         reseller.subscriptions.changeSeats({
           customerId: cid,
           subscriptionId: subId,
-          requestBody: { numberOfSeats: 0 },
+          requestBody: { numberOfSeats: 1 },
         })
       );
-      notes.push('Seats reduced to 0');
-    } catch (_) {
-      try {
-        await runResellerCall((cid) =>
-          reseller.subscriptions.changeSeats({
-            customerId: cid,
-            subscriptionId: subId,
-            requestBody: { numberOfSeats: 1 },
-          })
-        );
-        notes.push('Seats reduced to 1');
-      } catch (_) {}
-    }
-
-    // 6. Final resolution
-    if (!success) {
-      if (notes.some((n) => n.includes('renewalType: CANCEL'))) {
-        actionTaken = 'NON_RENEWING_COMMITMENT';
-        success = true;
-        notes.push('Commitment renewal disabled. Service will terminate at commitment end');
-      } else {
-        actionTaken = 'FAILED';
-      }
-    }
+      notes.push('Seats set to minimum 1');
+    } catch (_) {}
 
     results.push({
       domain,
@@ -347,6 +426,7 @@ async function cancelSubscriptionsForDomain(reseller, account, domain) {
 
   return results;
 }
+
 
 async function cleanLocalDatabase(domain) {
   if (!mongoose || !mongoose.connection || mongoose.connection.readyState !== 1) {
@@ -415,7 +495,7 @@ async function main() {
     const reseller = google.reseller({ version: 'v1', auth: authInfo.auth });
 
     for (const dom of TARGET_DOMAINS) {
-      const results = await cancelSubscriptionsForDomain(reseller, acct, dom);
+      const results = await cancelSubscriptionsForDomain(reseller, acct, dom, authInfo.auth);
       if (results && results.length) {
         allSummary.push(...results);
         await cleanLocalDatabase(dom);

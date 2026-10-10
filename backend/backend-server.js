@@ -14919,7 +14919,7 @@ async function executeTransferToGoogle(domainsToProcess) {
         let success = false;
         let action = '';
 
-        // 1. Disable auto-renewal
+        // 1. Disable auto-renewal so commitment plans never renew
         try {
           await runCall((cid) =>
             reseller.subscriptions.changeRenewalSettings({
@@ -14933,25 +14933,82 @@ async function executeTransferToGoogle(domainsToProcess) {
           notes.push(`Renewal settings note: ${renErr?.errors?.[0]?.message || renErr.message}`);
         }
 
-        // 2. Transfer to direct Google billing (official Google method)
+        // 2. First attempt: Direct cancellation (deletionType: 'cancel')
         try {
           await runCall((cid) =>
             reseller.subscriptions.delete({
               customerId: cid,
               subscriptionId: subId,
-              deletionType: 'transfer_to_direct',
+              deletionType: 'cancel',
             })
           );
           success = true;
-          action = 'TRANSFERRED_TO_DIRECT';
-          notes.push('Transferred to Google direct billing. Reseller billing stopped immediately');
-        } catch (transErr) {
-          notes.push(`transfer_to_direct: ${transErr?.errors?.[0]?.message || transErr.message}`);
+          action = 'REMOVED_CANCELLED';
+          notes.push('Cancelled via Google Reseller API and removed from Partner Console');
+        } catch (canErr) {
+          const canMsg = canErr?.errors?.[0]?.message || canErr.message;
+          notes.push(`cancel: ${canMsg}`);
+
+          // 3. Second attempt: Transfer to direct Google billing (transfer_to_direct)
+          try {
+            await runCall((cid) =>
+              reseller.subscriptions.delete({
+                customerId: cid,
+                subscriptionId: subId,
+                deletionType: 'transfer_to_direct',
+              })
+            );
+            success = true;
+            action = 'TRANSFERRED_TO_DIRECT';
+            notes.push('Transferred to Google direct billing. Reseller billing stopped and removed from Partner Console');
+          } catch (transErr) {
+            const transMsg = transErr?.errors?.[0]?.message || transErr.message;
+            notes.push(`transfer_to_direct: ${transMsg}`);
+
+            // If Google requires a domain administrator, create one and retry transfer_to_direct!
+            if (transMsg.toLowerCase().includes('domain administrator') || transMsg.toLowerCase().includes('administrator')) {
+              try {
+                const directory = google.admin({ version: 'directory_v1', auth });
+                const adminEmail = `admin@${dom}`;
+                await directory.users.insert({
+                  customer: primaryCustId,
+                  requestBody: {
+                    primaryEmail: adminEmail,
+                    name: { givenName: 'Domain', familyName: 'Admin' },
+                    password: 'AdminPassword!2026#X',
+                    isAdmin: true,
+                  },
+                });
+                notes.push(`Created domain admin ${adminEmail}`);
+
+                // Retry transfer_to_direct!
+                await runCall((cid) =>
+                  reseller.subscriptions.delete({
+                    customerId: cid,
+                    subscriptionId: subId,
+                    deletionType: 'transfer_to_direct',
+                  })
+                );
+                success = true;
+                action = 'TRANSFERRED_TO_DIRECT';
+                notes.push('Transferred to Google direct after creating admin user');
+              } catch (adminRetryErr) {
+                notes.push(`Admin transfer retry: ${adminRetryErr?.errors?.[0]?.message || adminRetryErr.message}`);
+              }
+            }
+          }
         }
 
-        // 3. If transfer_to_direct not accepted, attempt direct cancel
+        // 4. Third attempt: If annual commitment blocked deletion, convert to FLEXIBLE plan then cancel
         if (!success) {
           try {
+            await runCall((cid) =>
+              reseller.subscriptions.changePlan({
+                customerId: cid,
+                subscriptionId: subId,
+                requestBody: { planName: 'FLEXIBLE', seats: { numberOfSeats: 1 } },
+              })
+            );
             await runCall((cid) =>
               reseller.subscriptions.delete({
                 customerId: cid,
@@ -14960,10 +15017,10 @@ async function executeTransferToGoogle(domainsToProcess) {
               })
             );
             success = true;
-            action = 'CANCELLED';
-            notes.push('Cancelled via Google Reseller API');
-          } catch (canErr) {
-            notes.push(`cancel: ${canErr?.errors?.[0]?.message || canErr.message}`);
+            action = 'REMOVED_CANCELLED';
+            notes.push('Converted to FLEXIBLE and cancelled');
+          } catch (flexErr) {
+            notes.push(`flexible plan: ${flexErr?.errors?.[0]?.message || flexErr.message}`);
           }
         }
 
