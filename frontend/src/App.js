@@ -2836,6 +2836,10 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
   const [cancelMsg, setCancelMsg] = useState('');
   const [cancelResults, setCancelResults] = useState(null);
 
+  // Row-level cancel state
+  const [cancellingRow, setCancellingRow] = useState(null);
+  const [rowCancelMsg, setRowCancelMsg] = useState('');
+
   const isUSA = account === 'USA';
 
   useEffect(() => { setPage(1); }, [account]);
@@ -2901,6 +2905,43 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
       setCancelMsg(e?.response?.data?.error || 'Cancellation request failed.');
     } finally {
       setCancelBusy(false);
+    }
+  };
+
+  const handleCancelSubRow = async (sub) => {
+    const domainName = sub.domain || sub.customerId;
+    const skuLabel = sub.skuName || sub.skuId || 'Workspace Subscription';
+    const confirmed = window.confirm(
+      `Are you sure you want to cancel the subscription for "${domainName}" (${skuLabel}) in the Google Reseller API?\n\n` +
+      `This immediately cancels the subscription in Google's Partner Console billing system and prevents recurring monthly bills.`
+    );
+    if (!confirmed) return;
+
+    setCancellingRow(sub.subscriptionId || domainName);
+    setRowCancelMsg('');
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(
+        `${API_URL}/admin/subscriptions/cancel-domains`,
+        {
+          domains: [domainName],
+          subscriptionId: sub.subscriptionId,
+          customerId: sub.customerId,
+          skuId: sub.skuId,
+          skuName: sub.skuName,
+          account: account.toLowerCase(),
+        },
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        }
+      );
+      const resCount = response.data?.resultsCount || 0;
+      setRowCancelMsg(`✓ Successfully cancelled subscription for ${domainName} in Google Reseller API (${resCount} processed).`);
+      fetchSubs();
+    } catch (e) {
+      setRowCancelMsg(e?.response?.data?.error || `Failed to cancel subscription for ${domainName}.`);
+    } finally {
+      setCancellingRow(null);
     }
   };
 
@@ -3050,9 +3091,27 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
             Immediately cancels subscriptions in Google's Reseller billing system and halts recurring monthly charges. If Google blocks immediate cancellation due to an annual contract commitment, it automatically switches the renewal type to <strong>CANCEL</strong> and suspends the subscription.
           </p>
 
-          <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 6, color: '#374151' }}>
-            Domains to Cancel (one per line or comma-separated):
-          </label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', margin: 0 }}>
+              Domains to Cancel (one per line or comma-separated):
+            </label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                type="button"
+                onClick={() => setCancelText('daskacity.com\nrelpvaa.com\nqenalora.com\ncoloradohaven.shop')}
+                style={{ fontSize: 11, background: '#fee2e2', border: '1px solid #fca5a5', color: '#991b1b', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontWeight: 600 }}
+              >
+                ⚡ Insert 4 Target Domains
+              </button>
+              <button
+                type="button"
+                onClick={() => setCancelText('')}
+                style={{ fontSize: 11, background: '#f3f4f6', border: '1px solid #d1d5db', color: '#4b5563', borderRadius: 4, padding: '2px 8px', cursor: 'pointer' }}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
           <textarea
             value={cancelText}
             onChange={(e) => setCancelText(e.target.value)}
@@ -3175,13 +3234,36 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
         </div>
       )}
 
+      {rowCancelMsg && (
+        <div style={{
+          marginBottom: 16,
+          padding: '12px 16px',
+          borderRadius: 8,
+          fontSize: 14,
+          fontWeight: 500,
+          backgroundColor: rowCancelMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2',
+          border: rowCancelMsg.startsWith('✓') ? '1px solid #bbf7d0' : '1px solid #fee2e2',
+          color: rowCancelMsg.startsWith('✓') ? '#15803d' : '#b91c1c'
+        }}>
+          {rowCancelMsg}
+        </div>
+      )}
+
       {rows.length === 0 ? (
         <p>No subscriptions found on this account.</p>
       ) : (
         <>
           <table className="data-table">
             <thead>
-              <tr><th>Domain</th><th>Product</th><th>Plan</th><th>Seats</th><th>Status</th><th>Created</th></tr>
+              <tr>
+                <th>Domain</th>
+                <th>Product</th>
+                <th>Plan</th>
+                <th>Seats</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th style={{ textAlign: 'center' }}>Action</th>
+              </tr>
             </thead>
             <tbody>
               {rows.map((s, i) => (
@@ -3192,6 +3274,30 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
                   <td>{s.seats ?? s.licensedSeats ?? '—'}</td>
                   <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
                   <td>{fmtDate(s.creationTime)}</td>
+                  <td style={{ textAlign: 'center' }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => handleCancelSubRow(s)}
+                      disabled={cancellingRow === (s.subscriptionId || s.domain)}
+                      style={{
+                        background: '#fee2e2',
+                        color: '#991b1b',
+                        border: '1px solid #fca5a5',
+                        padding: '4px 10px',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }}
+                      title="Cancel this subscription in Google Reseller API to stop billing"
+                    >
+                      {cancellingRow === (s.subscriptionId || s.domain) ? '⏳ Cancelling…' : '🛑 Cancel'}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -3416,6 +3522,33 @@ const AdminCustomersSection = () => {
       setAttaching(null); load();
     } catch (e) { setAttachMsg(e?.response?.data?.error || 'Could not attach.'); }
     finally { setAttachBusy(false); }
+  };
+
+  const cancelDomainDirectly = async (domainToCancel, acct) => {
+    const dom = (domainToCancel || '').trim().toLowerCase();
+    if (!dom) return;
+    const confirmed = window.confirm(
+      `Cancel subscriptions for "${dom}" in ${acct ? acct.toUpperCase() : 'Google'} Reseller API?\n\n` +
+      `This immediately cancels active subscriptions and halts monthly reseller billing.`
+    );
+    if (!confirmed) return;
+
+    setAttachBusy(true);
+    setAttachMsg('');
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        `${API_URL}/admin/subscriptions/cancel-domains`,
+        { domains: [dom], account: acct },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      setAttachMsg(`✓ Successfully cancelled subscriptions for ${dom} via Google Reseller API.`);
+      doLookup();
+    } catch (e) {
+      setAttachMsg(e?.response?.data?.error || `Failed to cancel subscription for ${dom}.`);
+    } finally {
+      setAttachBusy(false);
+    }
   };
 
   const doBulkLookup = async () => {
@@ -3648,14 +3781,25 @@ const AdminCustomersSection = () => {
                       <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 12 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                           <span style={{ fontWeight: 700, color: '#166534', fontSize: 13 }}>🇵🇰 Pakistan Account (PK) — FOUND</span>
-                          <button 
-                            onClick={() => confirmAttachForAccount('pk')} 
-                            disabled={attachBusy} 
-                            className="btn btn-primary" 
-                            style={{ padding: '4px 8px', fontSize: 12, height: 'auto', minHeight: 'auto', borderRadius: 6 }}
-                          >
-                            Attach PK
-                          </button>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button 
+                              onClick={() => confirmAttachForAccount('pk')} 
+                              disabled={attachBusy} 
+                              className="btn btn-primary" 
+                              style={{ padding: '4px 8px', fontSize: 12, height: 'auto', minHeight: 'auto', borderRadius: 6 }}
+                            >
+                              Attach PK
+                            </button>
+                            <button 
+                              onClick={() => cancelDomainDirectly(attachDom, 'pk')} 
+                              disabled={attachBusy} 
+                              className="btn btn-danger" 
+                              style={{ padding: '4px 8px', fontSize: 12, height: 'auto', minHeight: 'auto', borderRadius: 6, background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}
+                              title="Cancel subscriptions in Google Reseller API"
+                            >
+                              🛑 Cancel PK
+                            </button>
+                          </div>
                         </div>
                         {lookup.accounts.pk.subscriptions && lookup.accounts.pk.subscriptions.length > 0 ? (
                           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#1e293b' }}>
@@ -3681,14 +3825,25 @@ const AdminCustomersSection = () => {
                       <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 12 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                           <span style={{ fontWeight: 700, color: '#166534', fontSize: 13 }}>🇺🇸 USA Account (USA) — FOUND</span>
-                          <button 
-                            onClick={() => confirmAttachForAccount('usa')} 
-                            disabled={attachBusy} 
-                            className="btn btn-primary" 
-                            style={{ padding: '4px 8px', fontSize: 12, height: 'auto', minHeight: 'auto', borderRadius: 6 }}
-                          >
-                            Attach USA
-                          </button>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button 
+                              onClick={() => confirmAttachForAccount('usa')} 
+                              disabled={attachBusy} 
+                              className="btn btn-primary" 
+                              style={{ padding: '4px 8px', fontSize: 12, height: 'auto', minHeight: 'auto', borderRadius: 6 }}
+                            >
+                              Attach USA
+                            </button>
+                            <button 
+                              onClick={() => cancelDomainDirectly(attachDom, 'usa')} 
+                              disabled={attachBusy} 
+                              className="btn btn-danger" 
+                              style={{ padding: '4px 8px', fontSize: 12, height: 'auto', minHeight: 'auto', borderRadius: 6, background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}
+                              title="Cancel subscriptions in Google Reseller API"
+                            >
+                              🛑 Cancel USA
+                            </button>
+                          </div>
                         </div>
                         {lookup.accounts.usa.subscriptions && lookup.accounts.usa.subscriptions.length > 0 ? (
                           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#1e293b' }}>

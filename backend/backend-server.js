@@ -14557,17 +14557,27 @@ app.get('/api/admin/google/subscriptions', authenticateCustomer, async (req, res
 // Admin: cancel subscriptions for specific domains via Google Reseller API (stops recurring monthly charges)
 app.post('/api/admin/subscriptions/cancel-domains', authenticateCustomer, requireAdmin, async (req, res) => {
   try {
-    const rawDomains = req.body?.domains || [];
-    const targetDomains = (Array.isArray(rawDomains) ? rawDomains : [rawDomains])
+    const rawDomains = req.body?.domains || req.body?.domain || [];
+    const directSubId = req.body?.subscriptionId ? String(req.body.subscriptionId).trim() : null;
+    const directCustId = req.body?.customerId ? String(req.body.customerId).trim() : null;
+    const directAccount = req.body?.account ? String(req.body.account).toLowerCase() : null;
+
+    let targetDomains = (Array.isArray(rawDomains) ? rawDomains : [rawDomains])
       .map((d) => String(d).trim().toLowerCase())
       .filter(Boolean);
 
-    if (!targetDomains.length) {
-      return res.status(400).json({ error: 'Please provide at least one domain to cancel.' });
+    if (!targetDomains.length && directCustId) {
+      targetDomains = [directCustId.toLowerCase()];
+    }
+
+    if (!targetDomains.length && !directSubId) {
+      return res.status(400).json({ error: 'Please provide at least one domain or subscription ID to cancel.' });
     }
 
     const results = [];
-    const accounts = ['pk', 'usa'];
+    const accounts = directAccount && ['pk', 'usa'].includes(directAccount)
+      ? [directAccount]
+      : ['pk', 'usa'];
 
     for (const acct of accounts) {
       let auth;
@@ -14578,35 +14588,47 @@ app.post('/api/admin/subscriptions/cancel-domains', authenticateCustomer, requir
       }
       const reseller = google.reseller({ version: 'v1', auth });
 
-      for (const domain of targetDomains) {
+      for (const domain of (targetDomains.length ? targetDomains : ['direct-target'])) {
         let subs = [];
-        try {
-          const resp = await reseller.subscriptions.list({ customerId: domain });
-          subs = resp.data?.subscriptions || [];
-        } catch (_) {
-          try {
-            const custResp = await reseller.customers.get({ customerId: domain });
-            const custId = custResp.data?.customerId;
-            if (custId && custId !== domain) {
-              const resp2 = await reseller.subscriptions.list({ customerId: custId });
-              subs = resp2.data?.subscriptions || [];
-            }
-          } catch (_) {}
-        }
 
-        if (!subs.length) {
+        // If direct subscription ID was provided, prioritize direct cancellation target
+        if (directSubId) {
+          subs.push({
+            subscriptionId: directSubId,
+            customerId: directCustId || domain,
+            skuId: req.body?.skuId || 'unknown',
+            skuName: req.body?.skuName || 'Workspace Subscription',
+            status: 'ACTIVE',
+          });
+        } else {
           try {
-            let pageToken;
-            do {
-              const listResp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
-              const batch = listResp.data?.subscriptions || [];
-              for (const s of batch) {
-                const sDom = (s.customerDomain || s.customerId || '').toLowerCase();
-                if (sDom === domain) subs.push(s);
+            const resp = await reseller.subscriptions.list({ customerId: domain });
+            subs = resp.data?.subscriptions || [];
+          } catch (_) {
+            try {
+              const custResp = await reseller.customers.get({ customerId: domain });
+              const custId = custResp.data?.customerId;
+              if (custId && custId !== domain) {
+                const resp2 = await reseller.subscriptions.list({ customerId: custId });
+                subs = resp2.data?.subscriptions || [];
               }
-              pageToken = listResp.data?.nextPageToken;
-            } while (pageToken && subs.length === 0);
-          } catch (_) {}
+            } catch (_) {}
+          }
+
+          if (!subs.length) {
+            try {
+              let pageToken;
+              do {
+                const listResp = await reseller.subscriptions.list({ maxResults: 100, pageToken });
+                const batch = listResp.data?.subscriptions || [];
+                for (const s of batch) {
+                  const sDom = (s.customerDomain || s.customerId || '').toLowerCase();
+                  if (sDom === domain) subs.push(s);
+                }
+                pageToken = listResp.data?.nextPageToken;
+              } while (pageToken && subs.length === 0);
+            } catch (_) {}
+          }
         }
 
         for (const s of subs) {
