@@ -1,0 +1,9 @@
+{
+  "short_name": "GNB Mentor",
+  "name": "GNB Mentor — Google Workspace Reseller Portal",
+  "icons": [],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#0F766E",
+  "background_color": "#ffffff"
+}
