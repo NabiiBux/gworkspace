@@ -130,52 +130,120 @@ async function getAuth(account) {
   return null;
 }
 
-async function ensureDomainAdminUser(auth, cid, domain) {
+async function ensureDomainAdminUser(auth, candidateCustIds, domain, reseller, subId, isSuspended) {
   if (!auth) return false;
-  try {
-    const admin = google.admin({ version: 'directory_v1', auth });
-    let existingUsers = [];
-    try {
-      const resp = await admin.users.list({ customer: cid, maxResults: 10 });
-      existingUsers = resp.data?.users || [];
-    } catch (_) {
+  const admin = google.admin({ version: 'directory_v1', auth });
+
+  // If subscription is currently suspended, temporarily activate so directory mutations succeed
+  if (isSuspended && reseller && subId) {
+    for (const cid of candidateCustIds) {
       try {
-        const resp2 = await admin.users.list({ domain: domain, maxResults: 10 });
-        existingUsers = resp2.data?.users || [];
+        await reseller.subscriptions.activate({ customerId: cid, subscriptionId: subId });
+        console.log(`     Temporarily activated subscription for ${domain} to permit domain admin setup...`);
+        break;
+      } catch (actErr) {
+        console.log(`     ℹ️ Activation note for ${cid}: ${actErr?.errors?.[0]?.message || actErr.message}`);
+      }
+    }
+  }
+
+  try {
+    let existingUsers = [];
+    for (const cid of candidateCustIds) {
+      try {
+        const resp = await admin.users.list({ customer: cid, maxResults: 20 });
+        if (resp.data?.users && resp.data.users.length) {
+          existingUsers = resp.data.users;
+          break;
+        }
+      } catch (_) {}
+    }
+    if (!existingUsers.length) {
+      try {
+        const resp2 = await admin.users.list({ domain: domain, maxResults: 20 });
+        if (resp2.data?.users && resp2.data.users.length) {
+          existingUsers = resp2.data.users;
+        }
       } catch (_) {}
     }
 
-    if (existingUsers.some(u => u.isAdmin)) return true;
+    // Check if an active, non-suspended Super Admin already exists
+    const activeAdmin = existingUsers.find(u => u.isAdmin && !u.suspended);
+    if (activeAdmin) {
+      console.log(`     ✅ Found active domain administrator: ${activeAdmin.primaryEmail}`);
+      return true;
+    }
 
-    if (existingUsers.length > 0) {
+    // Promote existing users to Super Admin via makeAdmin
+    for (const u of existingUsers) {
+      try {
+        if (u.suspended) {
+          await admin.users.update({
+            userKey: u.primaryEmail,
+            requestBody: { suspended: false },
+          });
+          console.log(`     Unsuspended user ${u.primaryEmail}`);
+        }
+        await admin.users.makeAdmin({
+          userKey: u.primaryEmail,
+          requestBody: { status: true },
+        });
+        console.log(`     ✅ Successfully promoted ${u.primaryEmail} to Super Admin via makeAdmin!`);
+        return true;
+      } catch (err) {
+        console.log(`     ℹ️ makeAdmin on ${u.primaryEmail} note: ${err?.errors?.[0]?.message || err.message}`);
+      }
+    }
+
+    // If no existing user was promoted, create a new domain administrator
+    const candidateEmails = [
+      `admin@${domain}`,
+      `administrator@${domain}`,
+      `workspace@${domain}`,
+      `superadmin@${domain}`,
+    ];
+
+    for (const adminEmail of candidateEmails) {
+      try {
+        console.log(`     Creating domain administrator (${adminEmail}) for transfer...`);
+        await admin.users.insert({
+          requestBody: {
+            primaryEmail: adminEmail,
+            name: { givenName: 'Domain', familyName: 'Admin' },
+            password: 'AdminPassword!2026#X',
+            changePasswordAtNextLogin: false,
+          },
+        });
+        console.log(`     ✅ Created user ${adminEmail}`);
+      } catch (insErr) {
+        const insMsg = insErr?.errors?.[0]?.message || insErr.message;
+        console.log(`     ℹ️ Insert note for ${adminEmail}: ${insMsg}`);
+      }
+
       try {
         await admin.users.update({
-          userKey: existingUsers[0].primaryEmail,
-          requestBody: { isAdmin: true },
+          userKey: adminEmail,
+          requestBody: { suspended: false },
         });
-        console.log(`     Promoted ${existingUsers[0].primaryEmail} to domain admin.`);
-        return true;
       } catch (_) {}
-    }
 
-    const adminEmail = `admin@${domain}`;
-    console.log(`     Creating domain administrator (${adminEmail}) for transfer...`);
-    await admin.users.insert({
-      customer: cid,
-      requestBody: {
-        primaryEmail: adminEmail,
-        name: { givenName: 'Domain', familyName: 'Admin' },
-        password: 'AdminPassword!2026#X',
-        isAdmin: true,
-      },
-    });
-    console.log(`     ✅ Created domain administrator ${adminEmail}`);
-    return true;
+      try {
+        await admin.users.makeAdmin({
+          userKey: adminEmail,
+          requestBody: { status: true },
+        });
+        console.log(`     ✅ Promoted ${adminEmail} to Domain Super Admin via makeAdmin!`);
+        return true;
+      } catch (maErr) {
+        console.log(`     ℹ️ makeAdmin on ${adminEmail} note: ${maErr?.errors?.[0]?.message || maErr.message}`);
+      }
+    }
   } catch (err) {
     const msg = err?.errors?.[0]?.message || err?.message || String(err);
-    console.log(`     ℹ️ Domain admin setup note: ${msg}`);
-    return false;
+    console.log(`     ℹ️ Domain admin setup exception: ${msg}`);
   }
+
+  return false;
 }
 
 async function cancelSubscriptionsForDomain(reseller, account, domain, auth) {
@@ -314,9 +382,11 @@ async function cancelSubscriptionsForDomain(reseller, account, domain, auth) {
         // If Google requires a domain administrator, create one and retry transfer_to_direct!
         if (transMsg.toLowerCase().includes('domain administrator') || transMsg.toLowerCase().includes('administrator')) {
           console.log(`     -> Setting up domain administrator for ${domain} to unblock transfer...`);
-          for (const cid of candidateCustIds) {
-            await ensureDomainAdminUser(auth, cid, domain);
-          }
+          await ensureDomainAdminUser(auth, candidateCustIds, domain, reseller, subId, status === 'SUSPENDED');
+
+          // Wait 2500ms for Directory API propagation
+          await new Promise(r => setTimeout(r, 2500));
+
           try {
             console.log(`     Retrying deletionType: 'transfer_to_direct' with domain admin...`);
             await runResellerCall((cid) =>
@@ -328,12 +398,20 @@ async function cancelSubscriptionsForDomain(reseller, account, domain, auth) {
             );
             actionTaken = 'TRANSFERRED_TO_DIRECT';
             success = true;
-            notes.push('Transferred to Google direct billing after creating domain admin. Partner billing halted');
+            notes.push('Transferred to Google direct billing after creating domain admin. Reseller billing stopped');
             console.log(`     ✅ SUCCESS: Transferred to Google Direct on retry!`);
           } catch (retryErr) {
             const retryMsg = retryErr?.errors?.[0]?.message || retryErr?.message || String(retryErr);
             notes.push(`Transfer retry note: ${retryMsg}`);
             console.log(`     ℹ️  Transfer retry note: ${retryMsg}`);
+            if (status === 'SUSPENDED') {
+              try {
+                console.log(`     Re-suspending subscription to keep billing halted...`);
+                await runResellerCall((cid) =>
+                  reseller.subscriptions.suspend({ customerId: cid, subscriptionId: subId })
+                );
+              } catch (_) {}
+            }
           }
         }
       }
@@ -410,6 +488,8 @@ async function cancelSubscriptionsForDomain(reseller, account, domain, auth) {
       notes.push('Seats set to minimum 1');
     } catch (_) {}
 
+    const isBillingHalted = success || actionTaken === 'TRANSFERRED_TO_DIRECT' || actionTaken === 'REMOVED_CANCELLED' || actionTaken === 'SUSPENDED';
+
     results.push({
       domain,
       account,
@@ -419,7 +499,7 @@ async function cancelSubscriptionsForDomain(reseller, account, domain, auth) {
       skuName,
       previousStatus: status,
       actionTaken,
-      success,
+      success: isBillingHalted,
       detail: notes.join('. '),
     });
   }

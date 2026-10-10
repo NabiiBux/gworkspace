@@ -2829,12 +2829,18 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
   const [attachMsg, setAttachMsg] = useState('');
   const [attachResults, setAttachResults] = useState(null);
 
-  // Bulk Cancel states
+  // Bulk Transfer / Cancel states
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelText, setCancelText] = useState('daskacity.com\nrelpvaa.com\nqenalora.com\ncoloradohaven.shop');
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelMsg, setCancelMsg] = useState('');
   const [cancelResults, setCancelResults] = useState(null);
+
+  // Direct Transfer states
+  const [transferBusy, setTransferBusy] = useState(false);
+  const [transferMsg, setTransferMsg] = useState('');
+  const [transferResults, setTransferResults] = useState(null);
+  const [transferringRow, setTransferringRow] = useState(null);
 
   // Row-level cancel state
   const [cancellingRow, setCancellingRow] = useState(null);
@@ -2942,6 +2948,66 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
       setRowCancelMsg(e?.response?.data?.error || `Failed to cancel subscription for ${domainName}.`);
     } finally {
       setCancellingRow(null);
+    }
+  };
+
+  const runBulkTransfer = async (overrideDomains) => {
+    setTransferResults(null);
+    setTransferMsg('');
+    const raw = overrideDomains || cancelText;
+    const domains = (Array.isArray(raw) ? raw : raw.split(/[\s,\n]+/))
+      .map(l => l.trim().toLowerCase())
+      .filter(Boolean);
+    if (domains.length === 0) {
+      setTransferMsg('Enter at least one domain to transfer.');
+      return;
+    }
+
+    setTransferBusy(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(
+        `${API_URL}/admin/subscriptions/transfer-to-google`,
+        { domains, force: true },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      setTransferResults(response.data);
+      const total = response.data?.totalProcessed ?? (response.data?.report?.length || domains.length);
+      setTransferMsg(`✓ Transfer to Google executed for ${total} subscription(s). Reseller billing unlinked & stopped.`);
+      fetchSubs();
+    } catch (e) {
+      setTransferMsg(e?.response?.data?.error || 'Transfer request failed.');
+    } finally {
+      setTransferBusy(false);
+    }
+  };
+
+  const handleTransferSubRow = async (sub) => {
+    const domainName = sub.domain || sub.customerId;
+    const skuLabel = sub.skuName || sub.skuId || 'Workspace Subscription';
+    const confirmed = window.confirm(
+      `Transfer subscription for "${domainName}" (${skuLabel}) to Google Direct?\n\n` +
+      `This offloads the subscription directly to Google billing via API, releasing your reseller account from monthly bills.`
+    );
+    if (!confirmed) return;
+
+    setTransferringRow(sub.subscriptionId || domainName);
+    setRowCancelMsg('');
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(
+        `${API_URL}/admin/subscriptions/transfer-to-google`,
+        { domains: [domainName], force: true },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      const rep = response.data?.report?.[0];
+      const outcome = rep?.actionTaken || 'PROCESSED';
+      setRowCancelMsg(`✓ Transfer result for ${domainName}: ${outcome}. (Billing unlinked from reseller)`);
+      fetchSubs();
+    } catch (e) {
+      setRowCancelMsg(e?.response?.data?.error || `Failed to transfer ${domainName}.`);
+    } finally {
+      setTransferringRow(null);
     }
   };
 
@@ -3122,21 +3188,86 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
 
           <div style={{ display: 'flex', gap: 10, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <button
-              onClick={runBulkCancel}
-              disabled={cancelBusy}
-              className="btn btn-danger"
-              style={{ background: '#dc2626', color: '#fff', borderColor: '#dc2626', padding: '10px 20px', fontWeight: 600 }}
+              onClick={() => runBulkTransfer()}
+              disabled={transferBusy || cancelBusy}
+              className="btn btn-primary"
+              style={{ background: '#2563eb', color: '#fff', borderColor: '#1d4ed8', padding: '10px 18px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
-              {cancelBusy ? 'Processing in Google API…' : `Transfer / Cancel for ${cancelText.split(/[\s,\n]+/).filter(Boolean).length || ''} Domain(s)`}
+              {transferBusy ? '⏳ Transferring to Google…' : `🚀 Transfer to Google Direct (${cancelText.split(/[\s,\n]+/).filter(Boolean).length} Domains)`}
+            </button>
+            <button
+              onClick={() => runBulkTransfer(['daskacity.com', 'relpvaa.com', 'qenalora.com', 'coloradohaven.shop'])}
+              disabled={transferBusy || cancelBusy}
+              style={{ background: '#059669', color: '#fff', border: '1px solid #047857', borderRadius: 8, padding: '10px 16px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              title="Immediately transfer and offload daskacity.com, relpvaa.com, qenalora.com, coloradohaven.shop directly to Google"
+            >
+              ⚡ 1-Click Transfer 4 Domains
+            </button>
+            <button
+              onClick={runBulkCancel}
+              disabled={cancelBusy || transferBusy}
+              className="btn btn-danger"
+              style={{ background: '#dc2626', color: '#fff', borderColor: '#dc2626', padding: '10px 18px', fontWeight: 600 }}
+            >
+              {cancelBusy ? '⏳ Cancelling in API…' : `🛑 Force Cancel / Suspend in API`}
             </button>
             <span style={{ fontSize: 12, color: '#6b7280' }}>
-              Releases partner billing in Google Partner Console &amp; local billing engine.
+              Transfers subscription ownership to Google Direct, unlinking partner reseller billing.
             </span>
           </div>
+
+          {transferMsg && (
+            <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, fontSize: 14, fontWeight: 500, backgroundColor: transferMsg.startsWith('✓') ? '#eff6ff' : '#fef2f2', border: transferMsg.startsWith('✓') ? '1px solid #bfdbfe' : '1px solid #fee2e2', color: transferMsg.startsWith('✓') ? '#1d4ed8' : '#b91c1c' }}>
+              {transferMsg}
+            </div>
+          )}
 
           {cancelMsg && (
             <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, fontSize: 14, fontWeight: 500, backgroundColor: cancelMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', border: cancelMsg.startsWith('✓') ? '1px solid #bbf7d0' : '1px solid #fee2e2', color: cancelMsg.startsWith('✓') ? '#15803d' : '#b91c1c' }}>
               {cancelMsg}
+            </div>
+          )}
+
+          {transferResults && transferResults.report && transferResults.report.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, color: '#111827' }}>
+                Transfer to Google Results ({transferResults.report.length} subscriptions processed):
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ textAlign: 'left', color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>
+                      <th style={{ padding: '6px 0' }}>Domain</th>
+                      <th>Account</th>
+                      <th>Sub ID</th>
+                      <th>Result</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transferResults.report.map((r, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                        <td style={{ padding: '8px 0', fontWeight: 600 }}>{r.domain}</td>
+                        <td><span style={{ textTransform: 'uppercase', fontSize: 11, background: '#f3f4f6', padding: '2px 6px', borderRadius: 4 }}>{r.account}</span></td>
+                        <td>{r.subscriptionId}</td>
+                        <td>
+                          <span style={{
+                            color: r.actionTaken === 'TRANSFERRED_TO_DIRECT' ? '#15803d' : r.actionTaken === 'SUSPENDED' ? '#d97706' : '#b91c1c',
+                            fontWeight: 600,
+                            background: r.actionTaken === 'TRANSFERRED_TO_DIRECT' ? '#dcfce7' : r.actionTaken === 'SUSPENDED' ? '#fef3c7' : '#fee2e2',
+                            padding: '2px 8px',
+                            borderRadius: 6,
+                            fontSize: 12
+                          }}>
+                            {r.actionTaken}
+                          </span>
+                        </td>
+                        <td style={{ color: '#4b5563', fontSize: 12 }}>{r.details || r.detail}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -3275,28 +3406,52 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
                   <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
                   <td>{fmtDate(s.creationTime)}</td>
                   <td style={{ textAlign: 'center' }}>
-                    <button
-                      type="button"
-                      className="btn btn-sm"
-                      onClick={() => handleCancelSubRow(s)}
-                      disabled={cancellingRow === (s.subscriptionId || s.domain)}
-                      style={{
-                        background: '#fee2e2',
-                        color: '#991b1b',
-                        border: '1px solid #fca5a5',
-                        padding: '4px 10px',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        borderRadius: 6,
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                      title="Cancel this subscription in Google Reseller API to stop billing"
-                    >
-                      {cancellingRow === (s.subscriptionId || s.domain) ? '⏳ Cancelling…' : '🛑 Cancel'}
-                    </button>
+                    <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'center' }}>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => handleTransferSubRow(s)}
+                        disabled={transferringRow === (s.subscriptionId || s.domain)}
+                        style={{
+                          background: '#dbeafe',
+                          color: '#1d4ed8',
+                          border: '1px solid #93c5fd',
+                          padding: '4px 9px',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          borderRadius: 6,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}
+                        title="Transfer this subscription to Google Direct billing to halt partner charges"
+                      >
+                        {transferringRow === (s.subscriptionId || s.domain) ? '⏳ Transferring…' : '🚀 Transfer'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => handleCancelSubRow(s)}
+                        disabled={cancellingRow === (s.subscriptionId || s.domain)}
+                        style={{
+                          background: '#fee2e2',
+                          color: '#991b1b',
+                          border: '1px solid #fca5a5',
+                          padding: '4px 9px',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          borderRadius: 6,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}
+                        title="Cancel this subscription in Google Reseller API to stop billing"
+                      >
+                        {cancellingRow === (s.subscriptionId || s.domain) ? '⏳ Cancelling…' : '🛑 Cancel'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

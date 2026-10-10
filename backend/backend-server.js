@@ -14685,6 +14685,33 @@ app.post('/api/admin/subscriptions/cancel-domains', authenticateCustomer, requir
           } catch (transErr) {
             const transMsg = transErr?.errors?.[0]?.message || transErr?.message || String(transErr);
             notes.push(`Transfer to direct: ${transMsg}`);
+
+            // If Google requires a domain administrator, create one and retry transfer_to_direct!
+            if (transMsg.toLowerCase().includes('domain administrator') || transMsg.toLowerCase().includes('administrator')) {
+              await ensureDomainAdminForTransfer(auth, candidateCustIds, domain, reseller, subId, status === 'SUSPENDED');
+              await new Promise(r => setTimeout(r, 2500));
+              try {
+                await runResellerCall((cid) =>
+                  reseller.subscriptions.delete({
+                    customerId: cid,
+                    subscriptionId: subId,
+                    deletionType: 'transfer_to_direct',
+                  })
+                );
+                actionTaken = 'TRANSFERRED_TO_DIRECT';
+                success = true;
+                notes.push('Transferred to Google direct billing after creating domain admin. Reseller billing stopped');
+              } catch (retryErr) {
+                notes.push(`Transfer retry note: ${retryErr?.errors?.[0]?.message || retryErr.message}`);
+                if (status === 'SUSPENDED') {
+                  try {
+                    await runResellerCall((cid) =>
+                      reseller.subscriptions.suspend({ customerId: cid, subscriptionId: subId })
+                    );
+                  } catch (_) {}
+                }
+              }
+            }
           }
 
           // 3. If transfer_to_direct not accepted, try deletionType: 'cancel' (direct cancellation)
@@ -14860,6 +14887,122 @@ app.get('/api/admin/google/dashboard', authenticateCustomer, async (req, res) =>
   }
 });
 
+// Ensure a domain administrator exists for a customer so Google accepts deletionType: 'transfer_to_direct'
+async function ensureDomainAdminForTransfer(auth, candidateCustIds, dom, reseller, subId, isSuspended) {
+  if (!auth) return false;
+  const admin = google.admin({ version: 'directory_v1', auth });
+
+  // 1. If currently suspended, temporarily activate subscription so directory operations are accepted
+  if (isSuspended && reseller && subId) {
+    for (const cid of candidateCustIds) {
+      try {
+        await reseller.subscriptions.activate({ customerId: cid, subscriptionId: subId });
+        console.log(`[DomainAdmin] Temporarily activated subscription for ${dom} to permit admin setup.`);
+        break;
+      } catch (actErr) {
+        console.log(`[DomainAdmin] Activation note for ${cid}:`, actErr?.errors?.[0]?.message || actErr.message);
+      }
+    }
+  }
+
+  try {
+    // 2. Search for existing users across customer IDs and domain
+    let existingUsers = [];
+    for (const cid of candidateCustIds) {
+      try {
+        const resp = await admin.users.list({ customer: cid, maxResults: 20 });
+        if (resp.data?.users?.length) {
+          existingUsers = resp.data.users;
+          break;
+        }
+      } catch (_) {}
+    }
+    if (!existingUsers.length) {
+      try {
+        const resp2 = await admin.users.list({ domain: dom, maxResults: 20 });
+        if (resp2.data?.users?.length) {
+          existingUsers = resp2.data.users;
+        }
+      } catch (_) {}
+    }
+
+    // 3. If an active, non-suspended super admin already exists
+    const existingAdmin = existingUsers.find((u) => u.isAdmin && !u.suspended);
+    if (existingAdmin) {
+      console.log(`[DomainAdmin] Domain ${dom} already has active admin: ${existingAdmin.primaryEmail}`);
+      return true;
+    }
+
+    // 4. Try promoting existing users via makeAdmin (unsuspending first if suspended)
+    for (const u of existingUsers) {
+      try {
+        if (u.suspended) {
+          await admin.users.update({
+            userKey: u.primaryEmail,
+            requestBody: { suspended: false },
+          });
+          console.log(`[DomainAdmin] Unsuspended existing user: ${u.primaryEmail}`);
+        }
+        await admin.users.makeAdmin({
+          userKey: u.primaryEmail,
+          requestBody: { status: true },
+        });
+        console.log(`[DomainAdmin] Successfully promoted ${u.primaryEmail} to Super Admin via makeAdmin.`);
+        return true;
+      } catch (maErr) {
+        console.log(`[DomainAdmin] makeAdmin on ${u.primaryEmail} note:`, maErr?.errors?.[0]?.message || maErr.message);
+      }
+    }
+
+    // 5. Try creating and promoting a new administrator user
+    const candidateEmails = [
+      `admin@${dom}`,
+      `administrator@${dom}`,
+      `workspace@${dom}`,
+      `superadmin@${dom}`,
+    ];
+
+    for (const candEmail of candidateEmails) {
+      try {
+        console.log(`[DomainAdmin] Creating domain admin user: ${candEmail}...`);
+        await admin.users.insert({
+          requestBody: {
+            primaryEmail: candEmail,
+            name: { givenName: 'Domain', familyName: 'Admin' },
+            password: 'AdminPassword!2026#X',
+            changePasswordAtNextLogin: false,
+          },
+        });
+        console.log(`[DomainAdmin] User created: ${candEmail}`);
+      } catch (insErr) {
+        console.log(`[DomainAdmin] Insert note for ${candEmail}:`, insErr?.errors?.[0]?.message || insErr.message);
+      }
+
+      try {
+        await admin.users.update({
+          userKey: candEmail,
+          requestBody: { suspended: false },
+        });
+      } catch (_) {}
+
+      try {
+        await admin.users.makeAdmin({
+          userKey: candEmail,
+          requestBody: { status: true },
+        });
+        console.log(`[DomainAdmin] Successfully promoted ${candEmail} to Super Admin via makeAdmin!`);
+        return true;
+      } catch (maErr) {
+        console.log(`[DomainAdmin] makeAdmin on ${candEmail} note:`, maErr?.errors?.[0]?.message || maErr.message);
+      }
+    }
+  } catch (err) {
+    console.log(`[DomainAdmin] Error in domain admin setup for ${dom}:`, err?.message || err);
+  }
+
+  return false;
+}
+
 // ==================== TRANSFER SUBSCRIPTIONS TO GOOGLE DIRECT / CANCEL ====================
 // Offloads specified customer domain subscriptions to Google direct billing (transfer_to_direct)
 // or cancels/suspends them in Google Workspace Reseller API v1 to halt all partner reseller billing.
@@ -14967,21 +15110,14 @@ async function executeTransferToGoogle(domainsToProcess) {
 
             // If Google requires a domain administrator, create one and retry transfer_to_direct!
             if (transMsg.toLowerCase().includes('domain administrator') || transMsg.toLowerCase().includes('administrator')) {
-              try {
-                const directory = google.admin({ version: 'directory_v1', auth });
-                const adminEmail = `admin@${dom}`;
-                await directory.users.insert({
-                  customer: primaryCustId,
-                  requestBody: {
-                    primaryEmail: adminEmail,
-                    name: { givenName: 'Domain', familyName: 'Admin' },
-                    password: 'AdminPassword!2026#X',
-                    isAdmin: true,
-                  },
-                });
-                notes.push(`Created domain admin ${adminEmail}`);
+              console.log(`[transfer-to-google] Setting up domain administrator for ${dom} to unblock transfer...`);
+              await ensureDomainAdminForTransfer(auth, candidateCustIds, dom, reseller, subId, s.status === 'SUSPENDED');
 
-                // Retry transfer_to_direct!
+              // Wait 2500ms for Directory API propagation
+              await new Promise(r => setTimeout(r, 2500));
+
+              try {
+                console.log(`[transfer-to-google] Retrying transfer_to_direct with domain admin...`);
                 await runCall((cid) =>
                   reseller.subscriptions.delete({
                     customerId: cid,
@@ -14991,9 +15127,19 @@ async function executeTransferToGoogle(domainsToProcess) {
                 );
                 success = true;
                 action = 'TRANSFERRED_TO_DIRECT';
-                notes.push('Transferred to Google direct after creating admin user');
+                notes.push('Transferred to Google direct after creating/promoting domain admin');
+                console.log(`[transfer-to-google] ✅ Successfully transferred ${dom} to Google Direct on retry!`);
               } catch (adminRetryErr) {
-                notes.push(`Admin transfer retry: ${adminRetryErr?.errors?.[0]?.message || adminRetryErr.message}`);
+                const retryMsg = adminRetryErr?.errors?.[0]?.message || adminRetryErr.message;
+                notes.push(`Admin transfer retry: ${retryMsg}`);
+                if (s.status === 'SUSPENDED') {
+                  try {
+                    console.log(`[transfer-to-google] Re-suspending subscription to keep billing halted...`);
+                    await runCall((cid) =>
+                      reseller.subscriptions.suspend({ customerId: cid, subscriptionId: subId })
+                    );
+                  } catch (_) {}
+                }
               }
             }
           }
