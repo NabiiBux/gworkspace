@@ -2829,18 +2829,12 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
   const [attachMsg, setAttachMsg] = useState('');
   const [attachResults, setAttachResults] = useState(null);
 
-  // Bulk Transfer / Cancel states
+  // Bulk Cancel states
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelText, setCancelText] = useState('daskacity.com\nrelpvaa.com\nqenalora.com\ncoloradohaven.shop');
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelMsg, setCancelMsg] = useState('');
   const [cancelResults, setCancelResults] = useState(null);
-
-  // Direct Transfer states
-  const [transferBusy, setTransferBusy] = useState(false);
-  const [transferMsg, setTransferMsg] = useState('');
-  const [transferResults, setTransferResults] = useState(null);
-  const [transferringRow, setTransferringRow] = useState(null);
 
   // Row-level cancel state
   const [cancellingRow, setCancellingRow] = useState(null);
@@ -2948,66 +2942,6 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
       setRowCancelMsg(e?.response?.data?.error || `Failed to cancel subscription for ${domainName}.`);
     } finally {
       setCancellingRow(null);
-    }
-  };
-
-  const runBulkTransfer = async (overrideDomains) => {
-    setTransferResults(null);
-    setTransferMsg('');
-    const raw = overrideDomains || cancelText;
-    const domains = (Array.isArray(raw) ? raw : raw.split(/[\s,\n]+/))
-      .map(l => l.trim().toLowerCase())
-      .filter(Boolean);
-    if (domains.length === 0) {
-      setTransferMsg('Enter at least one domain to transfer.');
-      return;
-    }
-
-    setTransferBusy(true);
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.post(
-        `${API_URL}/admin/subscriptions/transfer-to-google`,
-        { domains, force: true },
-        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
-      );
-      setTransferResults(response.data);
-      const total = response.data?.totalProcessed ?? (response.data?.report?.length || domains.length);
-      setTransferMsg(`✓ Transfer to Google executed for ${total} subscription(s). Reseller billing unlinked & stopped.`);
-      fetchSubs();
-    } catch (e) {
-      setTransferMsg(e?.response?.data?.error || 'Transfer request failed.');
-    } finally {
-      setTransferBusy(false);
-    }
-  };
-
-  const handleTransferSubRow = async (sub) => {
-    const domainName = sub.domain || sub.customerId;
-    const skuLabel = sub.skuName || sub.skuId || 'Workspace Subscription';
-    const confirmed = window.confirm(
-      `Transfer subscription for "${domainName}" (${skuLabel}) to Google Direct?\n\n` +
-      `This offloads the subscription directly to Google billing via API, releasing your reseller account from monthly bills.`
-    );
-    if (!confirmed) return;
-
-    setTransferringRow(sub.subscriptionId || domainName);
-    setRowCancelMsg('');
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.post(
-        `${API_URL}/admin/subscriptions/transfer-to-google`,
-        { domains: [domainName], force: true },
-        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
-      );
-      const rep = response.data?.report?.[0];
-      const outcome = rep?.actionTaken || 'PROCESSED';
-      setRowCancelMsg(`✓ Transfer result for ${domainName}: ${outcome}. (Billing unlinked from reseller)`);
-      fetchSubs();
-    } catch (e) {
-      setRowCancelMsg(e?.response?.data?.error || `Failed to transfer ${domainName}.`);
-    } finally {
-      setTransferringRow(null);
     }
   };
 
@@ -3143,23 +3077,23 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
           {showBulk ? 'Close Bulk Attach' : '🔗 Bulk Attach Subscriptions'}
         </button>
         <button className="btn btn-danger" onClick={() => setShowCancelModal(!showCancelModal)} style={{ background: '#b91c1c', color: '#fff', borderColor: '#b91c1c' }}>
-          {showCancelModal ? 'Close Transfer / Cancel Tool' : '🚀 Transfer / Cancel Subscriptions (Reseller API)'}
+          {showCancelModal ? 'Close Cancel Tool' : '🛑 Cancel Subscriptions (Reseller API)'}
         </button>
       </div>
 
       {showCancelModal && (
         <div style={{ background: '#fff', borderRadius: 12, padding: 20, border: '1px solid #fecaca', marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <span style={{ fontSize: 20 }}>🚀</span>
-            <h3 style={{ margin: 0, color: '#991b1b' }}>Transfer / Cancel Subscriptions via Google Reseller API</h3>
+            <span style={{ fontSize: 20 }}>🛑</span>
+            <h3 style={{ margin: 0, color: '#991b1b' }}>Cancel Subscriptions via Google Reseller API</h3>
           </div>
           <p style={{ color: '#4b5563', fontSize: 13, marginTop: 4, marginBottom: 14, lineHeight: 1.5 }}>
-            Directly calls the Google Workspace Reseller API v1 with <code>transfer_to_direct</code> (Google's official "Transfer all to Google" action) to release your reseller account from monthly billing. If transfer is not supported for the subscription, it forcibly cancels and suspends the subscription in Google's API to eliminate all extra bills.
+            Immediately cancels subscriptions in Google's Reseller billing system and halts recurring monthly charges. If Google blocks immediate cancellation due to an annual contract commitment, it automatically switches the renewal type to <strong>CANCEL</strong> and suspends the subscription.
           </p>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
             <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', margin: 0 }}>
-              Domains to Transfer / Cancel (one per line or comma-separated):
+              Domains to Cancel (one per line or comma-separated):
             </label>
             <div style={{ display: 'flex', gap: 6 }}>
               <button
@@ -3188,86 +3122,21 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
 
           <div style={{ display: 'flex', gap: 10, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <button
-              onClick={() => runBulkTransfer()}
-              disabled={transferBusy || cancelBusy}
-              className="btn btn-primary"
-              style={{ background: '#2563eb', color: '#fff', borderColor: '#1d4ed8', padding: '10px 18px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-            >
-              {transferBusy ? '⏳ Transferring to Google…' : `🚀 Transfer to Google Direct (${cancelText.split(/[\s,\n]+/).filter(Boolean).length} Domains)`}
-            </button>
-            <button
-              onClick={() => runBulkTransfer(['daskacity.com', 'relpvaa.com', 'qenalora.com', 'coloradohaven.shop'])}
-              disabled={transferBusy || cancelBusy}
-              style={{ background: '#059669', color: '#fff', border: '1px solid #047857', borderRadius: 8, padding: '10px 16px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              title="Immediately transfer and offload daskacity.com, relpvaa.com, qenalora.com, coloradohaven.shop directly to Google"
-            >
-              ⚡ 1-Click Transfer 4 Domains
-            </button>
-            <button
               onClick={runBulkCancel}
-              disabled={cancelBusy || transferBusy}
+              disabled={cancelBusy}
               className="btn btn-danger"
-              style={{ background: '#dc2626', color: '#fff', borderColor: '#dc2626', padding: '10px 18px', fontWeight: 600 }}
+              style={{ background: '#dc2626', color: '#fff', borderColor: '#dc2626', padding: '10px 20px', fontWeight: 600 }}
             >
-              {cancelBusy ? '⏳ Cancelling in API…' : `🛑 Force Cancel / Suspend in API`}
+              {cancelBusy ? 'Cancelling via Google API…' : `Cancel Subscriptions for ${cancelText.split(/[\s,\n]+/).filter(Boolean).length || ''} Domain(s)`}
             </button>
             <span style={{ fontSize: 12, color: '#6b7280' }}>
-              Transfers subscription ownership to Google Direct, unlinking partner reseller billing.
+              Checked against both PK and USA reseller accounts &amp; local billing tables.
             </span>
           </div>
-
-          {transferMsg && (
-            <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, fontSize: 14, fontWeight: 500, backgroundColor: transferMsg.startsWith('✓') ? '#eff6ff' : '#fef2f2', border: transferMsg.startsWith('✓') ? '1px solid #bfdbfe' : '1px solid #fee2e2', color: transferMsg.startsWith('✓') ? '#1d4ed8' : '#b91c1c' }}>
-              {transferMsg}
-            </div>
-          )}
 
           {cancelMsg && (
             <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, fontSize: 14, fontWeight: 500, backgroundColor: cancelMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', border: cancelMsg.startsWith('✓') ? '1px solid #bbf7d0' : '1px solid #fee2e2', color: cancelMsg.startsWith('✓') ? '#15803d' : '#b91c1c' }}>
               {cancelMsg}
-            </div>
-          )}
-
-          {transferResults && transferResults.report && transferResults.report.length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, color: '#111827' }}>
-                Transfer to Google Results ({transferResults.report.length} subscriptions processed):
-              </div>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ textAlign: 'left', color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>
-                      <th style={{ padding: '6px 0' }}>Domain</th>
-                      <th>Account</th>
-                      <th>Sub ID</th>
-                      <th>Result</th>
-                      <th>Details</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {transferResults.report.map((r, idx) => (
-                      <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                        <td style={{ padding: '8px 0', fontWeight: 600 }}>{r.domain}</td>
-                        <td><span style={{ textTransform: 'uppercase', fontSize: 11, background: '#f3f4f6', padding: '2px 6px', borderRadius: 4 }}>{r.account}</span></td>
-                        <td>{r.subscriptionId}</td>
-                        <td>
-                          <span style={{
-                            color: r.actionTaken === 'TRANSFERRED_TO_DIRECT' ? '#15803d' : r.actionTaken === 'SUSPENDED' ? '#d97706' : '#b91c1c',
-                            fontWeight: 600,
-                            background: r.actionTaken === 'TRANSFERRED_TO_DIRECT' ? '#dcfce7' : r.actionTaken === 'SUSPENDED' ? '#fef3c7' : '#fee2e2',
-                            padding: '2px 8px',
-                            borderRadius: 6,
-                            fontSize: 12
-                          }}>
-                            {r.actionTaken}
-                          </span>
-                        </td>
-                        <td style={{ color: '#4b5563', fontSize: 12 }}>{r.details || r.detail}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             </div>
           )}
 
@@ -3406,52 +3275,28 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
                   <td><span className={`status ${(s.status || '').toLowerCase()}`}>{s.status}</span></td>
                   <td>{fmtDate(s.creationTime)}</td>
                   <td style={{ textAlign: 'center' }}>
-                    <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'center' }}>
-                      <button
-                        type="button"
-                        className="btn btn-sm"
-                        onClick={() => handleTransferSubRow(s)}
-                        disabled={transferringRow === (s.subscriptionId || s.domain)}
-                        style={{
-                          background: '#dbeafe',
-                          color: '#1d4ed8',
-                          border: '1px solid #93c5fd',
-                          padding: '4px 9px',
-                          fontSize: 12,
-                          fontWeight: 600,
-                          borderRadius: 6,
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 4
-                        }}
-                        title="Transfer this subscription to Google Direct billing to halt partner charges"
-                      >
-                        {transferringRow === (s.subscriptionId || s.domain) ? '⏳ Transferring…' : '🚀 Transfer'}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-sm"
-                        onClick={() => handleCancelSubRow(s)}
-                        disabled={cancellingRow === (s.subscriptionId || s.domain)}
-                        style={{
-                          background: '#fee2e2',
-                          color: '#991b1b',
-                          border: '1px solid #fca5a5',
-                          padding: '4px 9px',
-                          fontSize: 12,
-                          fontWeight: 600,
-                          borderRadius: 6,
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 4
-                        }}
-                        title="Cancel this subscription in Google Reseller API to stop billing"
-                      >
-                        {cancellingRow === (s.subscriptionId || s.domain) ? '⏳ Cancelling…' : '🛑 Cancel'}
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => handleCancelSubRow(s)}
+                      disabled={cancellingRow === (s.subscriptionId || s.domain)}
+                      style={{
+                        background: '#fee2e2',
+                        color: '#991b1b',
+                        border: '1px solid #fca5a5',
+                        padding: '4px 10px',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }}
+                      title="Cancel this subscription in Google Reseller API to stop billing"
+                    >
+                      {cancellingRow === (s.subscriptionId || s.domain) ? '⏳ Cancelling…' : '🛑 Cancel'}
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -13423,6 +13268,581 @@ const useNoIndexOnPrivatePages = (isPrivate) => {
   }, [isPrivate]);
 };
 
+// ==================== WOOCOMMERCE ONBOARDING FLOW ====================
+function generateSecurePassword() {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const symbols = '!@#$%^&*';
+  let pw = '';
+  pw += upper.charAt(Math.floor(Math.random() * upper.length));
+  pw += lower.charAt(Math.floor(Math.random() * lower.length));
+  pw += digits.charAt(Math.floor(Math.random() * digits.length));
+  pw += symbols.charAt(Math.floor(Math.random() * symbols.length));
+  const allChars = upper + lower + digits + symbols;
+  for (let i = 0; i < 6; i++) {
+    pw += allChars.charAt(Math.floor(Math.random() * allChars.length));
+  }
+  return pw;
+}
+
+const ONBOARDING_COUNTRIES = [
+  { code: 'US', name: 'United States (+1)' },
+  { code: 'PK', name: 'Pakistan (+92)' },
+  { code: 'GB', name: 'United Kingdom (+44)' },
+  { code: 'CA', name: 'Canada (+1)' },
+  { code: 'AU', name: 'Australia (+61)' },
+  { code: 'DE', name: 'Germany (+49)' },
+  { code: 'FR', name: 'France (+33)' },
+  { code: 'AE', name: 'United Arab Emirates (+971)' },
+  { code: 'SA', name: 'Saudi Arabia (+966)' },
+  { code: 'IN', name: 'India (+91)' },
+  { code: 'SG', name: 'Singapore (+65)' },
+  { code: 'NL', name: 'Netherlands (+31)' },
+];
+
+function WooCommerceOnboardingFlow() {
+  const { login } = useAuth();
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const qEmail = searchParams.get('email') || '';
+  const qOrder = searchParams.get('order') || searchParams.get('order_id') || '';
+  const qStatus = searchParams.get('status') || 'paid';
+  const qPlan = searchParams.get('plan') || '';
+  const qDomain = searchParams.get('domain') || '';
+
+  const [domain, setDomain] = useState(qDomain);
+  const [domainOption, setDomainOption] = useState('existing'); // 'existing' | 'new'
+  const [organizationName, setOrganizationName] = useState('');
+  const [countryCode, setCountryCode] = useState('US');
+  const [adminFirstName, setAdminFirstName] = useState('');
+  const [adminLastName, setAdminLastName] = useState('');
+  const [adminUsername, setAdminUsername] = useState('admin');
+  const [tempPassword, setTempPassword] = useState(() => generateSecurePassword());
+  const [showTempPw, setShowTempPw] = useState(false);
+  const [recoveryEmail, setRecoveryEmail] = useState(qEmail);
+  const [recoveryPhone, setRecoveryPhone] = useState('');
+  const [planName, setPlanName] = useState(qPlan || 'Google Workspace Business Starter');
+  const [portalPassword, setPortalPassword] = useState('');
+  const [copiedKey, setCopiedKey] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [successData, setSuccessData] = useState(null);
+
+  const handleDomainChange = (e) => {
+    const val = e.target.value.toLowerCase().trim();
+    setDomain(val);
+    if (!organizationName || organizationName === '') {
+      const prefix = val.split('.')[0];
+      if (prefix && prefix.length > 1) {
+        setOrganizationName(prefix.charAt(0).toUpperCase() + prefix.slice(1));
+      }
+    }
+  };
+
+  const copyToClipboard = (text, key) => {
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(''), 2500);
+    }
+  };
+
+  const copyAllMx = () => {
+    if (!successData?.mxRecords) return;
+    const txt = successData.mxRecords.map(r => `Priority: ${r.priority}\tHost: @\tValue: ${r.value}`).join('\n');
+    copyToClipboard(txt, 'all_mx');
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+
+    const cleanDom = domain.toLowerCase().trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(cleanDom)) {
+      setError('Please enter a valid primary domain (e.g. company.com).');
+      return;
+    }
+
+    if (!organizationName.trim()) {
+      setError('Please provide an Organization / Business Name.');
+      return;
+    }
+
+    if (!adminFirstName.trim() || !adminLastName.trim()) {
+      setError('Please enter the Super Administrator first and last name.');
+      return;
+    }
+
+    const cleanRec = recoveryEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanRec)) {
+      setError('Please enter a valid recovery email address.');
+      return;
+    }
+
+    const recDom = cleanRec.split('@')[1] || '';
+    if (recDom.toLowerCase() === cleanDom.toLowerCase()) {
+      setError(`Recovery email cannot use @${cleanDom}. Google requires an external recovery address (e.g. personal Gmail) for account recovery.`);
+      return;
+    }
+
+    if (!recoveryPhone.trim() || recoveryPhone.trim().length < 6) {
+      setError('Please enter a valid mobile phone number for Google 2-Step Verification.');
+      return;
+    }
+
+    if (!tempPassword || tempPassword.length < 8) {
+      setError('Temporary password must be at least 8 characters.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await axios.post(`${API_URL}/onboarding/activate`, {
+        email: qEmail || cleanRec,
+        order: qOrder,
+        orderId: qOrder,
+        status: qStatus,
+        plan: planName,
+        domain: cleanDom,
+        organizationName: organizationName.trim(),
+        countryCode,
+        adminFirstName: adminFirstName.trim(),
+        adminLastName: adminLastName.trim(),
+        adminUsername: adminUsername.trim(),
+        tempPassword,
+        recoveryEmail: cleanRec,
+        recoveryPhone: recoveryPhone.trim(),
+        portalPassword: portalPassword || tempPassword,
+      });
+
+      if (res.data?.success) {
+        setSuccessData(res.data);
+        if (res.data.token && res.data.customer) {
+          login(res.data.customer.businessEmail, res.data.token, res.data.customer);
+        }
+      } else {
+        setError(res.data?.error || 'Could not activate Workspace.');
+      }
+    } catch (err) {
+      setError(err?.response?.data?.error || err.message || 'Error activating Google Workspace.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)', padding: '32px 16px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+      <div style={{ maxWidth: 860, margin: '0 auto' }}>
+        
+        {/* Brand & Handoff Header */}
+        <div style={{ background: '#ffffff', borderRadius: 16, padding: '24px 28px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.06)', border: '1px solid #e2e8f0', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ width: 48, height: 48, borderRadius: 12, background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #bfdbfe' }}>
+              <GoogleWorkspaceIcon size={28} />
+            </div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Google Workspace Setup Portal</div>
+              <h1 style={{ margin: 0, fontSize: 20, color: '#0f172a', fontWeight: 700 }}>Client Onboarding & Activation</h1>
+            </div>
+          </div>
+          {qOrder && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '8px 16px', borderRadius: 999 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981' }} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#065f46' }}>WooCommerce Order #{qOrder} • Payment Verified</span>
+            </div>
+          )}
+        </div>
+
+        {/* STEP 2: POST-SETUP & DNS RECORDS SUCCESS SCREEN */}
+        {successData ? (
+          <div style={{ background: '#ffffff', borderRadius: 16, padding: '36px 32px', boxShadow: '0 10px 30px -4px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0' }}>
+            <div style={{ textAlign: 'center', marginBottom: 28 }}>
+              <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#ecfdf5', color: '#059669', fontSize: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', border: '2px solid #a7f3d0' }}>✓</div>
+              <h2 style={{ margin: '0 0 8px', fontSize: 24, color: '#0f172a', fontWeight: 800 }}>Google Workspace Initialized!</h2>
+              <p style={{ margin: 0, color: '#64748b', fontSize: 15 }}>
+                Your order for <strong>{successData.domain}</strong> is confirmed. A confirmation email with full credentials and DNS instructions has been dispatched to <strong>{recoveryEmail}</strong>.
+              </p>
+            </div>
+
+            {/* Super Admin Credentials Box */}
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: 22, marginBottom: 24 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 18 }}>🔑</span>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#1e293b' }}>Super Administrator Account</h3>
+                </div>
+                <a href="https://admin.google.com" target="_blank" rel="noreferrer" style={{ background: '#4f46e5', color: '#ffffff', padding: '6px 14px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  Open Google Admin Console ↗
+                </a>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
+                <div style={{ background: '#ffffff', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Primary Admin Username</div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <code style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{successData.adminEmail}</code>
+                    <button type="button" onClick={() => copyToClipboard(successData.adminEmail, 'admin_email')} style={{ border: 'none', background: '#f1f5f9', padding: '4px 8px', borderRadius: 6, fontSize: 12, cursor: 'pointer', color: '#334155' }}>
+                      {copiedKey === 'admin_email' ? '✓ Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+                <div style={{ background: '#ffffff', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Temporary Password</div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <code style={{ fontSize: 14, fontWeight: 700, color: '#dc2626' }}>
+                      {showTempPw ? successData.tempPassword : '••••••••••••'}
+                    </code>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button type="button" onClick={() => setShowTempPw(!showTempPw)} style={{ border: 'none', background: '#f1f5f9', padding: '4px 8px', borderRadius: 6, fontSize: 12, cursor: 'pointer', color: '#334155' }}>
+                        {showTempPw ? 'Hide' : 'Show'}
+                      </button>
+                      <button type="button" onClick={() => copyToClipboard(successData.tempPassword, 'temp_pw')} style={{ border: 'none', background: '#f1f5f9', padding: '4px 8px', borderRadius: 6, fontSize: 12, cursor: 'pointer', color: '#334155' }}>
+                        {copiedKey === 'temp_pw' ? '✓ Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <p style={{ margin: '10px 0 0', fontSize: 12, color: '#64748b' }}>
+                💡 <em>Google requires you to change this temporary password upon first login to admin.google.com.</em>
+              </p>
+            </div>
+
+            {/* DNS Action 1: Google TXT Verification Record */}
+            <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 22, marginBottom: 24 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div>
+                  <h3 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700, color: '#1e293b' }}>1. Google TXT Verification Record</h3>
+                  <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>Add this TXT record at your domain registrar / DNS provider to verify ownership to Google.</p>
+                </div>
+                <button type="button" onClick={() => copyToClipboard(successData.txtRecord, 'txt_record')} style={{ background: '#0284c7', color: '#ffffff', border: 'none', padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                  {copiedKey === 'txt_record' ? '✓ TXT Record Copied!' : '📋 Copy TXT Value'}
+                </button>
+              </div>
+              <div style={{ background: '#f8fafc', padding: 14, borderRadius: 8, border: '1px solid #cbd5e1', fontFamily: 'monospace', fontSize: 13, wordBreak: 'break-all' }}>
+                <div style={{ marginBottom: 4 }}><strong style={{ color: '#475569' }}>Host / Name:</strong> @</div>
+                <div style={{ marginBottom: 4 }}><strong style={{ color: '#475569' }}>Record Type:</strong> TXT</div>
+                <div><strong style={{ color: '#475569' }}>TXT Value:</strong> <span style={{ color: '#0369a1', fontWeight: 600 }}>{successData.txtRecord}</span></div>
+              </div>
+            </div>
+
+            {/* DNS Action 2: Google MX Records Table */}
+            <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 22, marginBottom: 24 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <h3 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700, color: '#1e293b' }}>2. Official Google MX Records (Mail Routing)</h3>
+                  <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>These records route your domain's incoming email traffic to Google Workspace Gmail.</p>
+                </div>
+                <button type="button" onClick={copyAllMx} style={{ background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                  {copiedKey === 'all_mx' ? '✓ All 5 Copied!' : '📋 Copy All 5 MX Records'}
+                </button>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>
+                      <th style={{ padding: '10px 12px', color: '#475569' }}>Host</th>
+                      <th style={{ padding: '10px 12px', color: '#475569' }}>Type</th>
+                      <th style={{ padding: '10px 12px', color: '#475569' }}>Priority</th>
+                      <th style={{ padding: '10px 12px', color: '#475569' }}>Value / Destination</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'right', color: '#475569' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(successData.mxRecords || []).map((rec, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '10px 12px', fontFamily: 'monospace' }}>{rec.host}</td>
+                        <td style={{ padding: '10px 12px', fontWeight: 700, color: '#4f46e5' }}>{rec.type}</td>
+                        <td style={{ padding: '10px 12px', fontWeight: 600 }}>{rec.priority}</td>
+                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: '#0f172a' }}>{rec.value}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                          <button type="button" onClick={() => copyToClipboard(rec.value, `mx_${i}`)} style={{ border: 'none', background: '#f1f5f9', padding: '4px 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                            {copiedKey === `mx_${i}` ? '✓' : 'Copy'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* SPF Record */}
+              <div style={{ marginTop: 16, background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#16a34a' }}>Recommended SPF Record (TXT): </span>
+                  <code style={{ fontSize: 13, color: '#0f172a' }}>Host: @ | Value: {successData.spfRecord}</code>
+                </div>
+                <button type="button" onClick={() => copyToClipboard(successData.spfRecord, 'spf')} style={{ border: 'none', background: '#e2e8f0', padding: '4px 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                  {copiedKey === 'spf' ? '✓ Copied' : 'Copy SPF'}
+                </button>
+              </div>
+            </div>
+
+            {/* Post-Setup Action Buttons */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14, marginTop: 32 }}>
+              <button type="button" onClick={() => window.print()} style={{ background: '#ffffff', color: '#475569', border: '1px solid #cbd5e1', padding: '12px 22px', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+                🖨️ Print / Save DNS Instructions
+              </button>
+              <button type="button" onClick={() => { window.location.href = '/'; }} style={{ background: '#4f46e5', color: '#ffffff', border: 'none', padding: '12px 28px', borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: '0 4px 14px rgba(79,70,229,0.3)' }}>
+                Access My Customer Portal Dashboard →
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* STEP 1: ACTIVATION FORM */
+          <div style={{ background: '#ffffff', borderRadius: 16, padding: '36px 32px', boxShadow: '0 10px 30px -4px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0' }}>
+            <div style={{ marginBottom: 28 }}>
+              <h2 style={{ margin: '0 0 6px', fontSize: 22, color: '#0f172a', fontWeight: 800 }}>Google Workspace Activation Form</h2>
+              <p style={{ margin: 0, color: '#64748b', fontSize: 14 }}>
+                Please provide your primary domain and administrator details. We will automatically generate your super admin credentials and DNS verification records.
+              </p>
+            </div>
+
+            {error && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '12px 16px', borderRadius: 10, marginBottom: 20, fontSize: 14 }}>
+                ⚠️ {error}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit}>
+              
+              {/* Section 1: Domain & Organization */}
+              <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: 24, marginBottom: 24 }}>
+                <h3 style={{ margin: '0 0 16px', fontSize: 16, color: '#1e293b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span>🌐</span> 1. Primary Domain & Organization
+                </h3>
+                
+                <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#334155', cursor: 'pointer' }}>
+                    <input type="radio" name="domainOption" value="existing" checked={domainOption === 'existing'} onChange={() => setDomainOption('existing')} />
+                    Existing Domain (I already own this domain)
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#334155', cursor: 'pointer' }}>
+                    <input type="radio" name="domainOption" value="new" checked={domainOption === 'new'} onChange={() => setDomainOption('new')} />
+                    Domain Registered with Us
+                  </label>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                      Primary Domain <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. yourcompany.com"
+                      value={domain}
+                      onChange={handleDomainChange}
+                      style={{ width: '100%', boxSizing: 'border-box', height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14 }}
+                    />
+                    <span style={{ fontSize: 12, color: '#64748b', marginTop: 4, display: 'block' }}>
+                      The domain name that will follow the @ in your email addresses.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                      Organization / Company Name <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Acme Corporation"
+                      value={organizationName}
+                      onChange={(e) => setOrganizationName(e.target.value)}
+                      style={{ width: '100%', boxSizing: 'border-box', height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14 }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 16 }}>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                    Country <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <select
+                    value={countryCode}
+                    onChange={(e) => setCountryCode(e.target.value)}
+                    style={{ width: '100%', maxWidth: 360, height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14, background: '#ffffff' }}
+                  >
+                    {ONBOARDING_COUNTRIES.map((c) => (
+                      <option key={c.code} value={c.code}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Section 2: Super Administrator Account */}
+              <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: 24, marginBottom: 24 }}>
+                <h3 style={{ margin: '0 0 16px', fontSize: 16, color: '#1e293b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span>👤</span> 2. Super Administrator Account
+                </h3>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, marginBottom: 16 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                      Admin First Name <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. John"
+                      value={adminFirstName}
+                      onChange={(e) => setAdminFirstName(e.target.value)}
+                      style={{ width: '100%', boxSizing: 'border-box', height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14 }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                      Admin Last Name <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Doe"
+                      value={adminLastName}
+                      onChange={(e) => setAdminLastName(e.target.value)}
+                      style={{ width: '100%', boxSizing: 'border-box', height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14 }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                    Admin Username (Email Prefix) <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input
+                      type="text"
+                      required
+                      placeholder="admin"
+                      value={adminUsername}
+                      onChange={(e) => setAdminUsername(e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, ''))}
+                      style={{ maxWidth: 200, height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14 }}
+                    />
+                    <span style={{ fontSize: 15, fontWeight: 600, color: '#475569' }}>
+                      @{domain.trim() || 'yourcompany.com'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <span style={{ fontSize: 12, color: '#64748b' }}>Quick suggestions:</span>
+                    {['admin', 'contact', 'info', 'hello'].map((sug) => (
+                      <button
+                        key={sug}
+                        type="button"
+                        onClick={() => setAdminUsername(sug)}
+                        style={{ border: 'none', background: '#f1f5f9', padding: '2px 8px', borderRadius: 4, fontSize: 12, color: '#4338ca', cursor: 'pointer' }}
+                      >
+                        {sug}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Temporary Password */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                    Temporary Administrator Password <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, maxWidth: 440 }}>
+                    <input
+                      type={showTempPw ? 'text' : 'password'}
+                      required
+                      value={tempPassword}
+                      onChange={(e) => setTempPassword(e.target.value)}
+                      style={{ flex: 1, height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14, fontFamily: showTempPw ? 'monospace' : 'inherit' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowTempPw(!showTempPw)}
+                      style={{ border: '1px solid #cbd5e1', background: '#f8fafc', height: 44, padding: '0 12px', borderRadius: 8, fontSize: 13, cursor: 'pointer', color: '#334155' }}
+                    >
+                      {showTempPw ? 'Hide' : 'Show'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTempPassword(generateSecurePassword())}
+                      style={{ border: '1px solid #cbd5e1', background: '#f8fafc', height: 44, padding: '0 12px', borderRadius: 8, fontSize: 13, cursor: 'pointer', color: '#334155' }}
+                    >
+                      ↻ New
+                    </button>
+                  </div>
+                  <span style={{ fontSize: 12, color: '#64748b', marginTop: 4, display: 'block' }}>
+                    Google will require you to change this temporary password upon your initial sign in.
+                  </span>
+                </div>
+
+                {/* Recovery Email & Mobile Number for 2FA */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                      Recovery Email (External Address) <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="e.g. you@gmail.com"
+                      value={recoveryEmail}
+                      onChange={(e) => setRecoveryEmail(e.target.value)}
+                      style={{ width: '100%', boxSizing: 'border-box', height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14 }}
+                    />
+                    <span style={{ fontSize: 12, color: '#64748b', marginTop: 4, display: 'block' }}>
+                      Must be outside @{domain || 'yourdomain.com'} (auto-filled from checkout).
+                    </span>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                      Mobile Number (for 2-Step Verification) <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      placeholder="e.g. +1 555-0199 or 0300 1234567"
+                      value={recoveryPhone}
+                      onChange={(e) => setRecoveryPhone(e.target.value)}
+                      style={{ width: '100%', boxSizing: 'border-box', height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14 }}
+                    />
+                    <span style={{ fontSize: 12, color: '#64748b', marginTop: 4, display: 'block' }}>
+                      Required by Google for SMS security codes and 2FA recovery.
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 3: WooCommerce Order Summary Badge */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: 16, marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase' }}>Selected Plan</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>{planName}</div>
+                </div>
+                {qOrder && (
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>WooCommerce Order</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: '#059669' }}>#{qOrder} • Status: {qStatus}</div>
+                  </div>
+                )}
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Payment Source</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#334155' }}>gnbmentor.com (pay.gnbmentor.com)</div>
+                </div>
+              </div>
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={loading}
+                style={{ width: '100%', height: 50, background: loading ? '#94a3b8' : '#4f46e5', color: '#ffffff', border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', boxShadow: '0 4px 14px rgba(79,70,229,0.3)', transition: 'background .2s ease' }}
+              >
+                {loading ? 'Activating Google Workspace & Generating DNS Records…' : '🚀 Activate Google Workspace & Generate DNS Records'}
+              </button>
+            </form>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const { token, user, loading } = useAuth();
   const [viewStorefront, setViewStorefront] = useState(false);
@@ -13445,7 +13865,7 @@ function App() {
 
   // Private = signed in (portal, account, cart, checkout, admin) or on an auth page.
   const p = typeof window !== 'undefined' ? window.location.pathname : '/';
-  const onAuthPage = p.startsWith('/login') || p.startsWith('/register') || p.startsWith('/admin');
+  const onAuthPage = p.startsWith('/login') || p.startsWith('/register') || p.startsWith('/onboarding') || p.startsWith('/setup') || p.startsWith('/admin');
   useNoIndexOnPrivatePages(!!token || onAuthPage);
 
   if (loading) {
@@ -13454,6 +13874,19 @@ function App() {
 
   const isAdminPath = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
   const path = typeof window !== 'undefined' ? window.location.pathname : '/';
+
+  // Detect WooCommerce Onboarding Handoff parameters from URL
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const incomingOrder = urlParams.get('order') || urlParams.get('order_id') || '';
+  const incomingStatus = urlParams.get('status') || '';
+  const hasOnboardingParams = !!(incomingOrder || incomingStatus === 'paid');
+  const isOnboardingRoute = path.startsWith('/onboarding') || path.startsWith('/setup') || (path.startsWith('/register') && hasOnboardingParams);
+
+  // WooCommerce onboarding route takes precedence
+  if (isOnboardingRoute) {
+    return <WooCommerceOnboardingFlow />;
+  }
+
   const isAuthPath = path.startsWith('/login') || path.startsWith('/register') || isAdminPath;
 
   if (!token) {

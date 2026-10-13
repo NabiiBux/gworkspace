@@ -1360,6 +1360,101 @@ async function sendOrderPlacedEmail(to, name, orderDesc, amount) {
   await sendEmail(to, `Order received — ${BRAND_NAME}`, html);
 }
 
+// Workspace activation email with temporary credentials and DNS instructions
+async function sendWorkspaceActivationEmail(to, details) {
+  if (!to) return;
+  const {
+    orderNumber,
+    domain,
+    adminEmail,
+    tempPassword,
+    txtRecord,
+    mxRecords = [],
+    spfRecord = 'v=spf1 include:_spf.google.com ~all',
+    organizationName,
+    wooOrder,
+  } = details;
+
+  const mxRows = mxRecords.map((r) => `
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #e2e8f0;font-family:monospace;font-size:13px">${r.host}</td>
+      <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:bold;color:#4f46e5">${r.type}</td>
+      <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:600">${r.priority}</td>
+      <td style="padding:8px 12px;border:1px solid #e2e8f0;font-family:monospace;font-size:13px;word-break:break-all">${r.value}</td>
+    </tr>
+  `).join('');
+
+  const html = emailShell(`Google Workspace Activation & DNS Instructions`, `
+    <div style="margin-bottom:20px">
+      <span style="background:#ecfdf5;color:#059669;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700">✓ Order Confirmed ${wooOrder ? `(#${wooOrder})` : ''}</span>
+      <h2 style="margin:12px 0 6px;color:#0f172a">Your Google Workspace Setup & Credentials</h2>
+      <p style="margin:0;color:#64748b;font-size:14px">Welcome <strong>${organizationName || domain}</strong>! Your Google Workspace order has been initiated.</p>
+    </div>
+
+    <!-- Credentials Card -->
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-bottom:24px">
+      <h3 style="margin:0 0 14px;color:#1e293b;font-size:16px">🔑 Super Administrator Login Credentials</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <tr>
+          <td style="padding:6px 0;color:#64748b;width:140px">Admin Username:</td>
+          <td style="padding:6px 0;font-weight:700;color:#0f172a;font-family:monospace">${adminEmail}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0;color:#64748b">Temporary Password:</td>
+          <td style="padding:6px 0;font-weight:700;color:#dc2626;font-family:monospace">${tempPassword}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0;color:#64748b">Google Admin Console:</td>
+          <td style="padding:6px 0"><a href="https://admin.google.com" style="color:#2563eb;font-weight:600" target="_blank">https://admin.google.com →</a></td>
+        </tr>
+      </table>
+      <p style="margin:10px 0 0;font-size:12px;color:#64748b"><em>Note: Google will require you to change this temporary password upon your first sign-in.</em></p>
+    </div>
+
+    <!-- Step 1: DNS TXT Verification -->
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-bottom:24px">
+      <h3 style="margin:0 0 8px;color:#1e293b;font-size:16px">1. Domain Ownership Verification (TXT Record)</h3>
+      <p style="margin:0 0 12px;color:#475569;font-size:13px">Log in to your domain DNS provider (e.g. GoDaddy, Namecheap, Cloudflare) and add this TXT record to prove ownership of <strong>${domain}</strong>:</p>
+      <div style="background:#ffffff;border:1px solid #cbd5e1;border-radius:6px;padding:12px;font-family:monospace;font-size:13px;word-break:break-all">
+        <strong>Host / Name:</strong> @<br/>
+        <strong>Type:</strong> TXT<br/>
+        <strong>Value:</strong> <span style="color:#0284c7">${txtRecord}</span>
+      </div>
+    </div>
+
+    <!-- Step 2: MX Records -->
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-bottom:24px">
+      <h3 style="margin:0 0 8px;color:#1e293b;font-size:16px">2. Google Mail Routing (MX Records)</h3>
+      <p style="margin:0 0 12px;color:#475569;font-size:13px">Add the following Google MX records to route emails to your Workspace Gmail:</p>
+      <table style="width:100%;border-collapse:collapse;background:#ffffff;border-radius:6px;overflow:hidden">
+        <thead>
+          <tr style="background:#f1f5f9;text-align:left">
+            <th style="padding:8px 12px;border:1px solid #e2e8f0;font-size:12px;color:#475569">Host</th>
+            <th style="padding:8px 12px;border:1px solid #e2e8f0;font-size:12px;color:#475569">Type</th>
+            <th style="padding:8px 12px;border:1px solid #e2e8f0;font-size:12px;color:#475569">Priority</th>
+            <th style="padding:8px 12px;border:1px solid #e2e8f0;font-size:12px;color:#475569">Value / Destination</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${mxRows}
+        </tbody>
+      </table>
+
+      <!-- SPF Record -->
+      <div style="margin-top:14px;background:#ffffff;border:1px solid #cbd5e1;border-radius:6px;padding:12px;font-family:monospace;font-size:13px">
+        <strong>Recommended SPF Record:</strong><br/>
+        Host: @ | Type: TXT | Value: <span style="color:#16a34a">${spfRecord}</span>
+      </div>
+    </div>
+
+    <div style="text-align:center;margin-top:20px">
+      <a href="https://portal.gnbmentor.com/login" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Access Customer Portal →</a>
+    </div>
+  `);
+
+  await sendEmail(to, `🚀 Google Workspace Setup & DNS Instructions [Order #${wooOrder || orderNumber}]`, html);
+}
+
 // Simple email format validation (server-side)
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
@@ -12770,6 +12865,289 @@ app.post('/api/workspace-orders', authenticateCustomer, async (req, res) => {
   }
 });
 
+// ==================== WOOCOMMERCE ONBOARDING HANDOFF ====================
+// Config endpoint for onboarding form
+app.get('/api/onboarding/config', async (req, res) => {
+  try {
+    let plans = DEFAULT_PRODUCTS.workspace || [];
+    if (mongoose.connection.readyState === 1) {
+      try {
+        const plansDoc = await Plan.find({ category: 'workspace' });
+        if (plansDoc && plansDoc.length > 0) plans = plansDoc;
+      } catch (_) {}
+    }
+    res.json({
+      plans,
+      defaultMxRecords: [
+        { host: '@', type: 'MX', priority: 1, value: 'ASPMX.L.GOOGLE.COM.' },
+        { host: '@', type: 'MX', priority: 5, value: 'ALT1.ASPMX.L.GOOGLE.COM.' },
+        { host: '@', type: 'MX', priority: 5, value: 'ALT2.ASPMX.L.GOOGLE.COM.' },
+        { host: '@', type: 'MX', priority: 10, value: 'ALT3.ASPMX.L.GOOGLE.COM.' },
+        { host: '@', type: 'MX', priority: 10, value: 'ALT4.ASPMX.L.GOOGLE.COM.' },
+      ],
+      defaultSpf: 'v=spf1 include:_spf.google.com ~all',
+    });
+  } catch (e) {
+    res.json({
+      plans: DEFAULT_PRODUCTS.workspace || [],
+      defaultMxRecords: [
+        { host: '@', type: 'MX', priority: 1, value: 'ASPMX.L.GOOGLE.COM.' },
+        { host: '@', type: 'MX', priority: 5, value: 'ALT1.ASPMX.L.GOOGLE.COM.' },
+        { host: '@', type: 'MX', priority: 5, value: 'ALT2.ASPMX.L.GOOGLE.COM.' },
+        { host: '@', type: 'MX', priority: 10, value: 'ALT3.ASPMX.L.GOOGLE.COM.' },
+        { host: '@', type: 'MX', priority: 10, value: 'ALT4.ASPMX.L.GOOGLE.COM.' },
+      ],
+      defaultSpf: 'v=spf1 include:_spf.google.com ~all',
+    });
+  }
+});
+
+// Activate Google Workspace from WooCommerce Onboarding Handoff
+app.post('/api/onboarding/activate', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const {
+      email,
+      order,
+      orderId,
+      status = 'paid',
+      plan,
+      domain,
+      organizationName,
+      countryCode = 'US',
+      adminFirstName,
+      adminLastName,
+      adminUsername = 'admin',
+      tempPassword,
+      recoveryEmail,
+      recoveryPhone,
+      portalPassword,
+    } = body;
+
+    // 1. Validate & clean primary domain
+    const cleanDomain = (domain || '').toLowerCase().trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
+    if (!cleanDomain || !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(cleanDomain)) {
+      return res.status(400).json({ error: 'Please enter a valid primary domain (e.g. company.com).' });
+    }
+
+    // 2. Validate Super Admin credentials
+    const rawAdmin = (adminUsername || 'admin').toLowerCase().trim();
+    const localAdmin = (rawAdmin.includes('@') ? rawAdmin.split('@')[0] : rawAdmin).replace(/[^a-z0-9._-]/g, '') || 'admin';
+    const fullAdminEmail = `${localAdmin}@${cleanDomain}`;
+
+    const cleanRecoveryEmail = (recoveryEmail || email || '').trim().toLowerCase();
+    if (!isValidEmail(cleanRecoveryEmail)) {
+      return res.status(400).json({ error: 'Please provide a valid recovery email address.' });
+    }
+
+    // Google constraint: recovery/alternate email must NOT be on the primary domain
+    const recDomain = cleanRecoveryEmail.split('@')[1] || '';
+    if (recDomain.toLowerCase() === cleanDomain.toLowerCase()) {
+      return res.status(400).json({ error: `Recovery email cannot use @${cleanDomain}. Please provide an external address (e.g. your Gmail or existing business email).` });
+    }
+
+    const cleanPhone = (recoveryPhone || '').trim();
+    if (!cleanPhone || cleanPhone.length < 5) {
+      return res.status(400).json({ error: 'Please provide a valid mobile phone number for 2-Step Verification.' });
+    }
+
+    const finalOrgName = (organizationName || '').trim() || (cleanDomain.split('.')[0].charAt(0).toUpperCase() + cleanDomain.split('.')[0].slice(1));
+    const finalTempPassword = (tempPassword && tempPassword.length >= 8)
+      ? tempPassword
+      : `Pass!${crypto.randomBytes(4).toString('hex')}8#`;
+
+    // 3. Authenticate or Register customer account
+    let customer = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const decoded = jwt.verify(authHeader.split(' ')[1], JWT_SECRET);
+        if (mongoose.connection.readyState === 1) {
+          customer = await Customer.findById(decoded.id);
+        }
+      } catch (_) { }
+    }
+
+    if (!customer && mongoose.connection.readyState === 1) {
+      // Lookup by recovery email or email
+      customer = await Customer.findOne({ businessEmail: cleanRecoveryEmail });
+      if (!customer && email && email.toLowerCase() !== cleanRecoveryEmail) {
+        customer = await Customer.findOne({ businessEmail: email.toLowerCase() });
+      }
+    }
+
+    const ip = getClientIp(req);
+    const wooOrderId = String(order || orderId || '').trim();
+
+    if (!customer) {
+      // Create new customer account so they can log in to manage their workspace
+      const hashedPassword = await bcrypt.hash(portalPassword || finalTempPassword, 10);
+      const resellerCode = `WC-${Date.now()}`;
+      if (mongoose.connection.readyState === 1) {
+        customer = await Customer.create({
+          companyName: finalOrgName,
+          username: cleanRecoveryEmail.split('@')[0],
+          businessEmail: cleanRecoveryEmail,
+          password: hashedPassword,
+          phone: cleanPhone,
+          country: countryCode || 'US',
+          firstName: (adminFirstName || 'Admin').trim(),
+          lastName: (adminLastName || 'User').trim(),
+          domain: cleanDomain,
+          role: 'customer',
+          resellerCode,
+          aupAccepted: true,
+          aupAcceptedAt: new Date(),
+          registrationIp: ip,
+          lastLoginIp: ip,
+        });
+      } else {
+        customer = {
+          _id: new mongoose.Types.ObjectId(),
+          companyName: finalOrgName,
+          username: cleanRecoveryEmail.split('@')[0],
+          businessEmail: cleanRecoveryEmail,
+          phone: cleanPhone,
+          country: countryCode || 'US',
+          firstName: (adminFirstName || 'Admin').trim(),
+          lastName: (adminLastName || 'User').trim(),
+          domain: cleanDomain,
+          role: 'customer',
+          resellerCode,
+        };
+      }
+    } else {
+      // Update domain and contact details if needed
+      if (!customer.domain) customer.domain = cleanDomain;
+      if (cleanPhone && !customer.phone) customer.phone = cleanPhone;
+      if (finalOrgName && !customer.companyName) customer.companyName = finalOrgName;
+      if (typeof customer.save === 'function') await customer.save();
+    }
+
+    // 4. Resolve Plan
+    let matchedPlan = null;
+    const planQuery = (plan || '').toLowerCase();
+    let allPlans = [];
+    if (mongoose.connection.readyState === 1) {
+      try { allPlans = await Plan.find({ category: 'workspace' }); } catch (_) {}
+    }
+    if (allPlans && allPlans.length > 0) {
+      if (planQuery.includes('plus')) matchedPlan = allPlans.find((p) => (p.name || '').toLowerCase().includes('plus'));
+      else if (planQuery.includes('standard')) matchedPlan = allPlans.find((p) => (p.name || '').toLowerCase().includes('standard'));
+      else if (planQuery.includes('enterprise')) matchedPlan = allPlans.find((p) => (p.name || '').toLowerCase().includes('enterprise'));
+      if (!matchedPlan) matchedPlan = allPlans.find((p) => (p.name || '').toLowerCase().includes('starter')) || allPlans[0];
+    }
+    if (!matchedPlan) {
+      const defPlans = DEFAULT_PRODUCTS.workspace || [];
+      if (planQuery.includes('plus')) matchedPlan = defPlans.find((p) => p.id.includes('plus'));
+      else if (planQuery.includes('standard')) matchedPlan = defPlans.find((p) => p.id.includes('standard'));
+      if (!matchedPlan) matchedPlan = defPlans[0] || { id: 'business-starter', name: 'Google Workspace Business Starter', monthlyPrice: 7.20 };
+    }
+
+    // 5. Generate DNS Records
+    const txtRecord = `google-site-verification=${crypto.randomBytes(16).toString('hex')}`;
+    const mxRecords = [
+      { host: '@', type: 'MX', priority: 1, value: 'ASPMX.L.GOOGLE.COM.' },
+      { host: '@', type: 'MX', priority: 5, value: 'ALT1.ASPMX.L.GOOGLE.COM.' },
+      { host: '@', type: 'MX', priority: 5, value: 'ALT2.ASPMX.L.GOOGLE.COM.' },
+      { host: '@', type: 'MX', priority: 10, value: 'ALT3.ASPMX.L.GOOGLE.COM.' },
+      { host: '@', type: 'MX', priority: 10, value: 'ALT4.ASPMX.L.GOOGLE.COM.' },
+    ];
+    const spfRecord = 'v=spf1 include:_spf.google.com ~all';
+
+    // 6. Create WorkspaceOrder in database
+    const orderNumber = wooOrderId ? `WC-${wooOrderId}` : `WS-${Date.now()}`;
+    let orderDoc = null;
+    const orderPayload = {
+      customerId: customer._id,
+      orderNumber,
+      type: 'workspace',
+      planType: 'flexible',
+      plan: {
+        id: matchedPlan.planId || matchedPlan.id || 'business-starter',
+        name: matchedPlan.name,
+        monthlyPrice: matchedPlan.monthlyPrice || 7.20,
+      },
+      seats: 1,
+      monthlyTotal: matchedPlan.monthlyPrice || 7.20,
+      status: 'paid', // Mark as paid from WooCommerce payment
+      domainVerified: false,
+      txtRecord,
+      organization: {
+        name: finalOrgName,
+        domain: cleanDomain,
+        desiredAdminUsername: localAdmin,
+        tempPassword: finalTempPassword,
+        countryCode: countryCode || 'US',
+        country: countryCode || 'United States',
+        languageCode: 'en-US',
+      },
+      contact: {
+        firstName: (adminFirstName || 'Admin').trim(),
+        lastName: (adminLastName || 'User').trim(),
+        email: fullAdminEmail,
+        alternateEmail: cleanRecoveryEmail,
+        phone: cleanPhone,
+      },
+      notes: `WooCommerce Order #${wooOrderId} via gnbmentor.com (status: ${status})`,
+    };
+
+    if (mongoose.connection.readyState === 1) {
+      try {
+        orderDoc = await WorkspaceOrder.create(orderPayload);
+      } catch (ordErr) {
+        console.error('WorkspaceOrder creation err:', ordErr);
+      }
+    }
+    if (!orderDoc) {
+      orderDoc = { _id: new mongoose.Types.ObjectId(), ...orderPayload };
+    }
+
+    // 7. Send Activation & DNS Instructions Email (non-blocking)
+    sendWorkspaceActivationEmail(cleanRecoveryEmail, {
+      orderNumber: orderDoc.orderNumber,
+      wooOrder: wooOrderId,
+      domain: cleanDomain,
+      adminEmail: fullAdminEmail,
+      tempPassword: finalTempPassword,
+      txtRecord,
+      mxRecords,
+      spfRecord,
+      organizationName: finalOrgName,
+    }).catch((err) => console.error('[sendWorkspaceActivationEmail error]:', err.message));
+
+    // 8. Generate auth token for seamless portal login
+    const token = generateToken(customer._id, customer.businessEmail, customer.role);
+
+    return res.status(201).json({
+      success: true,
+      orderId: orderDoc._id,
+      orderNumber: orderDoc.orderNumber,
+      domain: cleanDomain,
+      adminEmail: fullAdminEmail,
+      tempPassword: finalTempPassword,
+      txtRecord,
+      mxRecords,
+      spfRecord,
+      plan: matchedPlan,
+      organizationName: finalOrgName,
+      customer: {
+        id: customer._id,
+        businessEmail: customer.businessEmail,
+        companyName: customer.companyName,
+        firstName: customer.firstName,
+        lastName: customer.lastName,
+        role: customer.role,
+        domain: customer.domain,
+      },
+      token,
+    });
+  } catch (error) {
+    console.error('Onboarding activate error:', error);
+    res.status(500).json({ error: error.message || 'Could not complete onboarding activation.' });
+  }
+});
+
 app.get('/api/workspace-orders', authenticateCustomer, async (req, res) => {
   try {
     const orders = await WorkspaceOrder.find({ customerId: req.customerId, status: { $ne: 'draft' } }).sort({ createdAt: -1 });
@@ -14685,51 +15063,24 @@ app.post('/api/admin/subscriptions/cancel-domains', authenticateCustomer, requir
           } catch (transErr) {
             const transMsg = transErr?.errors?.[0]?.message || transErr?.message || String(transErr);
             notes.push(`Transfer to direct: ${transMsg}`);
-
-            // If Google requires a domain administrator, create one and retry transfer_to_direct!
-            if (transMsg.toLowerCase().includes('domain administrator') || transMsg.toLowerCase().includes('administrator')) {
-              await ensureDomainAdminForTransfer(auth, candidateCustIds, domain, reseller, subId, status === 'SUSPENDED');
-              await new Promise(r => setTimeout(r, 2500));
-              try {
-                await runResellerCall((cid) =>
-                  reseller.subscriptions.delete({
-                    customerId: cid,
-                    subscriptionId: subId,
-                    deletionType: 'transfer_to_direct',
-                  })
-                );
-                actionTaken = 'TRANSFERRED_TO_DIRECT';
-                success = true;
-                notes.push('Transferred to Google direct billing after creating domain admin. Reseller billing stopped');
-              } catch (retryErr) {
-                notes.push(`Transfer retry note: ${retryErr?.errors?.[0]?.message || retryErr.message}`);
-                if (status === 'SUSPENDED') {
-                  try {
-                    await runResellerCall((cid) =>
-                      reseller.subscriptions.suspend({ customerId: cid, subscriptionId: subId })
-                    );
-                  } catch (_) {}
-                }
-              }
-            }
           }
 
-          // 3. If transfer_to_direct not accepted, try deletionType: 'cancel' (direct cancellation)
+          // 3. If transfer_to_direct not accepted, try deletionType: 'suspend'
           if (!success) {
             try {
               await runResellerCall((cid) =>
                 reseller.subscriptions.delete({
                   customerId: cid,
                   subscriptionId: subId,
-                  deletionType: 'cancel',
+                  deletionType: 'suspend',
                 })
               );
-              actionTaken = 'CANCELLED';
+              actionTaken = 'DELETED_SUSPENDED';
               success = true;
-              notes.push('Subscription directly cancelled via Google API. Reseller billing halted');
-            } catch (delCancelErr) {
-              const delCancelMsg = delCancelErr?.errors?.[0]?.message || delCancelErr?.message || String(delCancelErr);
-              notes.push(`Delete cancel: ${delCancelMsg}`);
+              notes.push('Subscription removed/suspended via delete');
+            } catch (delSuspErr) {
+              const delSuspMsg = delSuspErr?.errors?.[0]?.message || delSuspErr?.message || String(delSuspErr);
+              notes.push(`Delete suspend: ${delSuspMsg}`);
             }
           }
 
@@ -14887,388 +15238,6 @@ app.get('/api/admin/google/dashboard', authenticateCustomer, async (req, res) =>
   }
 });
 
-// Ensure a domain administrator exists for a customer so Google accepts deletionType: 'transfer_to_direct'
-async function ensureDomainAdminForTransfer(auth, candidateCustIds, dom, reseller, subId, isSuspended) {
-  if (!auth) return false;
-  const admin = google.admin({ version: 'directory_v1', auth });
-
-  // 1. If currently suspended, temporarily activate subscription so directory operations are accepted
-  if (isSuspended && reseller && subId) {
-    for (const cid of candidateCustIds) {
-      try {
-        await reseller.subscriptions.activate({ customerId: cid, subscriptionId: subId });
-        console.log(`[DomainAdmin] Temporarily activated subscription for ${dom} to permit admin setup.`);
-        break;
-      } catch (actErr) {
-        console.log(`[DomainAdmin] Activation note for ${cid}:`, actErr?.errors?.[0]?.message || actErr.message);
-      }
-    }
-  }
-
-  try {
-    // 2. Search for existing users across customer IDs and domain
-    let existingUsers = [];
-    for (const cid of candidateCustIds) {
-      try {
-        const resp = await admin.users.list({ customer: cid, maxResults: 20 });
-        if (resp.data?.users?.length) {
-          existingUsers = resp.data.users;
-          break;
-        }
-      } catch (_) {}
-    }
-    if (!existingUsers.length) {
-      try {
-        const resp2 = await admin.users.list({ domain: dom, maxResults: 20 });
-        if (resp2.data?.users?.length) {
-          existingUsers = resp2.data.users;
-        }
-      } catch (_) {}
-    }
-
-    // 3. If an active, non-suspended super admin already exists
-    const existingAdmin = existingUsers.find((u) => u.isAdmin && !u.suspended);
-    if (existingAdmin) {
-      console.log(`[DomainAdmin] Domain ${dom} already has active admin: ${existingAdmin.primaryEmail}`);
-      return true;
-    }
-
-    // 4. Try promoting existing users via makeAdmin (unsuspending first if suspended)
-    for (const u of existingUsers) {
-      try {
-        if (u.suspended) {
-          await admin.users.update({
-            userKey: u.primaryEmail,
-            requestBody: { suspended: false },
-          });
-          console.log(`[DomainAdmin] Unsuspended existing user: ${u.primaryEmail}`);
-        }
-        await admin.users.makeAdmin({
-          userKey: u.primaryEmail,
-          requestBody: { status: true },
-        });
-        console.log(`[DomainAdmin] Successfully promoted ${u.primaryEmail} to Super Admin via makeAdmin.`);
-        return true;
-      } catch (maErr) {
-        console.log(`[DomainAdmin] makeAdmin on ${u.primaryEmail} note:`, maErr?.errors?.[0]?.message || maErr.message);
-      }
-    }
-
-    // 5. Try creating and promoting a new administrator user
-    const candidateEmails = [
-      `admin@${dom}`,
-      `administrator@${dom}`,
-      `workspace@${dom}`,
-      `superadmin@${dom}`,
-    ];
-
-    for (const candEmail of candidateEmails) {
-      try {
-        console.log(`[DomainAdmin] Creating domain admin user: ${candEmail}...`);
-        await admin.users.insert({
-          requestBody: {
-            primaryEmail: candEmail,
-            name: { givenName: 'Domain', familyName: 'Admin' },
-            password: 'AdminPassword!2026#X',
-            changePasswordAtNextLogin: false,
-          },
-        });
-        console.log(`[DomainAdmin] User created: ${candEmail}`);
-      } catch (insErr) {
-        console.log(`[DomainAdmin] Insert note for ${candEmail}:`, insErr?.errors?.[0]?.message || insErr.message);
-      }
-
-      try {
-        await admin.users.update({
-          userKey: candEmail,
-          requestBody: { suspended: false },
-        });
-      } catch (_) {}
-
-      try {
-        await admin.users.makeAdmin({
-          userKey: candEmail,
-          requestBody: { status: true },
-        });
-        console.log(`[DomainAdmin] Successfully promoted ${candEmail} to Super Admin via makeAdmin!`);
-        return true;
-      } catch (maErr) {
-        console.log(`[DomainAdmin] makeAdmin on ${candEmail} note:`, maErr?.errors?.[0]?.message || maErr.message);
-      }
-    }
-  } catch (err) {
-    console.log(`[DomainAdmin] Error in domain admin setup for ${dom}:`, err?.message || err);
-  }
-
-  return false;
-}
-
-// ==================== TRANSFER SUBSCRIPTIONS TO GOOGLE DIRECT / CANCEL ====================
-// Offloads specified customer domain subscriptions to Google direct billing (transfer_to_direct)
-// or cancels/suspends them in Google Workspace Reseller API v1 to halt all partner reseller billing.
-async function executeTransferToGoogle(domainsToProcess) {
-  const domains = Array.isArray(domainsToProcess) && domainsToProcess.length > 0
-    ? domainsToProcess.map((d) => String(d).trim().toLowerCase()).filter(Boolean)
-    : ['daskacity.com', 'relpvaa.com', 'qenalora.com', 'coloradohaven.shop'];
-
-  const results = [];
-  const accountsToTry = ['pk', 'usa'];
-
-  for (const acct of accountsToTry) {
-    let auth;
-    try {
-      auth = acct === 'usa' ? await getUsaAuth() : await getResellerAuth();
-    } catch (authErr) {
-      console.warn(`[transfer-to-google] Auth failed for ${acct}:`, authErr.message);
-      continue;
-    }
-    const reseller = google.reseller({ version: 'v1', auth });
-
-    for (const dom of domains) {
-      let subs = [];
-      try {
-        const resp = await reseller.subscriptions.list({ customerId: dom });
-        subs = resp.data?.subscriptions || [];
-      } catch (err) {
-        try {
-          const custResp = await reseller.customers.get({ customerId: dom });
-          const custId = custResp.data?.customerId;
-          if (custId && custId !== dom) {
-            const resp2 = await reseller.subscriptions.list({ customerId: custId });
-            subs = resp2.data?.subscriptions || [];
-          }
-        } catch (_) {}
-      }
-
-      if (!subs.length) {
-        continue;
-      }
-
-      for (const s of subs) {
-        const subId = s.subscriptionId;
-        const skuId = s.skuId;
-        const candidateCustIds = [...new Set([s.customerId, dom, s.customerDomain].filter(Boolean))];
-        const primaryCustId = candidateCustIds[0] || dom;
-
-        const runCall = async (fn) => {
-          let lastErr;
-          for (const cid of candidateCustIds) {
-            try { return await fn(cid); } catch (e) { lastErr = e; }
-          }
-          throw lastErr;
-        };
-
-        const notes = [];
-        let success = false;
-        let action = '';
-
-        // 1. Disable auto-renewal so commitment plans never renew
-        try {
-          await runCall((cid) =>
-            reseller.subscriptions.changeRenewalSettings({
-              customerId: cid,
-              subscriptionId: subId,
-              requestBody: { renewalType: 'CANCEL' },
-            })
-          );
-          notes.push('Auto-renew cancelled');
-        } catch (renErr) {
-          notes.push(`Renewal settings note: ${renErr?.errors?.[0]?.message || renErr.message}`);
-        }
-
-        // 2. First attempt: Direct cancellation (deletionType: 'cancel')
-        try {
-          await runCall((cid) =>
-            reseller.subscriptions.delete({
-              customerId: cid,
-              subscriptionId: subId,
-              deletionType: 'cancel',
-            })
-          );
-          success = true;
-          action = 'REMOVED_CANCELLED';
-          notes.push('Cancelled via Google Reseller API and removed from Partner Console');
-        } catch (canErr) {
-          const canMsg = canErr?.errors?.[0]?.message || canErr.message;
-          notes.push(`cancel: ${canMsg}`);
-
-          // 3. Second attempt: Transfer to direct Google billing (transfer_to_direct)
-          try {
-            await runCall((cid) =>
-              reseller.subscriptions.delete({
-                customerId: cid,
-                subscriptionId: subId,
-                deletionType: 'transfer_to_direct',
-              })
-            );
-            success = true;
-            action = 'TRANSFERRED_TO_DIRECT';
-            notes.push('Transferred to Google direct billing. Reseller billing stopped and removed from Partner Console');
-          } catch (transErr) {
-            const transMsg = transErr?.errors?.[0]?.message || transErr.message;
-            notes.push(`transfer_to_direct: ${transMsg}`);
-
-            // If Google requires a domain administrator, create one and retry transfer_to_direct!
-            if (transMsg.toLowerCase().includes('domain administrator') || transMsg.toLowerCase().includes('administrator')) {
-              console.log(`[transfer-to-google] Setting up domain administrator for ${dom} to unblock transfer...`);
-              await ensureDomainAdminForTransfer(auth, candidateCustIds, dom, reseller, subId, s.status === 'SUSPENDED');
-
-              // Wait 2500ms for Directory API propagation
-              await new Promise(r => setTimeout(r, 2500));
-
-              try {
-                console.log(`[transfer-to-google] Retrying transfer_to_direct with domain admin...`);
-                await runCall((cid) =>
-                  reseller.subscriptions.delete({
-                    customerId: cid,
-                    subscriptionId: subId,
-                    deletionType: 'transfer_to_direct',
-                  })
-                );
-                success = true;
-                action = 'TRANSFERRED_TO_DIRECT';
-                notes.push('Transferred to Google direct after creating/promoting domain admin');
-                console.log(`[transfer-to-google] ✅ Successfully transferred ${dom} to Google Direct on retry!`);
-              } catch (adminRetryErr) {
-                const retryMsg = adminRetryErr?.errors?.[0]?.message || adminRetryErr.message;
-                notes.push(`Admin transfer retry: ${retryMsg}`);
-                if (s.status === 'SUSPENDED') {
-                  try {
-                    console.log(`[transfer-to-google] Re-suspending subscription to keep billing halted...`);
-                    await runCall((cid) =>
-                      reseller.subscriptions.suspend({ customerId: cid, subscriptionId: subId })
-                    );
-                  } catch (_) {}
-                }
-              }
-            }
-          }
-        }
-
-        // 4. Third attempt: If annual commitment blocked deletion, convert to FLEXIBLE plan then cancel
-        if (!success) {
-          try {
-            await runCall((cid) =>
-              reseller.subscriptions.changePlan({
-                customerId: cid,
-                subscriptionId: subId,
-                requestBody: { planName: 'FLEXIBLE', seats: { numberOfSeats: 1 } },
-              })
-            );
-            await runCall((cid) =>
-              reseller.subscriptions.delete({
-                customerId: cid,
-                subscriptionId: subId,
-                deletionType: 'cancel',
-              })
-            );
-            success = true;
-            action = 'REMOVED_CANCELLED';
-            notes.push('Converted to FLEXIBLE and cancelled');
-          } catch (flexErr) {
-            notes.push(`flexible plan: ${flexErr?.errors?.[0]?.message || flexErr.message}`);
-          }
-        }
-
-        // 4. If still not succeeded, suspend
-        if (!success) {
-          try {
-            await runCall((cid) =>
-              reseller.subscriptions.suspend({
-                customerId: cid,
-                subscriptionId: subId,
-              })
-            );
-            success = true;
-            action = 'SUSPENDED';
-            notes.push('Suspended via Google Reseller API');
-          } catch (suspErr) {
-            notes.push(`suspend: ${suspErr?.errors?.[0]?.message || suspErr.message}`);
-          }
-        }
-
-        // 5. Reduce seats to 1/0
-        try {
-          await runCall((cid) =>
-            reseller.subscriptions.changeSeats({
-              customerId: cid,
-              subscriptionId: subId,
-              requestBody: { numberOfSeats: 1 },
-            })
-          );
-          notes.push('Seats set to 1');
-        } catch (_) {}
-
-        // Deactivate local DB billing
-        try {
-          await SubBilling.updateMany({ domain: dom }, { $set: { active: false, billingStatus: 'cancelled', autoRenew: false } });
-          await Subscription.updateMany({ $or: [{ domain: dom }, { customerDomain: dom }] }, { $set: { status: 'CANCELLED', autoRenew: false } });
-          await ServiceBillingCycle.updateMany({ domain: dom }, { $set: { status: 'cancelled', active: false } });
-        } catch (_) {}
-
-        results.push({
-          domain: dom,
-          account: acct,
-          subscriptionId: subId,
-          skuId,
-          customerId: primaryCustId,
-          actionTaken: action || 'FAILED',
-          success,
-          details: notes.join('; '),
-        });
-      }
-    }
-  }
-
-  return results;
-}
-
-const handleTransferRoute = async (req, res) => {
-  try {
-    // Auth: valid admin JWT OR matching ?secret=JWT_SECRET
-    let isAdmin = false;
-    const token = req.headers.authorization?.split(' ')[1];
-    if (token) {
-      const decoded = verifyToken(token);
-      if (decoded) {
-        const me = await Customer.findById(decoded.id);
-        if (me && me.role === 'admin') isAdmin = true;
-      }
-    }
-    const secret = req.query?.secret || req.body?.secret || req.headers['x-admin-secret'];
-    if (secret && process.env.JWT_SECRET && secret === process.env.JWT_SECRET) {
-      isAdmin = true;
-    }
-
-    if (!isAdmin) {
-      return res.status(403).json({
-        error: 'Admin authorization required. Please log in as admin or append ?secret=YOUR_JWT_SECRET',
-      });
-    }
-
-    let inputDomains = req.body?.domains || req.query?.domains;
-    if (typeof inputDomains === 'string') {
-      inputDomains = inputDomains.split(',').map((d) => d.trim()).filter(Boolean);
-    }
-
-    const report = await executeTransferToGoogle(inputDomains);
-    res.json({
-      success: true,
-      message: 'Google Workspace subscriptions processed for transfer/cancellation.',
-      timestamp: new Date().toISOString(),
-      domainsChecked: inputDomains || ['daskacity.com', 'relpvaa.com', 'qenalora.com', 'coloradohaven.shop'],
-      totalProcessed: report.length,
-      report,
-    });
-  } catch (err) {
-    console.error('[transfer-to-google route error]:', err);
-    res.status(500).json({ error: err.message });
-  }
-};
-
-app.post('/api/admin/subscriptions/transfer-to-google', handleTransferRoute);
-app.get('/api/admin/subscriptions/transfer-to-google', handleTransferRoute);
-
 // HEALTH CHECK
 // Serve the Google Maps browser key at runtime so the frontend address
 // autocomplete works without a build-time REACT_APP_GOOGLE_MAPS_API_KEY.
@@ -15314,43 +15283,12 @@ app.use(express.static(frontendBuildPath, {
 // Private areas that must never be indexed. Sent as an HTTP header so crawlers
 // honour it without executing JavaScript (the in-app meta tag covers client-side
 // navigation within the SPA).
-const NOINDEX_PATHS = ['/admin', '/login', '/register', '/signup', '/cart', '/checkout', '/account', '/settings', '/portal'];
+const NOINDEX_PATHS = ['/admin', '/login', '/register', '/onboarding', '/setup', '/signup', '/cart', '/checkout', '/account', '/settings', '/portal'];
 
 // Fallback all non-API GET requests to index.html (SPA fallback)
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) {
     return next();
-  }
-  const indexPath = path.join(frontendBuildPath, 'index.html');
-  if (!fs.existsSync(indexPath)) {
-    console.error(`[Static Server] frontend/build/index.html not found at ${indexPath}. Build the frontend with: npm run build:frontend`);
-    return res.status(503).send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GNB Mentor Portal — Building Frontend</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
-    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; max-width: 620px; width: 100%; box-shadow: 0 10px 25px rgba(0,0,0,0.4); text-align: center; }
-    h1 { font-size: 22px; margin-bottom: 12px; color: #38bdf8; }
-    p { color: #94a3b8; font-size: 14px; line-height: 1.6; margin-bottom: 16px; }
-    .cmd { background: #0b1120; padding: 14px 18px; border-radius: 8px; text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; color: #34d399; margin: 18px 0; overflow-x: auto; border: 1px solid #1e293b; line-height: 1.7; }
-    .note { font-size: 13px; color: #64748b; margin-top: 14px; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>⚙️ Frontend Build Initializing</h1>
-    <p>The backend API server is online, but the React bundle (<code>frontend/build/index.html</code>) has not finished building on the server.</p>
-    <div class="cmd">
-      # Run this in your VPS terminal to build the frontend:<br/>
-      cd /opt/gworkspace &amp;&amp; bash backend/deploy/update.sh
-    </div>
-    <p class="note">Once the build command completes, refresh this page to load the portal.</p>
-  </div>
-</body>
-</html>`);
   }
   const p = req.path.toLowerCase();
   if (NOINDEX_PATHS.some((prefix) => p === prefix || p.startsWith(prefix + '/'))) {
@@ -15360,12 +15298,39 @@ app.get('*', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
-  res.sendFile(indexPath, (err) => {
-    if (err && !res.headersSent) {
-      console.error('[res.sendFile error]:', err.message);
-      res.status(500).send('Error loading page. Please refresh.');
-    }
-  });
+
+  const indexPath = path.join(frontendBuildPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    return res.sendFile(indexPath);
+  }
+
+  // Graceful fallback if build is still running or not present yet (prevents ENOENT crash)
+  return res.status(200).send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="refresh" content="5">
+  <title>Google Workspace Portal - Preparing Setup</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f8fafc; color: #0f172a; text-align: center; padding: 20px; box-sizing: border-box; }
+    .card { background: #ffffff; padding: 40px 32px; border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.08); max-width: 480px; width: 100%; border: 1px solid #e2e8f0; }
+    .spinner { width: 42px; height: 42px; border: 3px solid #e2e8f0; border-top-color: #4f46e5; border-radius: 50%; animation: spin 0.9s linear infinite; margin: 0 auto 20px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h2 { margin: 0 0 12px; font-size: 22px; color: #1e293b; font-weight: 700; }
+    p { margin: 0 0 16px; color: #64748b; font-size: 14px; line-height: 1.6; }
+    .badge { display: inline-block; background: #e0e7ff; color: #4338ca; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="spinner"></div>
+    <div class="badge">Initializing Application</div>
+    <h2>Starting Workspace Portal</h2>
+    <p>The frontend portal assets are loading. This page will refresh automatically in 5 seconds.</p>
+  </div>
+</body>
+</html>`);
 });
 
 // Database offline / generic error handler
@@ -15470,7 +15435,9 @@ function scheduleNickyPolling() {
 }
 
 // ==================== SERVER START ====================
-const PORT = process.env.PORT || 5000;
+// Dev server in AI Studio must listen on port 3000 (nginx reverse proxy expects backend on 3000).
+// In Google Cloud Run or Docker containers where PORT=8080 is outer nginx, the node process MUST listen on 3000.
+const PORT = (process.env.PORT && process.env.PORT !== '8080') ? process.env.PORT : 3000;
 const HOST = '0.0.0.0';
 app.listen(PORT, HOST, () => {
   console.log('======================================================');
