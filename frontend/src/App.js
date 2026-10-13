@@ -13301,8 +13301,32 @@ const ONBOARDING_COUNTRIES = [
   { code: 'NL', name: 'Netherlands (+31)' },
 ];
 
+// Language codes offered on the customer form (mirrors Google's console list).
+const LANGUAGE_CODES = [
+  ['en-US', 'English (United States)'], ['en-GB', 'English (United Kingdom)'],
+  ['es-ES', 'Spanish (Spain)'], ['es-419', 'Spanish (Latin America)'],
+  ['fr-FR', 'French (France)'], ['de-DE', 'German (Germany)'],
+  ['pt-BR', 'Portuguese (Brazil)'], ['it-IT', 'Italian (Italy)'],
+  ['nl-NL', 'Dutch (Netherlands)'], ['ar', 'Arabic'], ['hi', 'Hindi'],
+  ['ur', 'Urdu'], ['zh-CN', 'Chinese (Simplified)'], ['ja', 'Japanese'],
+];
+
+const US_STATES = [
+  ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'],
+  ['CO', 'Colorado'], ['CT', 'Connecticut'], ['DE', 'Delaware'], ['FL', 'Florida'], ['GA', 'Georgia'],
+  ['HI', 'Hawaii'], ['ID', 'Idaho'], ['IL', 'Illinois'], ['IN', 'Indiana'], ['IA', 'Iowa'],
+  ['KS', 'Kansas'], ['KY', 'Kentucky'], ['LA', 'Louisiana'], ['ME', 'Maine'], ['MD', 'Maryland'],
+  ['MA', 'Massachusetts'], ['MI', 'Michigan'], ['MN', 'Minnesota'], ['MS', 'Mississippi'], ['MO', 'Missouri'],
+  ['MT', 'Montana'], ['NE', 'Nebraska'], ['NV', 'Nevada'], ['NH', 'New Hampshire'], ['NJ', 'New Jersey'],
+  ['NM', 'New Mexico'], ['NY', 'New York'], ['NC', 'North Carolina'], ['ND', 'North Dakota'], ['OH', 'Ohio'],
+  ['OK', 'Oklahoma'], ['OR', 'Oregon'], ['PA', 'Pennsylvania'], ['RI', 'Rhode Island'], ['SC', 'South Carolina'],
+  ['SD', 'South Dakota'], ['TN', 'Tennessee'], ['TX', 'Texas'], ['UT', 'Utah'], ['VT', 'Vermont'],
+  ['VA', 'Virginia'], ['WA', 'Washington'], ['WV', 'West Virginia'], ['WI', 'Wisconsin'], ['WY', 'Wyoming'],
+  ['DC', 'District of Columbia'],
+];
+
 function WooCommerceOnboardingFlow() {
-  const { login } = useAuth();
+  const { token, login } = useAuth();
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
   const qEmail = searchParams.get('email') || '';
   const qOrder = searchParams.get('order') || searchParams.get('order_id') || '';
@@ -13310,34 +13334,102 @@ function WooCommerceOnboardingFlow() {
   const qPlan = searchParams.get('plan') || '';
   const qDomain = searchParams.get('domain') || '';
 
-  const [domain, setDomain] = useState(qDomain);
-  const [domainOption, setDomainOption] = useState('existing'); // 'existing' | 'new'
-  const [organizationName, setOrganizationName] = useState('');
-  const [countryCode, setCountryCode] = useState('US');
-  const [adminFirstName, setAdminFirstName] = useState('');
-  const [adminLastName, setAdminLastName] = useState('');
-  const [adminUsername, setAdminUsername] = useState('admin');
-  const [tempPassword, setTempPassword] = useState(() => generateSecurePassword());
-  const [showTempPw, setShowTempPw] = useState(false);
-  const [recoveryEmail, setRecoveryEmail] = useState(qEmail);
-  const [recoveryPhone, setRecoveryPhone] = useState('');
-  const [planName, setPlanName] = useState(qPlan || 'Google Workspace Business Starter');
-  const [portalPassword, setPortalPassword] = useState('');
-  const [copiedKey, setCopiedKey] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [successData, setSuccessData] = useState(null);
+  const [plans, setPlans] = useState([
+    { id: 'business-starter', name: 'Google Workspace Business Starter', monthlyPrice: 7.20 },
+    { id: 'business-standard', name: 'Google Workspace Business Standard', monthlyPrice: 14.40 },
+    { id: 'business-plus', name: 'Google Workspace Business Plus', monthlyPrice: 21.60 },
+    { id: 'enterprise-plus', name: 'Google Workspace Enterprise Plus', monthlyPrice: 28.00 },
+  ]);
 
-  const handleDomainChange = (e) => {
-    const val = e.target.value.toLowerCase().trim();
-    setDomain(val);
-    if (!organizationName || organizationName === '') {
-      const prefix = val.split('.')[0];
-      if (prefix && prefix.length > 1) {
-        setOrganizationName(prefix.charAt(0).toUpperCase() + prefix.slice(1));
-      }
+  const [form, setForm] = useState({
+    domain: qDomain || 'redvi.shop',
+    account: '',
+    planId: 'enterprise-plus',
+    seats: 1,
+    planType: 'flexible',
+    orgName: 'Acme Inc.',
+    languageCode: 'en-US',
+    country: 'United States',
+    streetAddress: '',
+    streetAddress2: '',
+    streetAddress3: '',
+    city: 'Newhall',
+    state: '',
+    zip: '91321-2563',
+    firstName: '',
+    lastName: '',
+    desiredAdminUsername: 'admin',
+    alternateEmail: qEmail || '',
+    phone: '',
+    tempPassword: '',
+  });
+
+  const [showAdminPw, setShowAdminPw] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [successData, setSuccessData] = useState(null);
+  const [copiedKey, setCopiedKey] = useState('');
+
+  // Domain search state for right sidebar
+  const [dq, setDq] = useState('');
+  const [dLoading, setDLoading] = useState(false);
+  const [dResult, setDResult] = useState(null);
+  const [dError, setDError] = useState('');
+  const [buyBusyDomain, setBuyBusyDomain] = useState('');
+
+  // Live domain checking
+  const [domStatus, setDomStatus] = useState({ state: 'idle', message: '', reason: '' });
+  const adminAltOnDomain = !!(form.alternateEmail && form.domain &&
+    (form.alternateEmail.split('@')[1] || '').toLowerCase() === form.domain.trim().toLowerCase());
+
+  // Load plans from API
+  useEffect(() => {
+    let active = true;
+    axios.get(`${API_URL}/products`)
+      .then(res => {
+        if (!active) return;
+        const wp = res.data?.workspace;
+        if (Array.isArray(wp) && wp.length > 0) {
+          setPlans(wp);
+          if (qPlan) {
+            const qp = qPlan.toLowerCase();
+            const matched = wp.find(p => (p.name || '').toLowerCase().includes(qp) || (p.id || '').toLowerCase().includes(qp));
+            if (matched) setForm(f => ({ ...f, planId: matched.id }));
+          } else {
+            const entPlus = wp.find(p => (p.id || '').includes('enterprise') || (p.name || '').toLowerCase().includes('enterprise'));
+            if (entPlus) setForm(f => ({ ...f, planId: entPlus.id }));
+          }
+        }
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [qPlan]);
+
+  // Live domain check with Google Reseller check API
+  useEffect(() => {
+    const d = (form.domain || '').toLowerCase().trim();
+    if (!d) { setDomStatus({ state: 'idle', message: '', reason: '' }); return; }
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(d)) {
+      setDomStatus({ state: 'invalid', message: 'Enter a valid domain (e.g. redvi.shop).', reason: 'invalid' });
+      return;
     }
-  };
+    setDomStatus({ state: 'checking', message: 'Checking…', reason: '' });
+    const t = setTimeout(async () => {
+      try {
+        const r = await axios.get(`${API_URL}/workspace-orders/check-domain/${encodeURIComponent(d)}`);
+        setDomStatus({
+          state: r.data.available ? 'available' : 'taken',
+          message: r.data.message || (r.data.available ? 'Available' : 'Already taken or belongs to another reseller'),
+          reason: r.data.reason || '',
+        });
+      } catch (_) {
+        setDomStatus({ state: 'idle', message: '', reason: '' });
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [form.domain]);
+
+  const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const copyToClipboard = (text, key) => {
     if (navigator?.clipboard?.writeText) {
@@ -13353,115 +13445,161 @@ function WooCommerceOnboardingFlow() {
     copyToClipboard(txt, 'all_mx');
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-
-    const cleanDom = domain.toLowerCase().trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(cleanDom)) {
-      setError('Please enter a valid primary domain (e.g. company.com).');
+  // Search domain in sidebar
+  const searchDomain = async () => {
+    setDError(''); setDResult(null);
+    const dom = dq.toLowerCase().trim();
+    if (!dom) { setDError('Enter a domain name to search.'); return; }
+    if (dom.includes('.') && !/^[a-z0-9-]+\.[a-z.]{2,}$/.test(dom)) {
+      setDError('Enter a valid domain like yourbusiness.com.');
       return;
     }
-
-    if (!organizationName.trim()) {
-      setError('Please provide an Organization / Business Name.');
-      return;
-    }
-
-    if (!adminFirstName.trim() || !adminLastName.trim()) {
-      setError('Please enter the Super Administrator first and last name.');
-      return;
-    }
-
-    const cleanRec = recoveryEmail.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanRec)) {
-      setError('Please enter a valid recovery email address.');
-      return;
-    }
-
-    const recDom = cleanRec.split('@')[1] || '';
-    if (recDom.toLowerCase() === cleanDom.toLowerCase()) {
-      setError(`Recovery email cannot use @${cleanDom}. Google requires an external recovery address (e.g. personal Gmail) for account recovery.`);
-      return;
-    }
-
-    if (!recoveryPhone.trim() || recoveryPhone.trim().length < 6) {
-      setError('Please enter a valid mobile phone number for Google 2-Step Verification.');
-      return;
-    }
-
-    if (!tempPassword || tempPassword.length < 8) {
-      setError('Temporary password must be at least 8 characters.');
-      return;
-    }
-
-    setLoading(true);
+    setDLoading(true);
     try {
-      const res = await axios.post(`${API_URL}/onboarding/activate`, {
-        email: qEmail || cleanRec,
+      const res = await axios.post(`${API_URL}/public/domains/search`, { domainName: dom });
+      setDResult(res.data);
+    } catch (e) {
+      setDError(e?.response?.data?.error || 'Domain search failed.');
+    } finally {
+      setDLoading(false);
+    }
+  };
+
+  // Buy domain button action (like website homepage)
+  const handleInitiateBuyDomain = async (domainObj) => {
+    const domainName = (domainObj.domain || domainObj.domainName || '').toLowerCase().trim();
+    const price = Number(domainObj.price || 12.99);
+    const pending = { domainName, price, period: 1, method: 'stripe', mode: 'register' };
+    try {
+      sessionStorage.setItem('pendingDomainPurchase', JSON.stringify(pending));
+      localStorage.setItem('pendingDomainPurchase', JSON.stringify(pending));
+    } catch (_) {}
+    if (token) {
+      setBuyBusyDomain(domainName);
+      try {
+        await executePendingDomainCheckout(token, pending);
+      } catch (err) {
+        alert(err?.response?.data?.error || 'Could not start domain checkout.');
+        setBuyBusyDomain('');
+      }
+      return;
+    }
+    window.location.href = `/register?domain=${encodeURIComponent(domainName)}&action=buy`;
+  };
+
+  // Submit and create Google Workspace immediately (no payment)
+  const submit = async (e) => {
+    e?.preventDefault?.();
+    if (!form.domain || !form.planId || !form.seats) {
+      setMsg('Domain, plan, and seats are required.');
+      return;
+    }
+    if (domStatus.state === 'taken' || domStatus.state === 'invalid') {
+      setMsg('✗ ' + domStatus.message);
+      return;
+    }
+    if (!/\S+@\S+\.\S+/.test(form.alternateEmail)) {
+      setMsg('An alternate email is required.');
+      return;
+    }
+    if (adminAltOnDomain) {
+      setMsg(`The alternate email must not use ${form.domain}.`);
+      return;
+    }
+
+    setBusy(true); setMsg('');
+    try {
+      const selectedPlanObj = plans.find(p => p.id === form.planId) || { id: form.planId, name: form.planId, monthlyPrice: 28.00 };
+      const payload = {
         order: qOrder,
         orderId: qOrder,
-        status: qStatus,
-        plan: planName,
-        domain: cleanDom,
-        organizationName: organizationName.trim(),
-        countryCode,
-        adminFirstName: adminFirstName.trim(),
-        adminLastName: adminLastName.trim(),
-        adminUsername: adminUsername.trim(),
-        tempPassword,
-        recoveryEmail: cleanRec,
-        recoveryPhone: recoveryPhone.trim(),
-        portalPassword: portalPassword || tempPassword,
-      });
+        status: qStatus || 'paid',
+        email: form.alternateEmail,
+        planId: form.planId,
+        plan: selectedPlanObj,
+        seats: Number(form.seats) || 1,
+        planType: form.planType,
+        account: form.account || undefined,
+        organization: {
+          domain: form.domain.toLowerCase().trim(),
+          name: form.orgName || form.domain.split('.')[0],
+          languageCode: form.languageCode || 'en-US',
+          country: form.country,
+          streetAddress: form.streetAddress,
+          streetAddress2: form.streetAddress2,
+          streetAddress3: form.streetAddress3,
+          city: form.city,
+          state: form.state,
+          zip: form.zip,
+          desiredAdminUsername: form.desiredAdminUsername || 'admin',
+          tempPassword: form.tempPassword || undefined,
+        },
+        contact: {
+          firstName: form.firstName || 'Admin',
+          lastName: form.lastName || 'User',
+          email: `${(form.desiredAdminUsername || 'admin').toLowerCase()}@${form.domain.toLowerCase().trim()}`,
+          alternateEmail: form.alternateEmail,
+          phone: form.phone,
+        },
+      };
 
+      const res = await axios.post(`${API_URL}/onboarding/activate`, payload);
       if (res.data?.success) {
         setSuccessData(res.data);
         if (res.data.token && res.data.customer) {
           login(res.data.customer.businessEmail, res.data.token, res.data.customer);
         }
       } else {
-        setError(res.data?.error || 'Could not activate Workspace.');
+        setMsg('✗ ' + (res.data?.error || 'Provisioning failed.'));
       }
-    } catch (err) {
-      setError(err?.response?.data?.error || err.message || 'Error activating Google Workspace.');
+    } catch (e) {
+      setMsg('✗ ' + (e?.response?.data?.error || e.message || 'Provisioning failed.'));
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
+  const box = { background: '#ffffff', borderRadius: 14, padding: 24, border: '1px solid #e5e7eb', marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' };
+  const inp = { width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', boxSizing: 'border-box', fontSize: 14, color: '#111827', background: '#ffffff' };
+  const lab = { fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 5, color: '#374151' };
+
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)', padding: '32px 16px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-      <div style={{ maxWidth: 860, margin: '0 auto' }}>
-        
-        {/* Brand & Handoff Header */}
-        <div style={{ background: '#ffffff', borderRadius: 16, padding: '24px 28px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.06)', border: '1px solid #e2e8f0', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <div style={{ width: 48, height: 48, borderRadius: 12, background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #bfdbfe' }}>
-              <GoogleWorkspaceIcon size={28} />
+    <div style={{ minHeight: '100vh', background: '#f8fafc', padding: '32px 16px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+      <div style={{ maxWidth: 1140, margin: '0 auto' }}>
+
+        {/* Top Header & Handoff Banner */}
+        <div style={{ background: '#ffffff', borderRadius: 14, padding: '20px 24px', border: '1px solid #e2e8f0', marginBottom: 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14, boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #bfdbfe' }}>
+              <GoogleWorkspaceIcon size={26} />
             </div>
             <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Google Workspace Setup Portal</div>
-              <h1 style={{ margin: 0, fontSize: 20, color: '#0f172a', fontWeight: 700 }}>Client Onboarding & Activation</h1>
+              <div style={{ fontSize: 11, fontWeight: 800, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Google Workspace Activation Portal</div>
+              <h1 style={{ margin: 0, fontSize: 20, color: '#0f172a', fontWeight: 800 }}>Client Onboarding &amp; Setup</h1>
             </div>
           </div>
           {qOrder && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '8px 16px', borderRadius: 999 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '6px 14px', borderRadius: 999 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981' }} />
               <span style={{ fontSize: 13, fontWeight: 700, color: '#065f46' }}>WooCommerce Order #{qOrder} • Payment Verified</span>
             </div>
           )}
         </div>
 
-        {/* STEP 2: POST-SETUP & DNS RECORDS SUCCESS SCREEN */}
+        {/* SUCCESS SCREEN POST-PROVISIONING */}
         {successData ? (
           <div style={{ background: '#ffffff', borderRadius: 16, padding: '36px 32px', boxShadow: '0 10px 30px -4px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0' }}>
             <div style={{ textAlign: 'center', marginBottom: 28 }}>
               <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#ecfdf5', color: '#059669', fontSize: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', border: '2px solid #a7f3d0' }}>✓</div>
-              <h2 style={{ margin: '0 0 8px', fontSize: 24, color: '#0f172a', fontWeight: 800 }}>Google Workspace Initialized!</h2>
+              <h2 style={{ margin: '0 0 8px', fontSize: 24, color: '#0f172a', fontWeight: 800 }}>Workspace Created in Google Immediately!</h2>
               <p style={{ margin: 0, color: '#64748b', fontSize: 15 }}>
-                Your order for <strong>{successData.domain}</strong> is confirmed. A confirmation email with full credentials and DNS instructions has been dispatched to <strong>{recoveryEmail}</strong>.
+                Your Google Workspace order for <strong>{successData.domain}</strong> has been provisioned. A confirmation email with full credentials has been sent to <strong>{form.alternateEmail}</strong>.
               </p>
+              {successData.provisionNote && (
+                <div style={{ marginTop: 10, fontSize: 13, color: '#0284c7', background: '#f0f9ff', border: '1px solid #bae6fd', padding: '6px 14px', borderRadius: 8, display: 'inline-block' }}>
+                  ℹ️ {successData.provisionNote}
+                </div>
+              )}
             </div>
 
             {/* Super Admin Credentials Box */}
@@ -13489,11 +13627,11 @@ function WooCommerceOnboardingFlow() {
                   <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Temporary Password</div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <code style={{ fontSize: 14, fontWeight: 700, color: '#dc2626' }}>
-                      {showTempPw ? successData.tempPassword : '••••••••••••'}
+                      {showAdminPw ? successData.tempPassword : '••••••••••••'}
                     </code>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      <button type="button" onClick={() => setShowTempPw(!showTempPw)} style={{ border: 'none', background: '#f1f5f9', padding: '4px 8px', borderRadius: 6, fontSize: 12, cursor: 'pointer', color: '#334155' }}>
-                        {showTempPw ? 'Hide' : 'Show'}
+                      <button type="button" onClick={() => setShowAdminPw(!showAdminPw)} style={{ border: 'none', background: '#f1f5f9', padding: '4px 8px', borderRadius: 6, fontSize: 12, cursor: 'pointer', color: '#334155' }}>
+                        {showAdminPw ? 'Hide' : 'Show'}
                       </button>
                       <button type="button" onClick={() => copyToClipboard(successData.tempPassword, 'temp_pw')} style={{ border: 'none', background: '#f1f5f9', padding: '4px 8px', borderRadius: 6, fontSize: 12, cursor: 'pointer', color: '#334155' }}>
                         {copiedKey === 'temp_pw' ? '✓ Copied' : 'Copy'}
@@ -13503,19 +13641,19 @@ function WooCommerceOnboardingFlow() {
                 </div>
               </div>
               <p style={{ margin: '10px 0 0', fontSize: 12, color: '#64748b' }}>
-                💡 <em>Google requires you to change this temporary password upon first login to admin.google.com.</em>
+                💡 <em>Google requires changing this temporary password upon your initial sign in at admin.google.com.</em>
               </p>
             </div>
 
-            {/* DNS Action 1: Google TXT Verification Record */}
+            {/* DNS Verification TXT */}
             <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 22, marginBottom: 24 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                 <div>
                   <h3 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700, color: '#1e293b' }}>1. Google TXT Verification Record</h3>
-                  <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>Add this TXT record at your domain registrar / DNS provider to verify ownership to Google.</p>
+                  <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>Add this TXT record at your DNS provider to complete domain ownership verification with Google.</p>
                 </div>
                 <button type="button" onClick={() => copyToClipboard(successData.txtRecord, 'txt_record')} style={{ background: '#0284c7', color: '#ffffff', border: 'none', padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-                  {copiedKey === 'txt_record' ? '✓ TXT Record Copied!' : '📋 Copy TXT Value'}
+                  {copiedKey === 'txt_record' ? '✓ TXT Copied!' : '📋 Copy TXT Value'}
                 </button>
               </div>
               <div style={{ background: '#f8fafc', padding: 14, borderRadius: 8, border: '1px solid #cbd5e1', fontFamily: 'monospace', fontSize: 13, wordBreak: 'break-all' }}>
@@ -13525,12 +13663,12 @@ function WooCommerceOnboardingFlow() {
               </div>
             </div>
 
-            {/* DNS Action 2: Google MX Records Table */}
+            {/* Official Google MX Records */}
             <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 22, marginBottom: 24 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
                 <div>
                   <h3 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700, color: '#1e293b' }}>2. Official Google MX Records (Mail Routing)</h3>
-                  <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>These records route your domain's incoming email traffic to Google Workspace Gmail.</p>
+                  <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>Configure these 5 MX records to route incoming emails into your Google Workspace Gmail.</p>
                 </div>
                 <button type="button" onClick={copyAllMx} style={{ background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                   {copiedKey === 'all_mx' ? '✓ All 5 Copied!' : '📋 Copy All 5 MX Records'}
@@ -13577,8 +13715,7 @@ function WooCommerceOnboardingFlow() {
               </div>
             </div>
 
-            {/* Post-Setup Action Buttons */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14, marginTop: 32 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14, marginTop: 28 }}>
               <button type="button" onClick={() => window.print()} style={{ background: '#ffffff', color: '#475569', border: '1px solid #cbd5e1', padding: '12px 22px', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
                 🖨️ Print / Save DNS Instructions
               </button>
@@ -13588,260 +13725,393 @@ function WooCommerceOnboardingFlow() {
             </div>
           </div>
         ) : (
-          /* STEP 1: ACTIVATION FORM */
-          <div style={{ background: '#ffffff', borderRadius: 16, padding: '36px 32px', boxShadow: '0 10px 30px -4px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0' }}>
-            <div style={{ marginBottom: 28 }}>
-              <h2 style={{ margin: '0 0 6px', fontSize: 22, color: '#0f172a', fontWeight: 800 }}>Google Workspace Activation Form</h2>
-              <p style={{ margin: 0, color: '#64748b', fontSize: 14 }}>
-                Please provide your primary domain and administrator details. We will automatically generate your super admin credentials and DNS verification records.
-              </p>
+          /* MAIN TWO-COLUMN LAYOUT: WORKSPACE CREATION FORM + DOMAIN SEARCH PANEL */
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 360px', gap: 24, alignItems: 'start' }} className="onboarding-grid">
+            
+            {/* LEFT COLUMN: ✨ Create Google Workspace (no payment) Form */}
+            <div className="section" style={{ minWidth: 0 }}>
+              <h2 style={{ margin: '0 0 6px', fontSize: 24, fontWeight: 800, color: '#111827' }}>✨ Create Google Workspace (no payment)</h2>
+              <p style={{ color: '#5b6075', marginTop: 0, marginBottom: 14, fontSize: 14 }}>Fill the form and submit — the Workspace is created in Google immediately. No checkout required.</p>
+
+              {msg && (
+                <div style={{ padding: '12px 16px', borderRadius: 8, marginBottom: 16, fontSize: 14, background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318', border: msg.startsWith('✓') ? '1px solid #bbf7d0' : '1px solid #fecaca' }}>
+                  {msg}
+                </div>
+              )}
+
+              <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 10px', fontWeight: 600 }}>Domain, plan, and seats are required.</p>
+
+              <div style={box}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }} className="grid-2">
+                  
+                  {/* Domain * */}
+                  <div>
+                    <label style={{ ...lab, color: domStatus.state === 'taken' || domStatus.state === 'invalid' ? '#b42318' : lab.color }}>Domain *</label>
+                    <input
+                      style={{ ...inp, borderColor: domStatus.state === 'taken' || domStatus.state === 'invalid' ? '#b42318' : inp.borderColor }}
+                      value={form.domain}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setField('domain', val);
+                        if (!form.orgName || form.orgName === 'Acme Inc.') {
+                          const pref = val.split('.')[0];
+                          if (pref && pref.length > 1) {
+                            setField('orgName', pref.charAt(0).toUpperCase() + pref.slice(1));
+                          }
+                        }
+                      }}
+                      placeholder="redvi.shop"
+                    />
+                    {domStatus.state === 'checking' && <small style={{ color: '#5b6075', display: 'block', marginTop: 4 }}>⏳ Checking…</small>}
+                    {domStatus.state === 'available' && <small style={{ color: '#166534', display: 'block', marginTop: 4 }}>✓ {domStatus.message}</small>}
+                    {(domStatus.state === 'taken' || domStatus.state === 'invalid') && (
+                      <small style={{ color: '#b42318', display: 'block', marginTop: 4 }}>
+                        {domStatus.message}{' '}
+                        {domStatus.reason === 'other_reseller' && (
+                          <a href="/#import" style={{ color: '#2563eb' }}>transfer this customer</a>
+                        )}
+                      </small>
+                    )}
+                  </div>
+
+                  {/* Reseller account */}
+                  <div>
+                    <label style={lab}>Reseller account</label>
+                    <select style={inp} value={form.account} onChange={e => setField('account', e.target.value)}>
+                      <option value="">Auto (by order routing)</option>
+                      <option value="pk">Pakistan</option>
+                      <option value="usa">USA</option>
+                    </select>
+                  </div>
+
+                  {/* Plan * */}
+                  <div>
+                    <label style={lab}>Plan *</label>
+                    <select style={inp} value={form.planId} onChange={e => setField('planId', e.target.value)}>
+                      {plans.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} — ${Number(p.monthlyPrice).toFixed(2)}/seat/mo
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Seats * */}
+                  <div>
+                    <label style={lab}>Seats *</label>
+                    <input type="number" min="1" style={inp} value={form.seats} onChange={e => setField('seats', e.target.value)} />
+                  </div>
+
+                  {/* Plan type */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={lab}>Plan type</label>
+                    <select style={inp} value={form.planType} onChange={e => setField('planType', e.target.value)}>
+                      <option value="flexible">Flexible (monthly)</option>
+                      <option value="annual">Annual (monthly pay)</option>
+                    </select>
+                  </div>
+
+                  {/* Customer information Divider */}
+                  <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #eef1f4', marginTop: 10, paddingTop: 16 }}>
+                    <h4 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700, color: '#111827' }}>Customer information</h4>
+                  </div>
+
+                  {/* Organization name * */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={lab}>Organization name *</label>
+                    <input style={inp} value={form.orgName} onChange={e => setField('orgName', e.target.value)} placeholder="Acme Inc." />
+                  </div>
+
+                  {/* Language code * */}
+                  <div>
+                    <label style={lab}>Language code *</label>
+                    <select style={inp} value={form.languageCode} onChange={e => setField('languageCode', e.target.value)}>
+                      {LANGUAGE_CODES.map(([code, label]) => (
+                        <option key={code} value={code}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Country / Region * */}
+                  <div>
+                    <label style={lab}>Country / Region *</label>
+                    <select style={inp} value={form.country} onChange={e => setField('country', e.target.value)}>
+                      {COUNTRIES.map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Street address * */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={lab}>Street address *</label>
+                    <AddressAutocomplete
+                      countries={getCountryCode(form.country)}
+                      initialValue={form.streetAddress}
+                      onTextChange={(v) => setForm(f => ({ ...f, streetAddress: v }))}
+                      onPick={({ street, city, state, zip }) => setForm(f => ({ ...f, streetAddress: street || f.streetAddress, city: city || f.city, state: state || f.state, zip: zip || f.zip }))}
+                    />
+                  </div>
+
+                  {/* Address line 2 (optional) */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <input style={inp} value={form.streetAddress2} onChange={e => setField('streetAddress2', e.target.value)} placeholder="Address line 2 (optional)" />
+                  </div>
+
+                  {/* Address line 3 (optional) */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <input style={inp} value={form.streetAddress3} onChange={e => setField('streetAddress3', e.target.value)} placeholder="Address line 3 (optional)" />
+                  </div>
+
+                  {/* City * */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={lab}>City *</label>
+                    <input style={inp} value={form.city} onChange={e => setField('city', e.target.value)} placeholder="Newhall" />
+                  </div>
+
+                  {/* State * */}
+                  <div>
+                    <label style={lab}>State *</label>
+                    <select style={inp} value={form.state} onChange={e => setField('state', e.target.value)}>
+                      <option value="">Please select</option>
+                      {US_STATES.map(([abbr, name]) => (
+                        <option key={abbr} value={abbr}>{name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* ZIP code * */}
+                  <div>
+                    <label style={lab}>ZIP code *</label>
+                    <input style={inp} value={form.zip} onChange={e => setField('zip', e.target.value.replace(/[^\d-]/g, '').slice(0, 10))} placeholder="91321-2563" />
+                  </div>
+
+                  {/* Contact information Divider */}
+                  <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #eef1f4', marginTop: 10, paddingTop: 16 }}>
+                    <h4 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700, color: '#111827' }}>Contact information</h4>
+                    <p style={{ color: '#5b6075', fontSize: 13, margin: 0 }}>
+                      The name and email address may be used to create the initial administrator account for Google Workspace, Cloud Identity, and Chrome Enterprise Upgrade orders, as applicable.
+                    </p>
+                  </div>
+
+                  {/* First name * */}
+                  <div>
+                    <label style={lab}>First name *</label>
+                    <input style={inp} value={form.firstName} onChange={e => setField('firstName', e.target.value)} placeholder="First name" />
+                  </div>
+
+                  {/* Last name * */}
+                  <div>
+                    <label style={lab}>Last name *</label>
+                    <input style={inp} value={form.lastName} onChange={e => setField('lastName', e.target.value)} placeholder="Last name" />
+                  </div>
+
+                  {/* Email * */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={lab}>Email *</label>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <input style={{ ...inp, flex: 1 }} value={form.desiredAdminUsername} onChange={e => setField('desiredAdminUsername', e.target.value)} placeholder="admin" />
+                      <span style={{ whiteSpace: 'nowrap', fontSize: 14, color: form.domain ? '#111827' : '#9aa0b4', fontWeight: form.domain ? 600 : 400 }}>
+                        @{form.domain || 'yourdomain.com'}
+                      </span>
+                    </div>
+                    <small style={{ color: '#5b6075', display: 'block', marginTop: 4 }}>This becomes the Workspace administrator login.</small>
+                  </div>
+
+                  {/* Alternate email * */}
+                  <div>
+                    <label style={lab}>Alternate email *</label>
+                    <input style={inp} value={form.alternateEmail} onChange={e => setField('alternateEmail', e.target.value)} placeholder="xyz@gmail.com" />
+                    <small style={{ color: '#5b6075', display: 'block', marginTop: 4 }}>Enter any email address that doesn't use the customer's primary domain.</small>
+                    {adminAltOnDomain && <small style={{ color: '#b42318', display: 'block', marginTop: 4 }}>This address uses {form.domain}. Use one on a different domain.</small>}
+                  </div>
+
+                  {/* Phone */}
+                  <div>
+                    <label style={lab}>Phone</label>
+                    <input style={inp} value={form.phone} onChange={e => setField('phone', e.target.value)} placeholder="Phone" />
+                  </div>
+
+                  {/* Temp password (optional) */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={lab}>Temp password (optional)</label>
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        type={showAdminPw ? 'text' : 'password'}
+                        style={{ ...inp, paddingRight: 64, fontFamily: showAdminPw ? 'monospace' : 'inherit' }}
+                        value={form.tempPassword}
+                        onChange={e => setField('tempPassword', e.target.value)}
+                        placeholder="auto-generated if blank"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAdminPw(v => !v)}
+                        style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#6e46eb', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        {showAdminPw ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Submit button */}
+                <button
+                  type="button"
+                  onClick={submit}
+                  disabled={busy}
+                  className="btn btn-primary"
+                  style={{ marginTop: 20, width: '100%', height: 48, fontSize: 16, fontWeight: 800, borderRadius: 10 }}
+                >
+                  {busy ? 'Provisioning in Google…' : 'Submit & create Workspace'}
+                </button>
+              </div>
             </div>
 
-            {error && (
-              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '12px 16px', borderRadius: 10, marginBottom: 20, fontSize: 14 }}>
-                ⚠️ {error}
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit}>
-              
-              {/* Section 1: Domain & Organization */}
-              <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: 24, marginBottom: 24 }}>
-                <h3 style={{ margin: '0 0 16px', fontSize: 16, color: '#1e293b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span>🌐</span> 1. Primary Domain & Organization
-                </h3>
-                
-                <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#334155', cursor: 'pointer' }}>
-                    <input type="radio" name="domainOption" value="existing" checked={domainOption === 'existing'} onChange={() => setDomainOption('existing')} />
-                    Existing Domain (I already own this domain)
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#334155', cursor: 'pointer' }}>
-                    <input type="radio" name="domainOption" value="new" checked={domainOption === 'new'} onChange={() => setDomainOption('new')} />
-                    Domain Registered with Us
-                  </label>
+            {/* RIGHT COLUMN: Search Domain Option to Register New Domain & Checkout */}
+            <div style={{ minWidth: 0 }}>
+              <div style={{ ...box, position: 'sticky', top: 20 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 20 }}>🔍</span>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#111827' }}>Search &amp; Register Domain</h3>
                 </div>
+                <p style={{ margin: '0 0 14px', fontSize: 13, color: '#64748b' }}>
+                  Need a new domain? Search availability to register immediately or use it for your Google Workspace.
+                </p>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-                      Primary Domain <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. yourcompany.com"
-                      value={domain}
-                      onChange={handleDomainChange}
-                      style={{ width: '100%', boxSizing: 'border-box', height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14 }}
-                    />
-                    <span style={{ fontSize: 12, color: '#64748b', marginTop: 4, display: 'block' }}>
-                      The domain name that will follow the @ in your email addresses.
-                    </span>
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-                      Organization / Company Name <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Acme Corporation"
-                      value={organizationName}
-                      onChange={(e) => setOrganizationName(e.target.value)}
-                      style={{ width: '100%', boxSizing: 'border-box', height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14 }}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 16 }}>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-                    Country <span style={{ color: '#ef4444' }}>*</span>
-                  </label>
-                  <select
-                    value={countryCode}
-                    onChange={(e) => setCountryCode(e.target.value)}
-                    style={{ width: '100%', maxWidth: 360, height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14, background: '#ffffff' }}
+                {/* Domain search input */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                  <input
+                    style={{ ...inp, flex: 1, height: 40 }}
+                    value={dq}
+                    onChange={e => setDq(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') searchDomain(); }}
+                    placeholder="yourcompany.com"
+                  />
+                  <button
+                    type="button"
+                    onClick={searchDomain}
+                    disabled={dLoading}
+                    className="btn btn-primary"
+                    style={{ height: 40, padding: '0 14px', fontSize: 13, fontWeight: 700, borderRadius: 8, whiteSpace: 'nowrap' }}
                   >
-                    {ONBOARDING_COUNTRIES.map((c) => (
-                      <option key={c.code} value={c.code}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Section 2: Super Administrator Account */}
-              <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: 24, marginBottom: 24 }}>
-                <h3 style={{ margin: '0 0 16px', fontSize: 16, color: '#1e293b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span>👤</span> 2. Super Administrator Account
-                </h3>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, marginBottom: 16 }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-                      Admin First Name <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. John"
-                      value={adminFirstName}
-                      onChange={(e) => setAdminFirstName(e.target.value)}
-                      style={{ width: '100%', boxSizing: 'border-box', height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14 }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-                      Admin Last Name <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Doe"
-                      value={adminLastName}
-                      onChange={(e) => setAdminLastName(e.target.value)}
-                      style={{ width: '100%', boxSizing: 'border-box', height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14 }}
-                    />
-                  </div>
+                    {dLoading ? '…' : 'Search'}
+                  </button>
                 </div>
 
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-                    Admin Username (Email Prefix) <span style={{ color: '#ef4444' }}>*</span>
-                  </label>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input
-                      type="text"
-                      required
-                      placeholder="admin"
-                      value={adminUsername}
-                      onChange={(e) => setAdminUsername(e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, ''))}
-                      style={{ maxWidth: 200, height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14 }}
-                    />
-                    <span style={{ fontSize: 15, fontWeight: 600, color: '#475569' }}>
-                      @{domain.trim() || 'yourcompany.com'}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                    <span style={{ fontSize: 12, color: '#64748b' }}>Quick suggestions:</span>
-                    {['admin', 'contact', 'info', 'hello'].map((sug) => (
-                      <button
-                        key={sug}
-                        type="button"
-                        onClick={() => setAdminUsername(sug)}
-                        style={{ border: 'none', background: '#f1f5f9', padding: '2px 8px', borderRadius: 4, fontSize: 12, color: '#4338ca', cursor: 'pointer' }}
+                {/* Popular TLD chips */}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+                  {[
+                    ['.com', '$12.99'],
+                    ['.net', '$14.99'],
+                    ['.org', '$13.99'],
+                    ['.io', '$39.99'],
+                    ['.shop', '$4.99'],
+                    ['.co', '$24.99'],
+                  ].map(([tld, pr]) => (
+                    <button
+                      key={tld}
+                      type="button"
+                      onClick={() => {
+                        const base = dq.replace(/\.[a-zA-Z.]+$/, '') || 'mybrand';
+                        setDq(base + tld);
+                      }}
+                      style={{ background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 999, padding: '2px 8px', fontSize: 11, cursor: 'pointer', display: 'inline-flex', gap: 4 }}
+                    >
+                      <strong>{tld}</strong>
+                      <span style={{ color: '#64748b' }}>{pr}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {dError && <div style={{ color: '#dc2626', fontSize: 12.5, marginBottom: 10, fontWeight: 600 }}>{dError}</div>}
+
+                {/* Live Search Results */}
+                {dResult && dResult.results && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+                    {dResult.results.map((r, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          background: r.available ? '#f0fdf4' : '#f8fafc',
+                          border: r.available ? '1px solid #86efac' : '1px solid #e2e8f0',
+                          borderRadius: 10,
+                          padding: 12,
+                        }}
                       >
-                        {sug}
-                      </button>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{r.domain}</span>
+                          <span style={{ fontSize: 13, fontWeight: 800, color: '#4f46e5' }}>
+                            {r.price != null ? `$${Number(r.price).toFixed(2)}/yr` : ''}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: r.available ? '#166534' : '#b45309', marginBottom: 8 }}>
+                          {r.available ? '✓ Available for registration' : '✗ Already taken'}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setField('domain', r.domain);
+                              const pref = r.domain.split('.')[0];
+                              if (pref && pref.length > 1) {
+                                setField('orgName', pref.charAt(0).toUpperCase() + pref.slice(1));
+                              }
+                            }}
+                            style={{
+                              background: '#ffffff',
+                              color: '#4f46e5',
+                              border: '1px solid #c7d2fe',
+                              padding: '5px 10px',
+                              borderRadius: 6,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Use for Workspace ➔
+                          </button>
+
+                          {r.available && (
+                            <button
+                              type="button"
+                              onClick={() => handleInitiateBuyDomain(r)}
+                              disabled={buyBusyDomain === r.domain}
+                              style={{
+                                background: '#4f46e5',
+                                color: '#ffffff',
+                                border: 'none',
+                                padding: '5px 12px',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {buyBusyDomain === r.domain ? 'Preparing…' : '💳 Buy Domain'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     ))}
-                  </div>
-                </div>
-
-                {/* Temporary Password */}
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-                    Temporary Administrator Password <span style={{ color: '#ef4444' }}>*</span>
-                  </label>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, maxWidth: 440 }}>
-                    <input
-                      type={showTempPw ? 'text' : 'password'}
-                      required
-                      value={tempPassword}
-                      onChange={(e) => setTempPassword(e.target.value)}
-                      style={{ flex: 1, height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14, fontFamily: showTempPw ? 'monospace' : 'inherit' }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowTempPw(!showTempPw)}
-                      style={{ border: '1px solid #cbd5e1', background: '#f8fafc', height: 44, padding: '0 12px', borderRadius: 8, fontSize: 13, cursor: 'pointer', color: '#334155' }}
-                    >
-                      {showTempPw ? 'Hide' : 'Show'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTempPassword(generateSecurePassword())}
-                      style={{ border: '1px solid #cbd5e1', background: '#f8fafc', height: 44, padding: '0 12px', borderRadius: 8, fontSize: 13, cursor: 'pointer', color: '#334155' }}
-                    >
-                      ↻ New
-                    </button>
-                  </div>
-                  <span style={{ fontSize: 12, color: '#64748b', marginTop: 4, display: 'block' }}>
-                    Google will require you to change this temporary password upon your initial sign in.
-                  </span>
-                </div>
-
-                {/* Recovery Email & Mobile Number for 2FA */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-                      Recovery Email (External Address) <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      placeholder="e.g. you@gmail.com"
-                      value={recoveryEmail}
-                      onChange={(e) => setRecoveryEmail(e.target.value)}
-                      style={{ width: '100%', boxSizing: 'border-box', height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14 }}
-                    />
-                    <span style={{ fontSize: 12, color: '#64748b', marginTop: 4, display: 'block' }}>
-                      Must be outside @{domain || 'yourdomain.com'} (auto-filled from checkout).
-                    </span>
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-                      Mobile Number (for 2-Step Verification) <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
-                    <input
-                      type="tel"
-                      required
-                      placeholder="e.g. +1 555-0199 or 0300 1234567"
-                      value={recoveryPhone}
-                      onChange={(e) => setRecoveryPhone(e.target.value)}
-                      style={{ width: '100%', boxSizing: 'border-box', height: 44, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 14px', fontSize: 14 }}
-                    />
-                    <span style={{ fontSize: 12, color: '#64748b', marginTop: 4, display: 'block' }}>
-                      Required by Google for SMS security codes and 2FA recovery.
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Section 3: WooCommerce Order Summary Badge */}
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: 16, marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase' }}>Selected Plan</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>{planName}</div>
-                </div>
-                {qOrder && (
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>WooCommerce Order</div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: '#059669' }}>#{qOrder} • Status: {qStatus}</div>
                   </div>
                 )}
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Payment Source</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: '#334155' }}>gnbmentor.com (pay.gnbmentor.com)</div>
+
+                <div style={{ marginTop: 16, borderTop: '1px solid #f1f5f9', paddingTop: 12, fontSize: 12, color: '#64748b' }}>
+                  💡 <strong>Tip:</strong> If you already registered your domain with WooCommerce, enter it directly into the <em>Domain *</em> field on the left.
                 </div>
               </div>
+            </div>
 
-              {/* Submit Button */}
-              <button
-                type="submit"
-                disabled={loading}
-                style={{ width: '100%', height: 50, background: loading ? '#94a3b8' : '#4f46e5', color: '#ffffff', border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', boxShadow: '0 4px 14px rgba(79,70,229,0.3)', transition: 'background .2s ease' }}
-              >
-                {loading ? 'Activating Google Workspace & Generating DNS Records…' : '🚀 Activate Google Workspace & Generate DNS Records'}
-              </button>
-            </form>
           </div>
         )}
+
       </div>
     </div>
   );
 }
+
 
 function App() {
   const { token, user, loading } = useAuth();
@@ -13946,30 +14216,6 @@ function App() {
 }
 
 // ==================== STAGE 1: WORKSPACE ORDER FLOW ====================
-// Language codes offered on the customer form (mirrors Google's console list).
-const LANGUAGE_CODES = [
-  ['en-US', 'English (United States)'], ['en-GB', 'English (United Kingdom)'],
-  ['es-ES', 'Spanish (Spain)'], ['es-419', 'Spanish (Latin America)'],
-  ['fr-FR', 'French (France)'], ['de-DE', 'German (Germany)'],
-  ['pt-BR', 'Portuguese (Brazil)'], ['it-IT', 'Italian (Italy)'],
-  ['nl-NL', 'Dutch (Netherlands)'], ['ar', 'Arabic'], ['hi', 'Hindi'],
-  ['ur', 'Urdu'], ['zh-CN', 'Chinese (Simplified)'], ['ja', 'Japanese'],
-];
-
-const US_STATES = [
-  ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'],
-  ['CO', 'Colorado'], ['CT', 'Connecticut'], ['DE', 'Delaware'], ['FL', 'Florida'], ['GA', 'Georgia'],
-  ['HI', 'Hawaii'], ['ID', 'Idaho'], ['IL', 'Illinois'], ['IN', 'Indiana'], ['IA', 'Iowa'],
-  ['KS', 'Kansas'], ['KY', 'Kentucky'], ['LA', 'Louisiana'], ['ME', 'Maine'], ['MD', 'Maryland'],
-  ['MA', 'Massachusetts'], ['MI', 'Michigan'], ['MN', 'Minnesota'], ['MS', 'Mississippi'], ['MO', 'Missouri'],
-  ['MT', 'Montana'], ['NE', 'Nebraska'], ['NV', 'Nevada'], ['NH', 'New Hampshire'], ['NJ', 'New Jersey'],
-  ['NM', 'New Mexico'], ['NY', 'New York'], ['NC', 'North Carolina'], ['ND', 'North Dakota'], ['OH', 'Ohio'],
-  ['OK', 'Oklahoma'], ['OR', 'Oregon'], ['PA', 'Pennsylvania'], ['RI', 'Rhode Island'], ['SC', 'South Carolina'],
-  ['SD', 'South Dakota'], ['TN', 'Tennessee'], ['TX', 'Texas'], ['UT', 'Utah'], ['VT', 'Vermont'],
-  ['VA', 'Virginia'], ['WA', 'Washington'], ['WV', 'West Virginia'], ['WI', 'Wisconsin'], ['WY', 'Wyoming'],
-  ['DC', 'District of Columbia'],
-];
-
 function WorkspaceOrderFlow({ initialDomain = '', initialStep = 1, onBackToDomainSetup = null, onProceedToBusinessPhone = null }) {
   const [step, setStep] = useState(initialStep || 1);
   const [plans, setPlans] = useState(null);

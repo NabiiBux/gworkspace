@@ -12906,55 +12906,53 @@ app.get('/api/onboarding/config', async (req, res) => {
 app.post('/api/onboarding/activate', async (req, res) => {
   try {
     const body = req.body || {};
-    const {
-      email,
-      order,
-      orderId,
-      status = 'paid',
-      plan,
-      domain,
-      organizationName,
-      countryCode = 'US',
-      adminFirstName,
-      adminLastName,
-      adminUsername = 'admin',
-      tempPassword,
-      recoveryEmail,
-      recoveryPhone,
-      portalPassword,
-    } = body;
+    const org = body.organization || {};
+    const contact = body.contact || {};
 
-    // 1. Validate & clean primary domain
-    const cleanDomain = (domain || '').toLowerCase().trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
+    const rawDomain = (org.domain || body.domain || '').toLowerCase().trim();
+    const cleanDomain = rawDomain.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
     if (!cleanDomain || !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(cleanDomain)) {
       return res.status(400).json({ error: 'Please enter a valid primary domain (e.g. company.com).' });
     }
 
-    // 2. Validate Super Admin credentials
-    const rawAdmin = (adminUsername || 'admin').toLowerCase().trim();
+    // 2. Validate Super Admin & Contact Information
+    const rawAdmin = (org.desiredAdminUsername || contact.desiredAdminUsername || body.adminUsername || body.desiredAdminUsername || 'admin').toLowerCase().trim();
     const localAdmin = (rawAdmin.includes('@') ? rawAdmin.split('@')[0] : rawAdmin).replace(/[^a-z0-9._-]/g, '') || 'admin';
     const fullAdminEmail = `${localAdmin}@${cleanDomain}`;
 
-    const cleanRecoveryEmail = (recoveryEmail || email || '').trim().toLowerCase();
+    const cleanRecoveryEmail = (contact.alternateEmail || contact.recoveryEmail || body.recoveryEmail || body.alternateEmail || body.email || '').trim().toLowerCase();
     if (!isValidEmail(cleanRecoveryEmail)) {
-      return res.status(400).json({ error: 'Please provide a valid recovery email address.' });
+      return res.status(400).json({ error: 'Please provide a valid alternate/recovery email address.' });
     }
 
     // Google constraint: recovery/alternate email must NOT be on the primary domain
     const recDomain = cleanRecoveryEmail.split('@')[1] || '';
     if (recDomain.toLowerCase() === cleanDomain.toLowerCase()) {
-      return res.status(400).json({ error: `Recovery email cannot use @${cleanDomain}. Please provide an external address (e.g. your Gmail or existing business email).` });
+      return res.status(400).json({ error: `Alternate email cannot use @${cleanDomain}. Google requires an external address (e.g. Gmail or external business email).` });
     }
 
-    const cleanPhone = (recoveryPhone || '').trim();
-    if (!cleanPhone || cleanPhone.length < 5) {
-      return res.status(400).json({ error: 'Please provide a valid mobile phone number for 2-Step Verification.' });
-    }
+    const cleanPhone = (contact.phone || body.recoveryPhone || body.phone || '').trim();
+    const finalOrgName = (org.name || body.organizationName || body.orgName || '').trim() || (cleanDomain.split('.')[0].charAt(0).toUpperCase() + cleanDomain.split('.')[0].slice(1));
+    const languageCode = org.languageCode || body.languageCode || 'en-US';
+    const country = org.country || body.country || 'United States';
+    const countryCode = body.countryCode || (country === 'Pakistan' ? 'PK' : country === 'United Kingdom' ? 'GB' : 'US');
+    const streetAddress = org.streetAddress || body.streetAddress || '';
+    const streetAddress2 = org.streetAddress2 || body.streetAddress2 || '';
+    const streetAddress3 = org.streetAddress3 || body.streetAddress3 || '';
+    const city = org.city || body.city || '';
+    const state = org.state || body.state || '';
+    const zip = org.zip || body.zip || '';
+    const firstName = (contact.firstName || body.adminFirstName || body.firstName || 'Admin').trim();
+    const lastName = (contact.lastName || body.adminLastName || body.lastName || '').trim();
+    const seats = Math.max(1, Number(body.seats) || 1);
+    const planType = body.planType === 'annual' ? 'annual' : 'flexible';
+    const account = body.account || ''; // 'pk', 'usa', or '' (auto by order routing)
 
-    const finalOrgName = (organizationName || '').trim() || (cleanDomain.split('.')[0].charAt(0).toUpperCase() + cleanDomain.split('.')[0].slice(1));
-    const finalTempPassword = (tempPassword && tempPassword.length >= 8)
-      ? tempPassword
+    const rawTempPassword = org.tempPassword || body.tempPassword || '';
+    const finalTempPassword = (rawTempPassword && rawTempPassword.length >= 8)
+      ? rawTempPassword
       : `Pass!${crypto.randomBytes(4).toString('hex')}8#`;
+    const portalPassword = body.portalPassword || finalTempPassword;
 
     // 3. Authenticate or Register customer account
     let customer = null;
@@ -12969,19 +12967,18 @@ app.post('/api/onboarding/activate', async (req, res) => {
     }
 
     if (!customer && mongoose.connection.readyState === 1) {
-      // Lookup by recovery email or email
       customer = await Customer.findOne({ businessEmail: cleanRecoveryEmail });
-      if (!customer && email && email.toLowerCase() !== cleanRecoveryEmail) {
-        customer = await Customer.findOne({ businessEmail: email.toLowerCase() });
+      if (!customer && body.email && body.email.toLowerCase() !== cleanRecoveryEmail) {
+        customer = await Customer.findOne({ businessEmail: body.email.toLowerCase() });
       }
     }
 
     const ip = getClientIp(req);
-    const wooOrderId = String(order || orderId || '').trim();
+    const wooOrderId = String(body.order || body.orderId || '').trim();
 
     if (!customer) {
       // Create new customer account so they can log in to manage their workspace
-      const hashedPassword = await bcrypt.hash(portalPassword || finalTempPassword, 10);
+      const hashedPassword = await bcrypt.hash(portalPassword, 10);
       const resellerCode = `WC-${Date.now()}`;
       if (mongoose.connection.readyState === 1) {
         customer = await Customer.create({
@@ -12991,8 +12988,8 @@ app.post('/api/onboarding/activate', async (req, res) => {
           password: hashedPassword,
           phone: cleanPhone,
           country: countryCode || 'US',
-          firstName: (adminFirstName || 'Admin').trim(),
-          lastName: (adminLastName || 'User').trim(),
+          firstName,
+          lastName,
           domain: cleanDomain,
           role: 'customer',
           resellerCode,
@@ -13009,15 +13006,14 @@ app.post('/api/onboarding/activate', async (req, res) => {
           businessEmail: cleanRecoveryEmail,
           phone: cleanPhone,
           country: countryCode || 'US',
-          firstName: (adminFirstName || 'Admin').trim(),
-          lastName: (adminLastName || 'User').trim(),
+          firstName,
+          lastName,
           domain: cleanDomain,
           role: 'customer',
           resellerCode,
         };
       }
     } else {
-      // Update domain and contact details if needed
       if (!customer.domain) customer.domain = cleanDomain;
       if (cleanPhone && !customer.phone) customer.phone = cleanPhone;
       if (finalOrgName && !customer.companyName) customer.companyName = finalOrgName;
@@ -13026,21 +13022,25 @@ app.post('/api/onboarding/activate', async (req, res) => {
 
     // 4. Resolve Plan
     let matchedPlan = null;
-    const planQuery = (plan || '').toLowerCase();
+    const rawPlanQuery = String(body.planId || body.plan?.id || body.plan?.name || body.plan || '').toLowerCase();
     let allPlans = [];
     if (mongoose.connection.readyState === 1) {
       try { allPlans = await Plan.find({ category: 'workspace' }); } catch (_) {}
     }
     if (allPlans && allPlans.length > 0) {
-      if (planQuery.includes('plus')) matchedPlan = allPlans.find((p) => (p.name || '').toLowerCase().includes('plus'));
-      else if (planQuery.includes('standard')) matchedPlan = allPlans.find((p) => (p.name || '').toLowerCase().includes('standard'));
-      else if (planQuery.includes('enterprise')) matchedPlan = allPlans.find((p) => (p.name || '').toLowerCase().includes('enterprise'));
-      if (!matchedPlan) matchedPlan = allPlans.find((p) => (p.name || '').toLowerCase().includes('starter')) || allPlans[0];
+      if (body.planId) matchedPlan = allPlans.find(p => p.planId === body.planId || p.id === body.planId);
+      if (!matchedPlan && rawPlanQuery.includes('enterprise plus')) matchedPlan = allPlans.find(p => (p.name || '').toLowerCase().includes('enterprise plus'));
+      if (!matchedPlan && rawPlanQuery.includes('plus')) matchedPlan = allPlans.find(p => (p.name || '').toLowerCase().includes('plus'));
+      if (!matchedPlan && rawPlanQuery.includes('standard')) matchedPlan = allPlans.find(p => (p.name || '').toLowerCase().includes('standard'));
+      if (!matchedPlan && rawPlanQuery.includes('enterprise')) matchedPlan = allPlans.find(p => (p.name || '').toLowerCase().includes('enterprise'));
+      if (!matchedPlan) matchedPlan = allPlans.find(p => (p.name || '').toLowerCase().includes('starter')) || allPlans[0];
     }
     if (!matchedPlan) {
       const defPlans = DEFAULT_PRODUCTS.workspace || [];
-      if (planQuery.includes('plus')) matchedPlan = defPlans.find((p) => p.id.includes('plus'));
-      else if (planQuery.includes('standard')) matchedPlan = defPlans.find((p) => p.id.includes('standard'));
+      if (body.planId) matchedPlan = defPlans.find(p => p.id === body.planId);
+      if (!matchedPlan && rawPlanQuery.includes('enterprise plus')) matchedPlan = defPlans.find(p => p.id.includes('enterprise-plus') || (p.name || '').toLowerCase().includes('enterprise plus'));
+      if (!matchedPlan && rawPlanQuery.includes('plus')) matchedPlan = defPlans.find(p => p.id.includes('plus'));
+      if (!matchedPlan && rawPlanQuery.includes('standard')) matchedPlan = defPlans.find(p => p.id.includes('standard'));
       if (!matchedPlan) matchedPlan = defPlans[0] || { id: 'business-starter', name: 'Google Workspace Business Starter', monthlyPrice: 7.20 };
     }
 
@@ -13062,14 +13062,15 @@ app.post('/api/onboarding/activate', async (req, res) => {
       customerId: customer._id,
       orderNumber,
       type: 'workspace',
-      planType: 'flexible',
+      planType,
+      account: account || '', // auto / pk / usa
       plan: {
         id: matchedPlan.planId || matchedPlan.id || 'business-starter',
         name: matchedPlan.name,
         monthlyPrice: matchedPlan.monthlyPrice || 7.20,
       },
-      seats: 1,
-      monthlyTotal: matchedPlan.monthlyPrice || 7.20,
+      seats,
+      monthlyTotal: (matchedPlan.monthlyPrice || 7.20) * seats,
       status: 'paid', // Mark as paid from WooCommerce payment
       domainVerified: false,
       txtRecord,
@@ -13078,18 +13079,24 @@ app.post('/api/onboarding/activate', async (req, res) => {
         domain: cleanDomain,
         desiredAdminUsername: localAdmin,
         tempPassword: finalTempPassword,
-        countryCode: countryCode || 'US',
-        country: countryCode || 'United States',
-        languageCode: 'en-US',
+        languageCode,
+        country,
+        countryCode,
+        streetAddress,
+        streetAddress2,
+        streetAddress3,
+        city,
+        state,
+        zip,
       },
       contact: {
-        firstName: (adminFirstName || 'Admin').trim(),
-        lastName: (adminLastName || 'User').trim(),
+        firstName,
+        lastName,
         email: fullAdminEmail,
         alternateEmail: cleanRecoveryEmail,
         phone: cleanPhone,
       },
-      notes: `WooCommerce Order #${wooOrderId} via gnbmentor.com (status: ${status})`,
+      notes: `WooCommerce Order #${wooOrderId} via gnbmentor.com (status: ${body.status || 'paid'})`,
     };
 
     if (mongoose.connection.readyState === 1) {
@@ -13103,7 +13110,41 @@ app.post('/api/onboarding/activate', async (req, res) => {
       orderDoc = { _id: new mongoose.Types.ObjectId(), ...orderPayload };
     }
 
-    // 7. Send Activation & DNS Instructions Email (non-blocking)
+    // 7. Provision into Google immediately (no payment required)
+    let provisionMessage = 'Workspace created in Google immediately.';
+    let provisionNote = null;
+    let provisionSuccess = false;
+    try {
+      const provRes = await provisionWorkspaceOrder(orderDoc);
+      provisionSuccess = true;
+      if (provRes?.message) provisionMessage = provRes.message;
+      if (orderDoc.provisionNote) provisionNote = orderDoc.provisionNote;
+
+      // Seed billing so subscription is tracked on monthly anchor
+      try {
+        const planDoc = await Plan.findOne({ planId: orderDoc.plan?.id });
+        if (planDoc?.skuId) {
+          const now = new Date();
+          let rec = await SubBilling.findOne({ domain: cleanDomain, skuId: planDoc.skuId });
+          if (!rec) {
+            rec = new SubBilling({ account: orderDoc.account || 'pk', domain: cleanDomain, skuId: planDoc.skuId });
+            startNewBillingCycle(rec, now);
+          }
+          applyPaymentToCurrentCycle(rec, now);
+          await rec.save();
+        }
+      } catch (_) {}
+    } catch (provErr) {
+      console.warn('Immediate Google provisioning attempt note:', provErr.message);
+      provisionNote = provErr.message;
+      if (orderDoc && typeof orderDoc.save === 'function') {
+        orderDoc.status = 'pending_verification';
+        orderDoc.provisionNote = provErr.message;
+        await orderDoc.save();
+      }
+    }
+
+    // 8. Send Activation & DNS Instructions Email (non-blocking)
     sendWorkspaceActivationEmail(cleanRecoveryEmail, {
       orderNumber: orderDoc.orderNumber,
       wooOrder: wooOrderId,
@@ -13116,7 +13157,7 @@ app.post('/api/onboarding/activate', async (req, res) => {
       organizationName: finalOrgName,
     }).catch((err) => console.error('[sendWorkspaceActivationEmail error]:', err.message));
 
-    // 8. Generate auth token for seamless portal login
+    // 9. Generate auth token for seamless portal login
     const token = generateToken(customer._id, customer.businessEmail, customer.role);
 
     return res.status(201).json({
@@ -13130,7 +13171,11 @@ app.post('/api/onboarding/activate', async (req, res) => {
       mxRecords,
       spfRecord,
       plan: matchedPlan,
+      seats,
       organizationName: finalOrgName,
+      provisioned: provisionSuccess,
+      message: provisionMessage,
+      provisionNote: provisionNote || (provisionSuccess ? 'Workspace provisioned in Google.' : null),
       customer: {
         id: customer._id,
         businessEmail: customer.businessEmail,
