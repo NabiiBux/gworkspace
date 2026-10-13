@@ -55,12 +55,8 @@ console.log('Target domains to cancel:');
 TARGET_DOMAINS.forEach((d, i) => console.log(`  ${i + 1}. ${d}`));
 console.log('===============================================================\n');
 
-function getServiceAccountAuth(account) {
-  const isUsa = account === 'usa';
-  const rawJson = isUsa
-    ? process.env.GOOGLE_SERVICE_ACCOUNT_JSON_USA
-    : process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-
+function getServiceAccountAuth() {
+  const rawJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!rawJson) return null;
 
   let creds;
@@ -70,9 +66,7 @@ function getServiceAccountAuth(account) {
     return null;
   }
 
-  const subject = isUsa
-    ? (process.env.RESELLER_ADMIN_EMAIL_USA || 'admin@artisandrywallaz.com')
-    : (process.env.RESELLER_ADMIN_EMAIL || 'admin@gnbmentor.com');
+  const subject = process.env.RESELLER_ADMIN_EMAIL || 'admin@gnbmentor.com';
 
   return new google.auth.JWT({
     email: creds.client_email,
@@ -82,11 +76,10 @@ function getServiceAccountAuth(account) {
   });
 }
 
-function makeOAuthClient(account) {
-  const isUsa = account === 'usa';
-  const clientId = isUsa ? process.env.GOOGLE_OAUTH_CLIENT_ID_USA : process.env.GOOGLE_OAUTH_CLIENT_ID;
-  const clientSecret = isUsa ? process.env.GOOGLE_OAUTH_CLIENT_SECRET_USA : process.env.GOOGLE_OAUTH_CLIENT_SECRET;
-  const redirectUri = isUsa ? process.env.GOOGLE_OAUTH_REDIRECT_URI_USA : process.env.GOOGLE_OAUTH_REDIRECT_URI;
+function makeOAuthClient() {
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI;
   if (!clientId || !clientSecret) return null;
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
@@ -101,9 +94,9 @@ async function getAuth(account) {
   // 2. Try MongoDB GoogleConnection
   if (mongoose && mongoose.connection && mongoose.connection.readyState === 1) {
     try {
-      const conn = await mongoose.connection.db.collection('googleconnections').findOne({ account });
+      const conn = await mongoose.connection.db.collection('googleconnections').findOne({ account: 'pk' });
       if (conn && conn.refreshToken) {
-        const oauth = makeOAuthClient(account);
+        const oauth = makeOAuthClient();
         if (oauth) {
           oauth.setCredentials({ refresh_token: conn.refreshToken });
           return { auth: oauth, type: 'OAuth (MongoDB)' };
@@ -117,10 +110,10 @@ async function getAuth(account) {
     const jsonPath = path.join(__dirname, 'google_connections.json');
     if (fs.existsSync(jsonPath)) {
       const parsed = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-      if (parsed[account] && parsed[account].refreshToken) {
-        const oauth = makeOAuthClient(account);
+      if (parsed.pk && parsed.pk.refreshToken) {
+        const oauth = makeOAuthClient();
         if (oauth) {
-          oauth.setCredentials({ refresh_token: parsed[account].refreshToken });
+          oauth.setCredentials({ refresh_token: parsed.pk.refreshToken });
           return { auth: oauth, type: 'OAuth (local JSON)' };
         }
       }
@@ -400,7 +393,7 @@ async function main() {
 
   const allSummary = [];
 
-  for (const acct of ['pk', 'usa']) {
+  for (const acct of ['pk']) {
     console.log(`---------------------------------------------------------------`);
     console.log(`Checking Reseller Account: ${acct.toUpperCase()}`);
     console.log(`---------------------------------------------------------------`);

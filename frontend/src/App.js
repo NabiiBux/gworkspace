@@ -1970,8 +1970,7 @@ const Dashboard = () => {
     'domain-orders': '🌐 Domain Orders',
     'products': '📦 Products',
     'addon-pricing': 'Gsuite Addon Prices',
-    'subs-pk': '🇵🇰 Pakistan Workspace',
-    'subs-usa': '🇺🇸 USA Voice',
+    'subs-pk': 'Google Workspace Subscriptions',
     'customers': '👥 Customers',
     'leads': '💼 Prospective Leads',
     'tickets': '🎫 Tickets',
@@ -2003,8 +2002,7 @@ const Dashboard = () => {
     { key: 'domain-orders', label: 'Domain Orders', icon: <NavIcons.Domains size={18} />, bg: '#ecfeff', border: '#cffafe' },
     { key: 'products', label: 'Products', icon: <NavIcons.AdminProducts size={18} />, bg: '#fef3c7', border: '#fde68a' },
     { key: 'addon-pricing', label: 'Gsuite Addon Prices', icon: <NavIcons.GsuiteAddon size={18} />, bg: '#ffffff', border: '#e2e8f0', shadow: true },
-    { key: 'subs-pk', label: 'Pakistan Workspace', icon: <NavIcons.PkFlag size={18} />, bg: '#01411c', border: '#065f46' },
-    { key: 'subs-usa', label: 'USA Voice', icon: <NavIcons.UsaFlag size={18} />, bg: '#ffffff', border: '#e2e8f0' },
+    { key: 'subs-pk', label: 'Subscriptions', icon: <NavIcons.GsuiteAddon size={18} />, bg: '#ffffff', border: '#e2e8f0', shadow: true },
     { key: 'customers', label: 'Customers', icon: <NavIcons.AdminCustomers size={18} />, bg: '#e0f2fe', border: '#bae6fd' },
     { key: 'leads', label: 'Prospective Leads', icon: <NavIcons.AdminLeads size={18} />, bg: '#ede9fe', border: '#ddd6fe' },
     { key: 'tickets', label: 'Tickets', icon: <NavIcons.Tickets size={18} />, bg: '#ffe4e6', border: '#fecdd3' },
@@ -2100,7 +2098,6 @@ const Dashboard = () => {
         {activeSection === 'products' && <ProductsSection />}
         {activeSection === 'addon-pricing' && <AdminAddonPricing />}
         {activeSection === 'subs-pk' && <SubscriptionsSection account="PK" />}
-        {activeSection === 'subs-usa' && <SubscriptionsSection account="USA" />}
         {activeSection === 'customers' && <AdminCustomersSection />}
         {activeSection === 'leads' && <AdminLeadsSection />}
         {activeSection === 'tickets' && <AdminTicketsSection />}
@@ -2125,7 +2122,7 @@ const Dashboard = () => {
         </button>
         <button
           id="bottom-nav-subs"
-          className={`bottom-nav-item ${(activeSection === 'subs-pk' || activeSection === 'subs-usa') ? 'active' : ''}`}
+          className={`bottom-nav-item ${activeSection === 'subs-pk' ? 'active' : ''}`}
           onClick={() => setActiveSection('subs-pk')}
         >
           <span className="bottom-nav-icon"><NavIcons.Subscriptions size={18} /></span>
@@ -2408,28 +2405,28 @@ const OverviewSection = ({ stats }) => {
         </>
       )}
 
-      {/* Per-account breakdown: USA vs Pakistan */}
-      <h3 style={{ marginTop: 24, marginBottom: 12, fontSize: 15, fontWeight: 700, color: '#1e293b' }}>Live Google Reseller Node Breakdown</h3>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }} className="grid-2" id="overview-account-breakdown">
-        {[
-          { key: 'pk', label: 'Pakistan reseller', sub: 'gnbmentor.com · Workspace', color: '#6e46eb', data: live?.pk },
-          { key: 'usa', label: 'USA reseller', sub: 'artisandrywallaz.com · Voice', color: '#1d4ed8', data: live?.usa },
-        ].map(acc => (
-          <div key={acc.key} style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #e5e7eb', borderTop: `4px solid ${acc.color}` }}>
-            <div style={{ fontWeight: 700, fontSize: 16 }}>{acc.label}</div>
-            <div style={{ color: '#6b7280', fontSize: 13, marginBottom: 14 }}>{acc.sub}</div>
-            {!live ? <p style={{ color: '#9ca3af' }}>Loading…</p> : acc.data?.error ? (
-              <div style={{ color: '#b45309', fontSize: 13 }}>⚠️ {acc.data.error}</div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div><div style={{ fontSize: 24, fontWeight: 800, color: acc.color }}>{acc.data?.totalCustomers ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Customers</div></div>
-                <div><div style={{ fontSize: 24, fontWeight: 800, color: acc.color }}>{acc.data?.activeSubscriptions ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Active subs</div></div>
-                <div><div style={{ fontSize: 24, fontWeight: 800, color: acc.color }}>{acc.data?.totalSeats ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Seats</div></div>
-                <div><div style={{ fontSize: 24, fontWeight: 800, color: (acc.data?.suspendedSubscriptions ? '#b42318' : acc.color) }}>{acc.data?.suspendedSubscriptions ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Suspended</div></div>
-              </div>
-            )}
-          </div>
-        ))}
+      {/* Google Reseller Node */}
+      <h3 style={{ marginTop: 24, marginBottom: 12, fontSize: 15, fontWeight: 700, color: '#1e293b' }}>Google Reseller Status</h3>
+      <div style={{ marginBottom: 24 }} id="overview-account-breakdown">
+        {(() => {
+          const acc = { key: 'pk', label: 'Google Workspace Reseller', sub: 'gnbmentor.com · Workspace', color: '#6e46eb', data: live?.pk || live };
+          return (
+            <div key={acc.key} style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #e5e7eb', borderTop: `4px solid ${acc.color}`, maxWidth: 640 }}>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{acc.label}</div>
+              <div style={{ color: '#6b7280', fontSize: 13, marginBottom: 14 }}>{acc.sub}</div>
+              {!live ? <p style={{ color: '#9ca3af' }}>Loading…</p> : acc.data?.error ? (
+                <div style={{ color: '#b45309', fontSize: 13 }}>⚠️ {acc.data.error}</div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                  <div><div style={{ fontSize: 24, fontWeight: 800, color: acc.color }}>{acc.data?.totalCustomers ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Customers</div></div>
+                  <div><div style={{ fontSize: 24, fontWeight: 800, color: acc.color }}>{acc.data?.activeSubscriptions ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Active subs</div></div>
+                  <div><div style={{ fontSize: 24, fontWeight: 800, color: acc.color }}>{acc.data?.totalSeats ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Seats</div></div>
+                  <div><div style={{ fontSize: 24, fontWeight: 800, color: (acc.data?.suspendedSubscriptions ? '#b42318' : acc.color) }}>{acc.data?.suspendedSubscriptions ?? 0}</div><div style={{ fontSize: 12, color: '#6b7280' }}>Suspended</div></div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       <div className="recent-orders" style={{ marginTop: 24 }} id="overview-recent-orders">
@@ -2635,19 +2632,12 @@ const ProductsSection = () => {
         {osMsg && <div style={{ color: osMsg.startsWith('✓') ? '#166534' : '#b42318', fontSize: 13, marginBottom: 8 }}>{osMsg}</div>}
         {!os ? <p style={{ color: '#9ca3af' }}>Loading…</p> : (
           <>
-            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Which reseller account takes new Workspace orders?</div>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Google Reseller Orders</div>
             <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 16 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input type="checkbox" checked={!!os.pkOrdersEnabled} onChange={e => saveOs({ pkOrdersEnabled: e.target.checked })} />
-                Pakistan reseller (gnbmentor.com)
+                Google Workspace Reseller orders enabled
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                <input type="checkbox" checked={!!os.usaOrdersEnabled} onChange={e => saveOs({ usaOrdersEnabled: e.target.checked })} />
-                USA reseller (artisandrywallaz.com)
-              </label>
-            </div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
-              New orders go to USA if it's the only one on; otherwise to Pakistan. Turn an account off to stop it taking orders.
             </div>
 
             <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Payment plans customers can choose</div>
@@ -2663,21 +2653,13 @@ const ProductsSection = () => {
             </div>
 
             <div style={{ borderTop: '1px solid #eee', marginTop: 16, paddingTop: 16 }}>
-              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Workspace transfer tokens</div>
-              <p style={{ color: '#6b7280', fontSize: 12, marginTop: 0 }}>Your reseller transfer tokens — customers paste these in their Google Admin to authorize transferring their Workspace to you. Set the one for whichever account takes orders.</p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }} className="grid-2">
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 600 }}>Pakistan transfer token</label>
-                  <input style={inp} value={os.pkTransferToken || ''} onChange={e => setOs({ ...os, pkTransferToken: e.target.value })} onBlur={() => saveOs({})} placeholder="e.g. C02qvoufl" />
-                  <label style={{ fontSize: 12, fontWeight: 600, marginTop: 8, display: 'block' }}>Pakistan Partner ID (optional)</label>
-                  <input style={inp} value={os.pkPartnerId || ''} onChange={e => setOs({ ...os, pkPartnerId: e.target.value })} onBlur={() => saveOs({})} placeholder="Partner/Reseller ID" />
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 600 }}>USA transfer token</label>
-                  <input style={inp} value={os.usaTransferToken || ''} onChange={e => setOs({ ...os, usaTransferToken: e.target.value })} onBlur={() => saveOs({})} placeholder="e.g. C0xxxxxxx" />
-                  <label style={{ fontSize: 12, fontWeight: 600, marginTop: 8, display: 'block' }}>USA Partner ID (optional)</label>
-                  <input style={inp} value={os.usaPartnerId || ''} onChange={e => setOs({ ...os, usaPartnerId: e.target.value })} onBlur={() => saveOs({})} placeholder="Partner/Reseller ID" />
-                </div>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Workspace transfer token</div>
+              <p style={{ color: '#6b7280', fontSize: 12, marginTop: 0 }}>Your reseller transfer token — customers paste this in their Google Admin to authorize transferring their Workspace to you.</p>
+              <div style={{ maxWidth: 420 }}>
+                <label style={{ fontSize: 12, fontWeight: 600 }}>Transfer token</label>
+                <input style={inp} value={os.pkTransferToken || ''} onChange={e => setOs({ ...os, pkTransferToken: e.target.value })} onBlur={() => saveOs({})} placeholder="e.g. C02qvoufl" />
+                <label style={{ fontSize: 12, fontWeight: 600, marginTop: 8, display: 'block' }}>Partner / Reseller ID (optional)</label>
+                <input style={inp} value={os.pkPartnerId || ''} onChange={e => setOs({ ...os, pkPartnerId: e.target.value })} onBlur={() => saveOs({})} placeholder="Partner/Reseller ID" />
               </div>
             </div>
           </>
@@ -2840,11 +2822,8 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
   const [cancellingRow, setCancellingRow] = useState(null);
   const [rowCancelMsg, setRowCancelMsg] = useState('');
 
-  const isUSA = account === 'USA';
-
   useEffect(() => { setPage(1); }, [account]);
   useEffect(() => { fetchSubs(); }, [account, page]);
-  useEffect(() => { if (isUSA) fetchVoicePlans(); }, [isUSA]);
 
   useEffect(() => {
     const loadProducts = async () => {
@@ -3000,18 +2979,16 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
     TRIAL: 'Trial', FREE: 'Free',
   }[p] || p || '—');
 
-  const title = isUSA ? 'USA Voice Subscriptions' : 'Pakistan Workspace Subscriptions';
+  const title = 'Google Workspace Subscriptions';
 
-  if (loading) return <div className="loading">Loading {isUSA ? 'USA' : 'Pakistan'} subscriptions from Google…</div>;
+  if (loading) return <div className="loading">Loading subscriptions from Google…</div>;
 
   if (notConnected) {
     return (
       <div className="section">
         <h2>{title}</h2>
         <div style={{ background: '#fff7ed', color: '#9a3412', padding: '14px 16px', borderRadius: 10 }}>
-          {isUSA
-            ? 'USA reseller is not connected. Connect it by visiting /api/google/usa/connect on the backend.'
-            : 'Pakistan reseller is not connected.'}
+          Google Reseller account is not connected.
         </div>
       </div>
     );
@@ -3029,45 +3006,6 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
           <div className="stat-card"><h3>Subscriptions</h3><p className="stat-value">{summary.totalSubscriptions}</p></div>
           <div className="stat-card"><h3>Active</h3><p className="stat-value">{summary.activeSubscriptions}</p></div>
           <div className="stat-card"><h3>Suspended</h3><p className="stat-value">{summary.suspendedSubscriptions}</p></div>
-        </div>
-      )}
-
-      {isUSA && (
-        <div className="add-voice-card" style={{ background: '#f5f8ff', border: '1px solid #dbe4ff', borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <h3 style={{ margin: '0 0 4px' }}>📞 Add Google Voice (USA only)</h3>
-          <p style={{ margin: '0 0 12px', color: '#5b6075', fontSize: 14 }}>
-            Voice is available only in supported countries (US, Canada, UK, and parts of Europe). One Voice subscription per domain.
-          </p>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Domain (type to search)</label>
-              <input list="usa-domains-list" value={vForm.domain}
-                onChange={(e) => setVForm({ ...vForm, domain: e.target.value })}
-                placeholder="Search USA domains…"
-                style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', minWidth: 240 }} />
-              <datalist id="usa-domains-list">
-                {eligibleDomains.map(d => <option key={d} value={d} />)}
-              </datalist>
-              <div style={{ fontSize: 12, color: '#7a809a', marginTop: 4 }}>{eligibleDomains.length} eligible domains</div>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Voice plan</label>
-              <select value={vForm.voicePlanId} onChange={(e) => setVForm({ ...vForm, voicePlanId: e.target.value })}
-                style={{ height: 40, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px', minWidth: 160 }}>
-                {voicePlans.map(p => <option key={p.id} value={p.id}>{p.name} (${p.monthlyPrice}/mo)</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Seats</label>
-              <input type="number" min="1" value={vForm.seats}
-                onChange={(e) => setVForm({ ...vForm, seats: Math.max(1, parseInt(e.target.value) || 1) })}
-                style={{ height: 40, width: 80, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 10px' }} />
-            </div>
-            <button className="btn btn-primary" onClick={addVoice} disabled={vBusy} style={{ height: 40 }}>
-              {vBusy ? 'Adding…' : 'Add Voice'}
-            </button>
-          </div>
-          {vMsg && <div style={{ marginTop: 12, fontSize: 14, color: vMsg.startsWith('✓') ? '#166534' : '#b42318' }}>{vMsg}</div>}
         </div>
       )}
 
@@ -3130,7 +3068,7 @@ const SubscriptionsSection = ({ account = 'PK' }) => {
               {cancelBusy ? 'Cancelling via Google API…' : `Cancel Subscriptions for ${cancelText.split(/[\s,\n]+/).filter(Boolean).length || ''} Domain(s)`}
             </button>
             <span style={{ fontSize: 12, color: '#6b7280' }}>
-              Checked against both PK and USA reseller accounts &amp; local billing tables.
+              Checked against Google Reseller API &amp; local billing tables.
             </span>
           </div>
 
@@ -3567,7 +3505,7 @@ const AdminCustomersSection = () => {
       const autoSelected = [];
       Object.entries(r.data.results).forEach(([domain, res]) => {
         if (res.found) {
-          ['pk', 'usa'].forEach(account => {
+          ['pk'].forEach(account => {
             if (res[account]?.found && res[account]?.subscriptions) {
               res[account].subscriptions.forEach(sub => {
                 if (sub.status === 'ACTIVE') {
@@ -3763,7 +3701,7 @@ const AdminCustomersSection = () => {
 
             {modalTab === 'single' && (
               <div>
-                <p style={{ color: '#6b7280', marginTop: 0, fontSize: 13, marginBottom: 12 }}>Enter or confirm the domain of the Google Workspace you manage for this customer. We'll automatically lookup Pakistan (PK) and USA reseller accounts.</p>
+                <p style={{ color: '#6b7280', marginTop: 0, fontSize: 13, marginBottom: 12 }}>Enter or confirm the domain of the Google Workspace you manage for this customer. We'll automatically look up the Google Reseller account.</p>
 
                 <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Workspace domain</label>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
@@ -3774,13 +3712,13 @@ const AdminCustomersSection = () => {
 
                 {lookup?.found && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>Lookup Results across Pakistan & USA accounts:</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>Lookup Results:</div>
                     
-                    {/* Pakistan Account Card */}
+                    {/* Google Reseller Account Card */}
                     {lookup.accounts?.pk?.found ? (
                       <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 12 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                          <span style={{ fontWeight: 700, color: '#166534', fontSize: 13 }}>🇵🇰 Pakistan Account (PK) — FOUND</span>
+                          <span style={{ fontWeight: 700, color: '#166534', fontSize: 13 }}>Google Workspace Account — FOUND</span>
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button 
                               onClick={() => confirmAttachForAccount('pk')} 
@@ -3788,7 +3726,7 @@ const AdminCustomersSection = () => {
                               className="btn btn-primary" 
                               style={{ padding: '4px 8px', fontSize: 12, height: 'auto', minHeight: 'auto', borderRadius: 6 }}
                             >
-                              Attach PK
+                              Attach Domain
                             </button>
                             <button 
                               onClick={() => cancelDomainDirectly(attachDom, 'pk')} 
@@ -3797,7 +3735,7 @@ const AdminCustomersSection = () => {
                               style={{ padding: '4px 8px', fontSize: 12, height: 'auto', minHeight: 'auto', borderRadius: 6, background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}
                               title="Cancel subscriptions in Google Reseller API"
                             >
-                              🛑 Cancel PK
+                              🛑 Cancel Subscriptions
                             </button>
                           </div>
                         </div>
@@ -3813,53 +3751,9 @@ const AdminCustomersSection = () => {
                       </div>
                     ) : (
                       <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, opacity: 0.85 }}>
-                        <div style={{ fontWeight: 600, color: '#64748b', fontSize: 12 }}>🇵🇰 Pakistan Account (PK) — Not Found{lookup.accounts?.pk?.authType ? ` · via ${lookup.accounts.pk.authType}` : ''}</div>
+                        <div style={{ fontWeight: 600, color: '#64748b', fontSize: 12 }}>Google Workspace Account — Not Found{lookup.accounts?.pk?.authType ? ` · via ${lookup.accounts.pk.authType}` : ''}</div>
                         {(lookup.accounts?.pk?.reason || lookup.accounts?.pk?.error) && (
                           <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: '1.4' }}>{lookup.accounts.pk.reason || lookup.accounts.pk.error}</div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* USA Account Card */}
-                    {lookup.accounts?.usa?.found ? (
-                      <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 12 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                          <span style={{ fontWeight: 700, color: '#166534', fontSize: 13 }}>🇺🇸 USA Account (USA) — FOUND</span>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button 
-                              onClick={() => confirmAttachForAccount('usa')} 
-                              disabled={attachBusy} 
-                              className="btn btn-primary" 
-                              style={{ padding: '4px 8px', fontSize: 12, height: 'auto', minHeight: 'auto', borderRadius: 6 }}
-                            >
-                              Attach USA
-                            </button>
-                            <button 
-                              onClick={() => cancelDomainDirectly(attachDom, 'usa')} 
-                              disabled={attachBusy} 
-                              className="btn btn-danger" 
-                              style={{ padding: '4px 8px', fontSize: 12, height: 'auto', minHeight: 'auto', borderRadius: 6, background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}
-                              title="Cancel subscriptions in Google Reseller API"
-                            >
-                              🛑 Cancel USA
-                            </button>
-                          </div>
-                        </div>
-                        {lookup.accounts.usa.subscriptions && lookup.accounts.usa.subscriptions.length > 0 ? (
-                          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#1e293b' }}>
-                            {lookup.accounts.usa.subscriptions.map((s, i) => (
-                              <li key={i}>{s.skuName} — {s.planName || '—'} · {s.seats ?? '?'} seats · <span style={{ color: s.status === 'ACTIVE' ? '#15803d' : '#b45309', fontWeight: 600 }}>{s.status}</span></li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <div style={{ fontSize: 12, color: '#64748b' }}>{lookup.accounts.usa.note || 'No active subscriptions found on this account.'}</div>
-                        )}
-                      </div>
-                    ) : (
-                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, opacity: 0.85 }}>
-                        <div style={{ fontWeight: 600, color: '#64748b', fontSize: 12 }}>🇺🇸 USA Account (USA) — Not Found{lookup.accounts?.usa?.authType ? ` · via ${lookup.accounts.usa.authType}` : ''}</div>
-                        {(lookup.accounts?.usa?.reason || lookup.accounts?.usa?.error) && (
-                          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: '1.4' }}>{lookup.accounts.usa.reason || lookup.accounts.usa.error}</div>
                         )}
                       </div>
                     )}
@@ -3869,10 +3763,10 @@ const AdminCustomersSection = () => {
                 {lookup && !lookup.found && (
                   <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 10, padding: 14, marginBottom: 14 }}>
                     <div style={{ fontWeight: 700, color: '#475569', marginBottom: 4, fontSize: 13 }}>
-                      🔍 Domain Not Found in Your Reseller Consoles
+                      🔍 Domain Not Found in Google Reseller Console
                     </div>
                     <div style={{ fontSize: 12, color: '#64748b', lineHeight: '1.4' }}>
-                      The domain <strong>{lookup.domain}</strong> was not found on either your Pakistan (PK) or USA reseller consoles.
+                      The domain <strong>{lookup.domain}</strong> was not found in your Google Reseller console.
                       <p style={{ margin: '6px 0 0', fontSize: 11, color: '#64748b' }}>
                         Note: Google returned <em>Forbidden</em> or <em>Not Found</em> access codes. This is normal and expected when a domain is registered directly with Google or managed by another reseller. It confirms your API credentials are functional and secure!
                       </p>
@@ -3892,7 +3786,7 @@ const AdminCustomersSection = () => {
 
             {modalTab === 'bulk' && (
               <div>
-                <p style={{ color: '#4b5563', fontSize: 13, margin: '0 0 10px' }}>Enter Google Workspace domains (one per line) to query Pakistan and USA accounts in bulk, then select which subscriptions to attach.</p>
+                <p style={{ color: '#4b5563', fontSize: 13, margin: '0 0 10px' }}>Enter Google Workspace domains (one per line) to query the Google Reseller account in bulk, then select which subscriptions to attach.</p>
                 <textarea 
                   value={bulkAttachDoms} 
                   onChange={e => setBulkAttachDoms(e.target.value)} 
@@ -3916,25 +3810,25 @@ const AdminCustomersSection = () => {
                         <div style={{ fontWeight: 700, fontSize: 13, color: '#1e293b' }}>🌐 {domain}</div>
                         {!res.found ? (
                           <div style={{ marginLeft: 12 }}>
-                            <div style={{ fontSize: 11, color: '#94a3b8' }}>No subscription found on either PK or USA accounts.</div>
-                            {['pk', 'usa'].map(acct => {
+                            <div style={{ fontSize: 11, color: '#94a3b8' }}>No subscription found on Google Reseller account.</div>
+                            {['pk'].map(acct => {
                               const why = res[acct]?.reason || res[acct]?.error;
-                              return why ? <div key={acct} style={{ fontSize: 10, color: '#cbd5e1', marginTop: 2 }}>{acct.toUpperCase()}: {why}</div> : null;
+                              return why ? <div key={acct} style={{ fontSize: 10, color: '#cbd5e1', marginTop: 2 }}>{why}</div> : null;
                             })}
                           </div>
                         ) : (
                           <div style={{ marginLeft: 12, marginTop: 4 }}>
-                            {['pk', 'usa'].map(acct => {
-                              const acctRes = res[acct];
-                              if (!acctRes?.found) return null;
+                            {['pk'].map(acct => {
+                              const acctRes = res[acct] || (res.found ? res : null);
+                              if (!acctRes?.found && !acctRes?.subscriptions?.length) return null;
                               return (
                                 <div key={acct} style={{ marginTop: 4 }}>
-                                  <div style={{ fontSize: 11, fontWeight: 600, color: '#6e46eb' }}>{acct.toUpperCase() === 'USA' ? '🇺🇸 USA Reseller' : '🇵🇰 PK Reseller'}:</div>
+                                  <div style={{ fontSize: 11, fontWeight: 600, color: '#6e46eb' }}>Google Reseller:</div>
                                   {acctRes.subscriptions && acctRes.subscriptions.length > 0 ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginLeft: 8, marginTop: 2 }}>
                                       {acctRes.subscriptions.map((sub, i) => {
-                                        const item = { domain, account: acct, subscriptionId: sub.subscriptionId, skuId: sub.skuId, skuName: sub.skuName, planName: sub.planName, seats: sub.seats, status: sub.status };
-                                        const isSelected = !!bulkSelectedSubs.find(p => p.domain === domain && p.account === acct && p.subscriptionId === sub.subscriptionId && p.skuId === sub.skuId);
+                                        const item = { domain, account: 'pk', subscriptionId: sub.subscriptionId, skuId: sub.skuId, skuName: sub.skuName, planName: sub.planName, seats: sub.seats, status: sub.status };
+                                        const isSelected = !!bulkSelectedSubs.find(p => p.domain === domain && p.subscriptionId === sub.subscriptionId && p.skuId === sub.skuId);
                                         return (
                                           <label key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, cursor: 'pointer' }}>
                                             <input 
@@ -3985,7 +3879,7 @@ const AdminCustomersSection = () => {
               <button onClick={() => setAttaching(null)} disabled={attachBusy} className="btn btn-secondary" style={{ width: '100%' }}>Cancel / Close</button>
             </div>
 
-            <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 14, marginBottom: 0 }}>The Pakistan and USA accounts are queried dynamically from the Google Reseller APIs using secure server authentication.</p>
+            <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 14, marginBottom: 0 }}>The Google Workspace subscriptions are queried dynamically from the Google Reseller API using secure server authentication.</p>
           </div>
         </div>
       )}
@@ -5759,8 +5653,8 @@ const AdminPaymentsSection = () => {
     setSubBillingMsg('Syncing from Google…');
     try {
       const r = await axios.post(`${API_URL}/admin/billing/sync`, {});
-      const pk = r.data.pk || {}, usa = r.data.usa || {};
-      setSubBillingMsg(`✓ Synced. PK: ${pk.total || 0} found (${pk.seeded || 0} new)${pk.error ? ' [' + pk.error + ']' : ''} · USA: ${usa.total || 0} found (${usa.seeded || 0} new)${usa.error ? ' [' + usa.error + ']' : ''}`);
+      const pk = r.data.pk || {};
+      setSubBillingMsg(`✓ Synced: ${pk.total || 0} subscriptions found (${pk.seeded || 0} new)${pk.error ? ' [' + pk.error + ']' : ''}`);
       loadSubBilling();
     }
     catch (e) { setSubBillingMsg(e?.response?.data?.error || 'Sync failed.'); }
@@ -13343,7 +13237,7 @@ function WooCommerceOnboardingFlow() {
 
   const [form, setForm] = useState({
     domain: qDomain || 'redvi.shop',
-    account: '',
+    account: 'pk',
     planId: 'enterprise-plus',
     seats: 1,
     planType: 'flexible',
@@ -13772,16 +13666,6 @@ function WooCommerceOnboardingFlow() {
                         )}
                       </small>
                     )}
-                  </div>
-
-                  {/* Reseller account */}
-                  <div>
-                    <label style={lab}>Reseller account</label>
-                    <select style={inp} value={form.account} onChange={e => setField('account', e.target.value)}>
-                      <option value="">Auto (by order routing)</option>
-                      <option value="pk">Pakistan</option>
-                      <option value="usa">USA</option>
-                    </select>
                   </div>
 
                   {/* Plan * */}
@@ -16035,7 +15919,7 @@ const AdminDomainOrders = ({ onSwitchToDirectOrder }) => {
 const AdminOrderWorkspace = () => {
   const [plans, setPlans] = useState([]);
   const [form, setForm] = useState({
-    domain: '', planId: '', seats: 1, planType: 'flexible', account: '',
+    domain: '', planId: '', seats: 1, planType: 'flexible', account: 'pk',
     orgName: '', firstName: '', lastName: '', email: '', alternateEmail: '', phone: '',
     languageCode: 'en-US',
     country: 'United States', streetAddress: '', streetAddress2: '', streetAddress3: '',
@@ -16215,13 +16099,6 @@ const AdminOrderWorkspace = () => {
               </small>
             )}
           </div>
-          <div><label style={lab}>Reseller account</label>
-            <select style={inp} value={form.account} onChange={e => set('account', e.target.value)}>
-              <option value="">Auto (by order routing)</option>
-              <option value="pk">Pakistan</option>
-              <option value="usa">USA</option>
-            </select>
-          </div>
           <div><label style={lab}>Plan *</label>
             <select style={inp} value={form.planId} onChange={e => set('planId', e.target.value)}>
               {plans.map(p => <option key={p.id} value={p.id}>{p.name} — ${Number(p.monthlyPrice).toFixed(2)}/seat/mo</option>)}
@@ -16326,14 +16203,6 @@ example3.com, 3, Acme Inc, admin`}</pre>
             <select value={bulkPlanType} onChange={e => setBulkPlanType(e.target.value)} style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }}>
               <option value="flexible">Flexible (monthly)</option>
               <option value="annual">Annual (yearly commitment, monthly pay)</option>
-            </select>
-          </div>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Reseller account</label>
-            <select value={bulkAccount} onChange={e => setBulkAccount(e.target.value)} style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px' }}>
-              <option value="">Auto (by order routing)</option>
-              <option value="pk">Pakistan</option>
-              <option value="usa">USA</option>
             </select>
           </div>
         </div>

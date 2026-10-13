@@ -696,17 +696,11 @@ const BrandSettings = mongoose.model('BrandSettings', BrandSettingsSchema);
 // Order routing + plan availability (admin-controlled).
 const OrderSettingsSchema = new mongoose.Schema({
   singleton: { type: String, default: 'main', unique: true },
-  // Which reseller account fulfills new Workspace orders.
-  pkOrdersEnabled: { type: Boolean, default: true },    // 🇵🇰 Pakistan reseller takes orders
-  usaOrdersEnabled: { type: Boolean, default: false },  // 🇺🇸 USA reseller takes orders
-  // Payment plans the customer may choose.
-  flexibleEnabled: { type: Boolean, default: true },    // monthly / pay-as-you-go
-  annualEnabled: { type: Boolean, default: false },     // annual commitment (monthly pay)
-  // Our reseller transfer tokens (we give these to customers to paste in THEIR Google Admin).
-  pkTransferToken: { type: String, default: '' },       // Pakistan reseller's transfer token
-  usaTransferToken: { type: String, default: '' },      // USA reseller's transfer token
-  pkPartnerId: { type: String, default: '' },           // Pakistan Partner/Reseller ID (shown to customer)
-  usaPartnerId: { type: String, default: '' },          // USA Partner/Reseller ID
+  pkOrdersEnabled: { type: Boolean, default: true },
+  flexibleEnabled: { type: Boolean, default: true },
+  annualEnabled: { type: Boolean, default: false },
+  pkTransferToken: { type: String, default: '' },
+  pkPartnerId: { type: String, default: '' },
   updatedAt: { type: Date, default: Date.now },
 });
 const OrderSettings = mongoose.model('OrderSettings', OrderSettingsSchema);
@@ -994,21 +988,12 @@ async function dbSaveGoogleConnection(account, connData) {
   }
 }
 
-// Build a configured OAuth2 client (Pakistan / default)
+// Build a configured OAuth2 client (Google Workspace reseller)
 function makeOAuthClient() {
   return new google.auth.OAuth2(
     process.env.GOOGLE_OAUTH_CLIENT_ID,
     process.env.GOOGLE_OAUTH_CLIENT_SECRET,
     process.env.GOOGLE_OAUTH_REDIRECT_URI
-  );
-}
-
-// Build a configured OAuth2 client for the USA reseller account
-function makeUsaOAuthClient() {
-  return new google.auth.OAuth2(
-    process.env.GOOGLE_OAUTH_CLIENT_ID_USA,
-    process.env.GOOGLE_OAUTH_CLIENT_SECRET_USA,
-    process.env.GOOGLE_OAUTH_REDIRECT_URI_USA
   );
 }
 
@@ -11947,8 +11932,8 @@ app.get('/api/admin/order-settings', authenticateCustomer, requireAdmin, async (
     let s = await OrderSettings.findOne({ singleton: 'main' });
     if (!s) s = await OrderSettings.create({ singleton: 'main' });
     res.json({
-      pkOrdersEnabled: s.pkOrdersEnabled, usaOrdersEnabled: s.usaOrdersEnabled, flexibleEnabled: s.flexibleEnabled, annualEnabled: s.annualEnabled,
-      pkTransferToken: s.pkTransferToken || '', usaTransferToken: s.usaTransferToken || '', pkPartnerId: s.pkPartnerId || '', usaPartnerId: s.usaPartnerId || ''
+      pkOrdersEnabled: s.pkOrdersEnabled, flexibleEnabled: s.flexibleEnabled, annualEnabled: s.annualEnabled,
+      pkTransferToken: s.pkTransferToken || '', pkPartnerId: s.pkPartnerId || ''
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -11961,13 +11946,10 @@ app.post('/api/admin/order-settings', authenticateCustomer, requireAdmin, async 
       {
         $set: {
           ...(b.pkOrdersEnabled !== undefined ? { pkOrdersEnabled: !!b.pkOrdersEnabled } : {}),
-          ...(b.usaOrdersEnabled !== undefined ? { usaOrdersEnabled: !!b.usaOrdersEnabled } : {}),
           ...(b.flexibleEnabled !== undefined ? { flexibleEnabled: !!b.flexibleEnabled } : {}),
           ...(b.annualEnabled !== undefined ? { annualEnabled: !!b.annualEnabled } : {}),
           ...(b.pkTransferToken !== undefined ? { pkTransferToken: String(b.pkTransferToken).trim() } : {}),
-          ...(b.usaTransferToken !== undefined ? { usaTransferToken: String(b.usaTransferToken).trim() } : {}),
           ...(b.pkPartnerId !== undefined ? { pkPartnerId: String(b.pkPartnerId).trim() } : {}),
-          ...(b.usaPartnerId !== undefined ? { usaPartnerId: String(b.usaPartnerId).trim() } : {}),
           updatedAt: new Date(),
         }
       },
@@ -11990,20 +11972,16 @@ app.get('/api/order-options', async (req, res) => {
 // Helper: pick the active reseller account for transfers (admin-routed).
 async function activeTransferAccount() {
   const os = await OrderSettings.findOne({ singleton: 'main' });
-  let account = 'pk';
-  if (os && os.usaOrdersEnabled && !os.pkOrdersEnabled) account = 'usa';
-  else if (os && os.pkOrdersEnabled) account = 'pk';
-  else if (os && os.usaOrdersEnabled) account = 'usa';
-  return { account, os };
+  return { account: 'pk', os };
 }
 
 // Customer: get the transfer instructions — OUR token + Partner ID for the active account.
 app.get('/api/customer/workspace/transfer-info', authenticateCustomer, async (req, res) => {
   try {
     const { account, os } = await activeTransferAccount();
-    const token = account === 'usa' ? (os?.usaTransferToken || '') : (os?.pkTransferToken || '');
-    const partnerId = account === 'usa' ? (os?.usaPartnerId || '') : (os?.pkPartnerId || '');
-    res.json({ account, token, partnerId, configured: !!token });
+    const token = os?.pkTransferToken || '';
+    const partnerId = os?.pkPartnerId || '';
+    res.json({ account: 'pk', token, partnerId, configured: !!token });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -13430,119 +13408,22 @@ app.get('/api/google/callback', async (req, res) => {
   }
 });
 
-// ===== USA reseller OAuth (for Google Voice) =====
-app.get('/api/google/usa/connect', (req, res) => {
-  try {
-    if (!process.env.GOOGLE_OAUTH_CLIENT_ID_USA) {
-      return res.status(500).send('USA OAuth not configured. Set GOOGLE_OAUTH_CLIENT_ID_USA / SECRET_USA / REDIRECT_URI_USA.');
-    }
-    const oauth2 = makeUsaOAuthClient();
-    const url = oauth2.generateAuthUrl({
-      access_type: 'offline',
-      prompt: 'consent',
-      scope: ['https://www.googleapis.com/auth/apps.order'], // Voice subscription only needs apps.order
-    });
-    res.redirect(url);
-  } catch (e) {
-    res.status(500).send('Could not start USA connection: ' + e.message);
-  }
-});
-
-app.get('/api/google/usa/callback', async (req, res) => {
-  try {
-    const { code } = req.query;
-    if (!code) return res.status(400).send('Missing authorization code.');
-    const oauth2 = makeUsaOAuthClient();
-    const { tokens } = await oauth2.getToken(code);
-    oauth2.setCredentials(tokens);
-
-    let email = '';
-    try {
-      const oauth2api = google.oauth2({ version: 'v2', auth: oauth2 });
-      const info = await oauth2api.userinfo.get();
-      email = info.data.email || '';
-    } catch (_) { }
-
-    const connData = {
-      refreshToken: tokens.refresh_token,
-      accessToken: tokens.access_token,
-      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      connectedEmail: email,
-      scopes: ['https://www.googleapis.com/auth/apps.order'],
-      name: 'USA Reseller (Voice)',
-      active: true
-    };
-    await dbSaveGoogleConnection('usa', connData);
-
-    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px">
-      <h2>✅ USA reseller connected (Voice)</h2>
-      <p>Connected as <b>${email || 'your USA reseller account'}</b>.</p>
-      <p>You can close this tab and return to your portal.</p>
-      </body></html>`);
-  } catch (e) {
-    res.status(500).send('USA connection failed: ' + e.message);
-  }
-});
-
 // Status: is the reseller Google account connected?
 app.get('/api/google/status', authenticateCustomer, async (req, res) => {
   try {
     const pk = await dbGetGoogleConnection('pk');
-    const usa = await dbGetGoogleConnection('usa');
     res.json({
       connected: !!(pk && pk.refreshToken && pk.active) || !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
       email: pk?.connectedEmail || null,
-      usa: {
-        connected: !!(usa && usa.refreshToken && usa.active),
-        email: usa?.connectedEmail || null,
-      },
     });
   } catch (e) {
     res.status(500).json({ connected: false });
   }
 });
 
-// Service-account auth for the USA reseller (domain-wide delegation) — mirrors PK.
-// Uses GOOGLE_SERVICE_ACCOUNT_JSON_USA + RESELLER_ADMIN_EMAIL_USA. This is the method
-// that can create users in customer domains (which OAuth cannot).
-async function getUsaServiceAccountAuth() {
-  if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON_USA) return null;
-  let creds;
-  try {
-    creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON_USA);
-  } catch (e) {
-    console.error('GOOGLE_SERVICE_ACCOUNT_JSON_USA is not valid JSON:', e.message);
-    return null;
-  }
-  // Impersonate the USA reseller admin directly (env override or known admin). Do NOT fall
-  // back to the OAuth-connected email — if that email is not a reseller admin, every
-  // reseller call fails with 403 and lookups appear as "not found".
-  const subject = process.env.RESELLER_ADMIN_EMAIL_USA || 'admin@artisandrywallaz.com';
-  return new google.auth.JWT({
-    email: creds.client_email,
-    key: creds.private_key,
-    scopes: PROVISION_SCOPES,
-    subject, // impersonate the USA reseller admin
-  });
-}
-
-// Auth client for the USA reseller.
-// Prefers the USA service account (needed for user creation + full provisioning);
-// falls back to the OAuth refresh token (Voice-only, can't create users).
+// Helper for backwards compatibility: all reseller auth goes through default reseller
 async function getUsaAuth() {
-  const sa = await getUsaServiceAccountAuth();
-  if (sa) {
-    sa.resellerAccount = 'usa';
-    sa.isServiceAccount = true;
-    return sa;
-  }
-  const conn = await dbGetGoogleConnection('usa');
-  if (!conn || !conn.refreshToken) throw new Error('USA reseller not connected. Add GOOGLE_SERVICE_ACCOUNT_JSON_USA (recommended) or connect via OAuth.');
-  const oauth2 = makeUsaOAuthClient();
-  oauth2.setCredentials({ refresh_token: conn.refreshToken });
-  oauth2.resellerAccount = 'usa';
-  oauth2.isServiceAccount = false;
-  return oauth2;
+  return await getResellerAuth();
 }
 
 // Full scopes needed for end-to-end provisioning (customer + admin user + verification)
@@ -14093,20 +13974,10 @@ async function provisionWorkspaceOrder(order) {
   const planDoc = await Plan.findOne({ planId: order.plan?.id });
   if (!planDoc || !planDoc.skuId) throw new Error('Plan is missing a Google SKU.');
 
-  // Decide which reseller account fulfills this order (admin-controlled).
-  // Priority: the order's own account if set; else the admin's enabled account (USA if on, else PK).
-  let account = order.account;
-  if (!account) {
-    const os = await OrderSettings.findOne({ singleton: 'main' });
-    if (os && os.usaOrdersEnabled && !os.pkOrdersEnabled) account = 'usa';
-    else if (os && os.pkOrdersEnabled) account = 'pk';
-    else if (os && os.usaOrdersEnabled) account = 'usa';
-    else account = 'pk'; // safe default
-  }
-  const auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth();
+  const account = 'pk';
+  const auth = await getResellerAuth();
   const reseller = google.reseller({ version: 'v1', auth });
-  // Remember which account handled it (for billing + display)
-  try { order.account = account; await order.save(); } catch (_) { }
+  try { order.account = 'pk'; await order.save(); } catch (_) { }
   const org = order.organization || {};
   const contact = order.contact || {};
   const domain = (org.domain || '').toLowerCase();
@@ -15231,9 +15102,9 @@ app.post('/api/admin/subscriptions/cancel-domains', authenticateCustomer, requir
 // Live dashboard stats from Google
 app.get('/api/admin/google/dashboard', authenticateCustomer, async (req, res) => {
   try {
-    const accountStats = async (account) => {
+    const accountStats = async () => {
       let auth;
-      try { auth = account === 'usa' ? await getUsaAuth() : await getResellerAuth(); }
+      try { auth = await getResellerAuth(); }
       catch (e) { return { error: e.message }; }
       const reseller = google.reseller({ version: 'v1', auth });
       let subs = [];
@@ -15258,24 +15129,14 @@ app.get('/api/admin/google/dashboard', authenticateCustomer, async (req, res) =>
       };
     };
 
-    const [pk, usa] = await Promise.all([accountStats('pk'), accountStats('usa')]);
-    // Combined totals (for the top summary)
-    const sum = (a, b, k) => (a && !a.error ? a[k] : 0) + (b && !b.error ? b[k] : 0);
+    const pk = await accountStats();
     res.json({
-      pk, usa,
-      combined: {
-        totalCustomers: sum(pk, usa, 'totalCustomers'),
-        totalSubscriptions: sum(pk, usa, 'totalSubscriptions'),
-        activeSubscriptions: sum(pk, usa, 'activeSubscriptions'),
-        suspendedSubscriptions: sum(pk, usa, 'suspendedSubscriptions'),
-        totalSeats: sum(pk, usa, 'totalSeats'),
-      },
-      // Back-compat top-level (used by older UI)
-      totalCustomers: sum(pk, usa, 'totalCustomers'),
-      totalSubscriptions: sum(pk, usa, 'totalSubscriptions'),
-      activeSubscriptions: sum(pk, usa, 'activeSubscriptions'),
-      suspendedSubscriptions: sum(pk, usa, 'suspendedSubscriptions'),
-      totalSeats: sum(pk, usa, 'totalSeats'),
+      pk,
+      totalCustomers: pk && !pk.error ? pk.totalCustomers : 0,
+      totalSubscriptions: pk && !pk.error ? pk.totalSubscriptions : 0,
+      activeSubscriptions: pk && !pk.error ? pk.activeSubscriptions : 0,
+      suspendedSubscriptions: pk && !pk.error ? pk.suspendedSubscriptions : 0,
+      totalSeats: pk && !pk.error ? pk.totalSeats : 0,
     });
   } catch (e) {
     const msg = e?.errors?.[0]?.message || e?.message || 'Could not fetch dashboard data from Google';
@@ -15407,7 +15268,7 @@ async function runDailyBillingTasks() {
   // Each step is isolated: a transient Google Reseller error on ONE account (e.g.
   // "Your reseller access has been disabled temporarily") must not abort the other
   // account's sync or — critically — the billing/renewal check itself.
-  for (const acct of ['pk', 'usa']) {
+  for (const acct of ['pk']) {
     try {
       const r = await syncSubscriptionsForBilling(acct);
       if (r?.error) console.warn(`Daily billing: ${acct.toUpperCase()} sync skipped — ${r.error}`);
@@ -15415,7 +15276,6 @@ async function runDailyBillingTasks() {
     } catch (e) {
       console.error(`Daily billing: ${acct.toUpperCase()} sync failed (continuing):`, e.message);
     }
-    await sleep(1000); // don't hit both accounts back-to-back
   }
   try {
     const subResults = await runSubscriptionBillingCheck();
