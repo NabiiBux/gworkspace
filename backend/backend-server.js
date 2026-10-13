@@ -22,6 +22,13 @@ const compression = require('compression');
 // found no matter where the app is launched from (PM2, systemd, a different cwd, etc.).
 dotenv.config({ path: require('path').join(__dirname, '.env') });
 
+const {
+  verifyWooCommerceOrder,
+  createWooCommerceCheckoutLink,
+  isWooCommerceConfigured,
+  WOOCOMMERCE_API_URL,
+} = require('./woocommerce');
+
 const app = express();
 
 // High-performance Gzip / Deflate response compression for all responses
@@ -758,9 +765,18 @@ const WorkspaceOrderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['draft', 'pending', 'domain_verification', 'provisioned', 'cancelled', 'test_paid'],
-      default: 'pending',
+      enum: ['draft', 'pending', 'pending_payment', 'paid', 'pending_verification', 'domain_verification', 'provisioned', 'cancelled', 'test_paid'],
+      default: 'pending_payment',
     },
+    paymentStatus: {
+      type: String,
+      enum: ['paid', 'pending_payment', 'failed', 'refunded'],
+      default: 'pending_payment',
+    },
+    wooOrderId: { type: String, index: true },
+    wooOrderVerifiedAt: Date,
+    paymentReminderSentAt: Date,
+    paymentCheckoutUrl: String,
     draftData: { type: mongoose.Schema.Types.Mixed }, // saved in-progress form for resume
     draftStep: { type: Number, default: 0 },          // which step the customer was on
     domainVerified: { type: Boolean, default: false },
@@ -1438,6 +1454,64 @@ async function sendWorkspaceActivationEmail(to, details) {
   `);
 
   await sendEmail(to, `🚀 Google Workspace Setup & DNS Instructions [Order #${wooOrder || orderNumber}]`, html);
+}
+
+// Payment reminder email for unverified or unpaid Workspace orders
+async function sendPaymentReminderEmail(to, details) {
+  if (!to) return;
+  const {
+    orderNumber,
+    domain,
+    planName,
+    seats = 1,
+    monthlyTotal,
+    paymentCheckoutUrl,
+    organizationName,
+  } = details;
+
+  const html = emailShell(`Complete Your Google Workspace Payment`, `
+    <div style="margin-bottom:20px">
+      <span style="background:#fef3c7;color:#b45309;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700">· Payment Pending</span>
+      <h2 style="margin:12px 0 6px;color:#0f172a">Action Required: Complete Payment to Activate Workspace</h2>
+      <p style="margin:0;color:#64748b;font-size:14px">Hello <strong>${organizationName || domain}</strong>, your Google Workspace setup for <strong>${domain}</strong> is reserved and waiting for payment verification.</p>
+    </div>
+
+    <!-- Order Summary Card -->
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-bottom:24px">
+      <h3 style="margin:0 0 14px;color:#1e293b;font-size:16px">📋 Order Summary</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <tr>
+          <td style="padding:6px 0;color:#64748b;width:140px">Order Number:</td>
+          <td style="padding:6px 0;font-weight:700;color:#0f172a;font-family:monospace">${orderNumber}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0;color:#64748b">Primary Domain:</td>
+          <td style="padding:6px 0;font-weight:700;color:#0f172a">${domain}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0;color:#64748b">Selected Plan:</td>
+          <td style="padding:6px 0;color:#0f172a">${planName || 'Google Workspace'} (${seats} seat${seats > 1 ? 's' : ''})</td>
+        </tr>
+        ${monthlyTotal ? `
+        <tr>
+          <td style="padding:6px 0;color:#64748b">Total Amount:</td>
+          <td style="padding:6px 0;font-weight:700;color:#4f46e5">$${Number(monthlyTotal).toFixed(2)}</td>
+        </tr>` : ''}
+      </table>
+    </div>
+
+    <div style="text-align:center;margin-top:24px;margin-bottom:20px">
+      <a href="${paymentCheckoutUrl || 'https://gnbmentor.com/checkout'}" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;box-shadow:0 4px 12px rgba(79,70,229,0.3)">
+        Complete Secure Payment Now →
+      </a>
+    </div>
+
+    <p style="margin:16px 0 0;font-size:13px;color:#64748b;text-align:center">
+      Once payment is received, your Google Workspace mailboxes and admin console will be automatically activated and instructions will be sent to your inbox.
+    </p>
+  `);
+
+  await sendEmail(to, `Action Required: Complete Payment for Google Workspace [${orderNumber}]`, html);
 }
 
 // Simple email format validation (server-side)
@@ -13033,15 +13107,70 @@ app.post('/api/onboarding/activate', async (req, res) => {
     ];
     const spfRecord = 'v=spf1 include:_spf.google.com ~all';
 
-    // 6. Create WorkspaceOrder in database
+    // 6. WooCommerce Payment Verification & Single-Use Enforcement
+    let isPaid = false;
+    let wooVerification = null;
+    let paymentCheckoutUrl = '';
+
+    if (wooOrderId) {
+      // Check if this WooCommerce order has already been fulfilled for another domain
+      if (mongoose.connection.readyState === 1) {
+        try {
+          const existingOrder = await WorkspaceOrder.findOne({
+            wooOrderId,
+            status: { $in: ['paid', 'provisioned', 'domain_verification', 'active'] },
+          });
+          if (existingOrder && (existingOrder.organization?.domain || '').toLowerCase() !== cleanDomain.toLowerCase()) {
+            return res.status(409).json({
+              error: `WooCommerce Order #${wooOrderId} has already been fulfilled for domain "${existingOrder.organization?.domain}". Each order can only be redeemed once.`,
+            });
+          }
+        } catch (_) {}
+      }
+
+      // Verify order with WooCommerce REST API
+      wooVerification = await verifyWooCommerceOrder({
+        orderId: wooOrderId,
+        email: cleanRecoveryEmail,
+        domain: cleanDomain,
+      });
+
+      if (wooVerification.verified) {
+        isPaid = true;
+      } else {
+        paymentCheckoutUrl = wooVerification.paymentUrl || createWooCommerceCheckoutLink({
+          planId: matchedPlan.id,
+          domain: cleanDomain,
+          seats,
+          orderId: wooOrderId,
+          email: cleanRecoveryEmail,
+        });
+      }
+    } else {
+      // Direct / domain search customer without existing WooCommerce order
+      paymentCheckoutUrl = createWooCommerceCheckoutLink({
+        planId: matchedPlan.id,
+        domain: cleanDomain,
+        seats,
+        email: cleanRecoveryEmail,
+      });
+    }
+
+    // 7. Create WorkspaceOrder in database
     const orderNumber = wooOrderId ? `WC-${wooOrderId}` : `WS-${Date.now()}`;
+    const orderStatus = isPaid ? 'paid' : 'pending_payment';
+    const paymentStatus = isPaid ? 'paid' : 'pending_payment';
     let orderDoc = null;
     const orderPayload = {
       customerId: customer._id,
       orderNumber,
+      wooOrderId: wooOrderId || undefined,
+      wooOrderVerifiedAt: isPaid ? new Date() : undefined,
+      paymentStatus,
+      paymentCheckoutUrl: paymentCheckoutUrl || undefined,
       type: 'workspace',
       planType,
-      account: account || '', // auto / pk / usa
+      account: account || 'pk',
       plan: {
         id: matchedPlan.planId || matchedPlan.id || 'business-starter',
         name: matchedPlan.name,
@@ -13049,7 +13178,7 @@ app.post('/api/onboarding/activate', async (req, res) => {
       },
       seats,
       monthlyTotal: (matchedPlan.monthlyPrice || 7.20) * seats,
-      status: 'paid', // Mark as paid from WooCommerce payment
+      status: orderStatus,
       domainVerified: false,
       txtRecord,
       organization: {
@@ -13074,7 +13203,9 @@ app.post('/api/onboarding/activate', async (req, res) => {
         alternateEmail: cleanRecoveryEmail,
         phone: cleanPhone,
       },
-      notes: `WooCommerce Order #${wooOrderId} via gnbmentor.com (status: ${body.status || 'paid'})`,
+      notes: isPaid
+        ? `WooCommerce Order #${wooOrderId} verified paid (status: ${wooVerification?.status || 'processing'})`
+        : `Pending payment via ${paymentCheckoutUrl || 'WooCommerce'}`,
     };
 
     if (mongoose.connection.readyState === 1) {
@@ -13088,7 +13219,42 @@ app.post('/api/onboarding/activate', async (req, res) => {
       orderDoc = { _id: new mongoose.Types.ObjectId(), ...orderPayload };
     }
 
-    // 7. Provision into Google immediately (no payment required)
+    // 8. If UNPAID: Send reminder email and return payment required response (DO NOT PROVISION GOOGLE)
+    if (!isPaid) {
+      sendPaymentReminderEmail(cleanRecoveryEmail, {
+        orderNumber: orderDoc.orderNumber,
+        domain: cleanDomain,
+        planName: matchedPlan.name,
+        seats,
+        monthlyTotal: (matchedPlan.monthlyPrice || 7.20) * seats,
+        paymentCheckoutUrl,
+        organizationName: finalOrgName,
+      }).catch((err) => console.error('[sendPaymentReminderEmail error]:', err.message));
+
+      const token = generateToken(customer._id, customer.businessEmail, customer.role);
+
+      return res.status(200).json({
+        success: false,
+        pendingPayment: true,
+        orderId: orderDoc._id,
+        orderNumber: orderDoc.orderNumber,
+        domain: cleanDomain,
+        plan: matchedPlan,
+        seats,
+        monthlyTotal: (matchedPlan.monthlyPrice || 7.20) * seats,
+        paymentCheckoutUrl,
+        message: wooVerification?.message || 'Payment is required before Google Workspace can be provisioned. A payment link has been sent to your email.',
+        customer: {
+          id: customer._id,
+          businessEmail: customer.businessEmail,
+          companyName: customer.companyName,
+          domain: customer.domain,
+        },
+        token,
+      });
+    }
+
+    // 9. If PAID: Provision into Google immediately
     let provisionMessage = 'Workspace created in Google immediately.';
     let provisionNote = null;
     let provisionSuccess = false;
@@ -13122,7 +13288,7 @@ app.post('/api/onboarding/activate', async (req, res) => {
       }
     }
 
-    // 8. Send Activation & DNS Instructions Email (non-blocking)
+    // 10. Send Activation & DNS Instructions Email (non-blocking)
     sendWorkspaceActivationEmail(cleanRecoveryEmail, {
       orderNumber: orderDoc.orderNumber,
       wooOrder: wooOrderId,
@@ -13135,7 +13301,7 @@ app.post('/api/onboarding/activate', async (req, res) => {
       organizationName: finalOrgName,
     }).catch((err) => console.error('[sendWorkspaceActivationEmail error]:', err.message));
 
-    // 9. Generate auth token for seamless portal login
+    // 11. Generate auth token for seamless portal login
     const token = generateToken(customer._id, customer.businessEmail, customer.role);
 
     return res.status(201).json({
@@ -13168,6 +13334,95 @@ app.post('/api/onboarding/activate', async (req, res) => {
   } catch (error) {
     console.error('Onboarding activate error:', error);
     res.status(500).json({ error: error.message || 'Could not complete onboarding activation.' });
+  }
+});
+
+// Endpoint for frontend to check WooCommerce order status and fulfillment state
+app.get('/api/onboarding/verify-order/:orderId', async (req, res) => {
+  try {
+    const rawId = req.params.orderId;
+    const cleanId = String(rawId || '').trim().replace(/^WC-/, '');
+    const email = String(req.query.email || '').trim().toLowerCase();
+
+    // Check if order was already fulfilled in our database
+    let alreadyFulfilled = false;
+    let fulfilledDomain = '';
+    if (mongoose.connection.readyState === 1) {
+      const existing = await WorkspaceOrder.findOne({
+        wooOrderId: cleanId,
+        status: { $in: ['paid', 'provisioned', 'domain_verification', 'active'] },
+      });
+      if (existing) {
+        alreadyFulfilled = true;
+        fulfilledDomain = existing.organization?.domain || existing.domain || '';
+      }
+    }
+
+    const verification = await verifyWooCommerceOrder({ orderId: cleanId, email });
+    res.json({
+      ...verification,
+      alreadyFulfilled,
+      fulfilledDomain,
+    });
+  } catch (e) {
+    res.status(500).json({ verified: false, error: e.message });
+  }
+});
+
+// WooCommerce Webhook receiver (order.updated / order.completed)
+app.post('/api/woocommerce/webhook', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const orderId = String(body.id || body.order_id || body.orderId || '').trim();
+    const orderStatus = (body.status || '').toLowerCase();
+
+    console.log(`[WooCommerce Webhook] Received event for Order #${orderId}, status: ${orderStatus}`);
+
+    // If order is completed or processing, check for matching pending WorkspaceOrder
+    if ((orderStatus === 'completed' || orderStatus === 'processing') && orderId && mongoose.connection.readyState === 1) {
+      const pendingOrder = await WorkspaceOrder.findOne({
+        wooOrderId: orderId,
+        status: 'pending_payment',
+      });
+
+      if (pendingOrder) {
+        console.log(`[WooCommerce Webhook] Transitioning WorkspaceOrder ${pendingOrder.orderNumber} for domain ${pendingOrder.organization?.domain} to PAID...`);
+        pendingOrder.status = 'paid';
+        pendingOrder.paymentStatus = 'paid';
+        pendingOrder.wooOrderVerifiedAt = new Date();
+        pendingOrder.notes = (pendingOrder.notes || '') + ` | Paid via webhook (status: ${orderStatus})`;
+        await pendingOrder.save();
+
+        // Trigger Google provisioning
+        try {
+          const provRes = await provisionWorkspaceOrder(pendingOrder);
+          console.log(`[WooCommerce Webhook] Provisioned in Google:`, provRes?.message || 'Success');
+
+          // Send activation email
+          const org = pendingOrder.organization || {};
+          const contact = pendingOrder.contact || {};
+          sendWorkspaceActivationEmail(contact.alternateEmail || contact.email, {
+            orderNumber: pendingOrder.orderNumber,
+            wooOrder: orderId,
+            domain: org.domain,
+            adminEmail: contact.email,
+            tempPassword: org.tempPassword,
+            txtRecord: pendingOrder.txtRecord,
+            organizationName: org.name,
+          }).catch(err => console.error('[Webhook Activation Email Err]:', err.message));
+        } catch (provErr) {
+          console.warn('[WooCommerce Webhook] Provisioning notice:', provErr.message);
+          pendingOrder.status = 'pending_verification';
+          pendingOrder.provisionNote = provErr.message;
+          await pendingOrder.save();
+        }
+      }
+    }
+
+    res.json({ received: true });
+  } catch (err) {
+    console.error('[WooCommerce Webhook Error]:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

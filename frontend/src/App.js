@@ -324,7 +324,7 @@ const getCountryCode = (name) => {
 const ALLOWED_COUNTRIES_DEFAULT = ['us'];
 const AddressAutocomplete = ({ onPick, onTextChange, countries = ALLOWED_COUNTRIES_DEFAULT, initialValue = '' }) => {
   const [mapsKey, setMapsKey] = useState(MAPS_KEY);
-  const [query, setQuery] = useState(initialValue);
+  const [query, setQuery] = useState(initialValue || '');
   const [suggestions, setSuggestions] = useState([]);
   const [open, setOpen] = useState(false);
   const libRef = useRef(null);
@@ -332,21 +332,25 @@ const AddressAutocomplete = ({ onPick, onTextChange, countries = ALLOWED_COUNTRI
   const debounceRef = useRef(null);
   const boxRef = useRef(null);
 
+  // Keep query in sync when initialValue changes
+  useEffect(() => {
+    if (initialValue !== undefined && initialValue !== query) {
+      setQuery(initialValue || '');
+    }
+  }, [initialValue]);
+
   // Resolve the browser Maps key (build-time var, else fetched from the backend).
   useEffect(() => {
     if (mapsKey) return;
     let alive = true;
-    getMapsKey().then((k) => { if (alive) setMapsKey(k); });
+    getMapsKey().then((k) => { if (alive && k) setMapsKey(k); });
     return () => { alive = false; };
   }, [mapsKey]);
 
-  // Load the Places (New) library and wait until AutocompleteSuggestion actually
-  // exists. Try the direct namespace (libraries=places populates it) and
-  // importLibrary, polling for up to ~12s so a slow load can't silently no-op.
+  // Load the Places (New) library when key is available
   useEffect(() => {
     if (!mapsKey || libRef.current) return;
     let alive = true;
-    // Make sure the Maps script is on the page.
     if (!document.getElementById('gmaps-places-script') && !window.google?.maps) {
       const s = document.createElement('script');
       s.id = 'gmaps-places-script';
@@ -359,7 +363,6 @@ const AddressAutocomplete = ({ onPick, onTextChange, countries = ALLOWED_COUNTRI
       if (!alive || libRef.current) return;
       if (window.google?.maps?.places?.AutocompleteSuggestion) {
         libRef.current = window.google.maps.places;
-        console.log('[addr] Places (New) ready via namespace');
         return;
       }
       if (window.google?.maps?.importLibrary) {
@@ -367,13 +370,11 @@ const AddressAutocomplete = ({ onPick, onTextChange, countries = ALLOWED_COUNTRI
           const lib = await window.google.maps.importLibrary('places');
           if (alive && lib?.AutocompleteSuggestion) {
             libRef.current = lib;
-            console.log('[addr] Places (New) ready via importLibrary');
             return;
           }
-        } catch (e) { console.error('[addr] importLibrary(places) failed:', e?.message || e); }
+        } catch (_) {}
       }
-      if (tries++ < 60) setTimeout(resolve, 200);
-      else console.error('[addr] Places (New) AutocompleteSuggestion never became available — check that Places API (New) + Maps JavaScript API are enabled for this key.');
+      if (tries++ < 50) setTimeout(resolve, 200);
     };
     resolve();
     return () => { alive = false; };
@@ -386,8 +387,6 @@ const AddressAutocomplete = ({ onPick, onTextChange, countries = ALLOWED_COUNTRI
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
 
-  // One session token per lookup (typing + selection) — Google bills it as a
-  // single session and it keeps requests grouped.
   const ensureToken = () => {
     const lib = libRef.current;
     if (!tokenRef.current && lib?.AutocompleteSessionToken) tokenRef.current = new lib.AutocompleteSessionToken();
@@ -395,36 +394,36 @@ const AddressAutocomplete = ({ onPick, onTextChange, countries = ALLOWED_COUNTRI
   };
 
   const runSearch = async (text) => {
-    if (text.length < 3) { setSuggestions([]); return; }
+    if (!text || text.length < 3) { setSuggestions([]); return; }
     const lib = libRef.current;
     if (!lib?.AutocompleteSuggestion?.fetchAutocompleteSuggestions) {
-      // Library not loaded yet — keep retrying so the search isn't silently dropped.
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => runSearch(text), 400);
       return;
     }
-    // Exactly the proven-working request shape ({ input } + a session token).
     const req = { input: text };
+    const countryList = Array.isArray(countries) ? countries.filter(Boolean) : (countries ? [countries] : []);
+    if (countryList.length > 0) {
+      req.includedRegionCodes = countryList.map(c => String(c).toLowerCase());
+    }
     const tok = ensureToken();
     if (tok) req.sessionToken = tok;
     try {
       const { suggestions: sugs } = await lib.AutocompleteSuggestion.fetchAutocompleteSuggestions(req);
       setSuggestions((sugs || []).filter((s) => s.placePrediction));
       setOpen(true);
-    } catch (e) {
-      console.error('[addr] Autocomplete fetch error:', e?.message || e);
+    } catch (_) {
       setSuggestions([]);
     }
   };
 
-  // Debounced: only call Google after the user pauses (350ms) and has typed >=3 chars.
-  // onTextChange keeps the parent form in sync with what's typed, so a manually
-  // entered address still counts (suggestions are an aid, not a requirement).
   const onInput = (v) => {
     setQuery(v);
     if (onTextChange) onTextChange(v);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => runSearch(v.trim()), 350);
+    if (mapsKey) {
+      debounceRef.current = setTimeout(() => runSearch(v.trim()), 350);
+    }
   };
 
   const choose = async (sug) => {
@@ -438,24 +437,29 @@ const AddressAutocomplete = ({ onPick, onTextChange, countries = ALLOWED_COUNTRI
       const city = get('locality')?.longText || get('sublocality')?.longText || get('postal_town')?.longText || '';
       const state = get('administrative_area_level_1')?.shortText || '';
       const zip = get('postal_code')?.longText || '';
-      const street = `${streetNumber} ${route}`.trim();
-      onPick({ street, city, state, zip });
-      setQuery(street || place.formattedAddress || '');
+      const street = `${streetNumber} ${route}`.trim() || place.formattedAddress || '';
+      if (onPick) onPick({ street, city, state, zip });
+      if (onTextChange) onTextChange(street);
+      setQuery(street);
     } catch (e) {
       console.error('Place select error:', e);
     } finally {
       setSuggestions([]); setOpen(false);
-      tokenRef.current = null; // end the billing session; next search starts a new one
+      tokenRef.current = null;
     }
   };
 
-  if (!mapsKey) return null;
+  // Resilient input container: always displays, works in both autocompleted and manual modes
   return (
     <div ref={boxRef} style={{ position: 'relative', width: '100%' }}>
-      <input value={query} onChange={(e) => onInput(e.target.value)}
-        onFocus={() => suggestions.length && setOpen(true)}
-        placeholder="Start typing your address…" autoComplete="off"
-        style={{ width: '100%', height: 44, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', fontSize: 14, boxSizing: 'border-box' }} />
+      <input
+        value={query}
+        onChange={(e) => onInput(e.target.value)}
+        onFocus={() => suggestions.length > 0 && setOpen(true)}
+        placeholder="Street address (e.g. 123 Main St)"
+        autoComplete="address-line1"
+        style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', fontSize: 14, boxSizing: 'border-box', background: '#ffffff', color: '#111827' }}
+      />
       {open && suggestions.length > 0 && (
         <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: '#fff', border: '1px solid #d8dbe6', borderRadius: 8, zIndex: 60, maxHeight: 260, overflowY: 'auto', boxShadow: '0 8px 22px rgba(0,0,0,0.14)' }}>
           {suggestions.map((s, i) => {
@@ -463,8 +467,8 @@ const AddressAutocomplete = ({ onPick, onTextChange, countries = ALLOWED_COUNTRI
             const label = pp?.text?.text || pp?.text || '';
             return (
               <div key={pp?.placeId || i} onMouseDown={(e) => { e.preventDefault(); choose(s); }}
-                style={{ padding: '10px 12px', cursor: 'pointer', fontSize: 14, borderBottom: i < suggestions.length - 1 ? '1px solid #f1f2f7' : 'none' }}>
-                {label}
+                style={{ padding: '10px 12px', cursor: 'pointer', fontSize: 13.5, borderBottom: i < suggestions.length - 1 ? '1px solid #f1f2f7' : 'none' }}>
+                📍 {label}
               </div>
             );
           })}
@@ -13262,7 +13266,55 @@ function WooCommerceOnboardingFlow() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [successData, setSuccessData] = useState(null);
+  const [pendingPaymentData, setPendingPaymentData] = useState(null);
   const [copiedKey, setCopiedKey] = useState('');
+
+  const [orderVerify, setOrderVerify] = useState({
+    checked: !qOrder,
+    loading: !!qOrder,
+    verified: false,
+    status: '',
+    total: '',
+    currency: 'USD',
+    alreadyFulfilled: false,
+    fulfilledDomain: '',
+    paymentUrl: '',
+    message: '',
+  });
+
+  // Check WooCommerce order verification on mount if order ID is present
+  useEffect(() => {
+    if (!qOrder) return;
+    let active = true;
+    axios.get(`${API_URL}/onboarding/verify-order/${encodeURIComponent(qOrder)}?email=${encodeURIComponent(qEmail)}`)
+      .then(res => {
+        if (!active) return;
+        const d = res.data || {};
+        setOrderVerify({
+          checked: true,
+          loading: false,
+          verified: !!d.verified,
+          status: d.status || '',
+          total: d.total || '',
+          currency: d.currency || 'USD',
+          alreadyFulfilled: !!d.alreadyFulfilled,
+          fulfilledDomain: d.fulfilledDomain || '',
+          paymentUrl: d.paymentUrl || '',
+          message: d.message || '',
+        });
+      })
+      .catch(err => {
+        if (!active) return;
+        setOrderVerify({
+          checked: true,
+          loading: false,
+          verified: false,
+          status: 'error',
+          message: err?.response?.data?.error || 'Could not verify order with store.',
+        });
+      });
+    return () => { active = false; };
+  }, [qOrder, qEmail]);
 
   // Domain search state for right sidebar
   const [dq, setDq] = useState('');
@@ -13443,8 +13495,13 @@ function WooCommerceOnboardingFlow() {
         if (res.data.token && res.data.customer) {
           login(res.data.customer.businessEmail, res.data.token, res.data.customer);
         }
+      } else if (res.data?.pendingPayment) {
+        setPendingPaymentData(res.data);
+        if (res.data.token && res.data.customer) {
+          login(res.data.customer.businessEmail, res.data.token, res.data.customer);
+        }
       } else {
-        setMsg('✗ ' + (res.data?.error || 'Provisioning failed.'));
+        setMsg('✗ ' + (res.data?.error || res.data?.message || 'Provisioning failed.'));
       }
     } catch (e) {
       setMsg('✗ ' + (e?.response?.data?.error || e.message || 'Provisioning failed.'));
@@ -13473,9 +13530,25 @@ function WooCommerceOnboardingFlow() {
             </div>
           </div>
           {qOrder && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '6px 14px', borderRadius: 999 }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981' }} />
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#065f46' }}>WooCommerce Order #{qOrder} • Payment Verified</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {orderVerify.loading ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', border: '1px solid #e2e8f0', padding: '6px 14px', borderRadius: 999, fontSize: 13, color: '#64748b' }}>
+                  <span>⏳ Verifying Order #{qOrder}…</span>
+                </div>
+              ) : orderVerify.alreadyFulfilled ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', padding: '6px 14px', borderRadius: 999, fontSize: 13, color: '#991b1b', fontWeight: 700 }}>
+                  <span>⚠️ Order #{qOrder} already redeemed for {orderVerify.fulfilledDomain}</span>
+                </div>
+              ) : orderVerify.verified ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '6px 14px', borderRadius: 999, fontSize: 13, color: '#065f46', fontWeight: 700 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981' }} />
+                  <span>· WooCommerce Order #{qOrder} Verified Paid</span>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fef3c7', border: '1px solid #fde68a', padding: '6px 14px', borderRadius: 999, fontSize: 13, color: '#92400e', fontWeight: 700 }}>
+                  <span>· WooCommerce Order #{qOrder} Payment Required</span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -13618,14 +13691,77 @@ function WooCommerceOnboardingFlow() {
               </button>
             </div>
           </div>
+        ) : pendingPaymentData ? (
+          /* PENDING PAYMENT STATE (UNPAID DOMAIN SEARCH / DIRECT ORDERS) */
+          <div style={{ background: '#ffffff', borderRadius: 16, padding: '36px 32px', boxShadow: '0 10px 30px -4px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0' }}>
+            <div style={{ textAlign: 'center', marginBottom: 28 }}>
+              <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#fffbeb', color: '#b45309', fontSize: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', border: '2px solid #fde68a' }}>💳</div>
+              <div style={{ display: 'inline-block', background: '#fef3c7', color: '#92400e', padding: '4px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>· Payment Required</div>
+              <h2 style={{ margin: '0 0 8px', fontSize: 24, color: '#0f172a', fontWeight: 800 }}>Complete Payment to Activate Your Workspace</h2>
+              <p style={{ margin: 0, color: '#64748b', fontSize: 15, maxWidth: 620, margin: '0 auto' }}>
+                Your Google Workspace configuration for <strong>{pendingPaymentData.domain}</strong> has been reserved under order <strong>#{pendingPaymentData.orderNumber}</strong>. Payment is required before Google mailboxes are provisioned.
+              </p>
+            </div>
+
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: 22, maxWidth: 640, margin: '0 auto 24px' }}>
+              <h3 style={{ margin: '0 0 14px', fontSize: 16, fontWeight: 700, color: '#1e293b' }}>Order Details</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f1f5f9', fontSize: 14 }}>
+                <span style={{ color: '#64748b' }}>Primary Domain:</span>
+                <span style={{ fontWeight: 700, color: '#0f172a' }}>{pendingPaymentData.domain}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f1f5f9', fontSize: 14 }}>
+                <span style={{ color: '#64748b' }}>Selected Plan:</span>
+                <span style={{ fontWeight: 600, color: '#0f172a' }}>{pendingPaymentData.plan?.name || 'Google Workspace'} ({pendingPaymentData.seats} seat{pendingPaymentData.seats > 1 ? 's' : ''})</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontSize: 15 }}>
+                <span style={{ color: '#64748b' }}>Total Due:</span>
+                <span style={{ fontWeight: 800, color: '#4f46e5' }}>${Number(pendingPaymentData.monthlyTotal || 28).toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div style={{ textAlign: 'center', marginBottom: 20 }}>
+              <a
+                href={pendingPaymentData.paymentCheckoutUrl || 'https://gnbmentor.com/checkout'}
+                style={{ display: 'inline-block', background: '#4f46e5', color: '#ffffff', padding: '14px 36px', borderRadius: 10, fontSize: 16, fontWeight: 700, textDecoration: 'none', boxShadow: '0 4px 14px rgba(79,70,229,0.3)' }}
+              >
+                Proceed to Secure Payment on gnbmentor.com →
+              </a>
+            </div>
+
+            <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 10, padding: 16, maxWidth: 640, margin: '0 auto', fontSize: 13, color: '#0369a1', lineHeight: 1.5, textAlign: 'center' }}>
+              ℹ️ A payment invoice and reminder link have also been sent to <strong>{form.alternateEmail}</strong>. Once payment is confirmed, your Google Workspace will be automatically provisioned into Google and login instructions will be delivered to your inbox.
+            </div>
+
+            <div style={{ textAlign: 'center', marginTop: 24 }}>
+              <button
+                type="button"
+                onClick={() => setPendingPaymentData(null)}
+                style={{ background: 'transparent', border: 'none', color: '#64748b', fontSize: 13, textDecoration: 'underline', cursor: 'pointer' }}
+              >
+                ← Back to edit configuration
+              </button>
+            </div>
+          </div>
         ) : (
           /* MAIN TWO-COLUMN LAYOUT: WORKSPACE CREATION FORM + DOMAIN SEARCH PANEL */
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 360px', gap: 24, alignItems: 'start' }} className="onboarding-grid">
             
-            {/* LEFT COLUMN: ✨ Create Google Workspace (no payment) Form */}
+            {/* LEFT COLUMN: Workspace Order / Activation Form */}
             <div className="section" style={{ minWidth: 0 }}>
-              <h2 style={{ margin: '0 0 6px', fontSize: 24, fontWeight: 800, color: '#111827' }}>✨ Create Google Workspace (no payment)</h2>
-              <p style={{ color: '#5b6075', marginTop: 0, marginBottom: 14, fontSize: 14 }}>Fill the form and submit — the Workspace is created in Google immediately. No checkout required.</p>
+              <h2 style={{ margin: '0 0 6px', fontSize: 24, fontWeight: 800, color: '#111827' }}>
+                {orderVerify.verified ? `Activate Google Workspace for ${form.domain}` : 'Configure Google Workspace'}
+              </h2>
+              <p style={{ color: '#5b6075', marginTop: 0, marginBottom: 14, fontSize: 14 }}>
+                {orderVerify.verified
+                  ? 'Payment confirmed via WooCommerce. Complete Super Admin setup to provision mailboxes in Google.'
+                  : 'Select your plan, domain, and administrator details. Complete checkout to provision your Google Workspace.'}
+              </p>
+
+              {orderVerify.alreadyFulfilled && (
+                <div style={{ padding: '12px 16px', borderRadius: 8, marginBottom: 16, fontSize: 14, background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}>
+                  ⚠️ <strong>Notice:</strong> WooCommerce Order #{qOrder} has already been fulfilled for <strong>{orderVerify.fulfilledDomain}</strong>. Each order can only be used once. To set up a new domain, please proceed to checkout below.
+                </div>
+              )}
 
               {msg && (
                 <div style={{ padding: '12px 16px', borderRadius: 8, marginBottom: 16, fontSize: 14, background: msg.startsWith('✓') ? '#dcfce7' : '#fde8e8', color: msg.startsWith('✓') ? '#166534' : '#b42318', border: msg.startsWith('✓') ? '1px solid #bbf7d0' : '1px solid #fecaca' }}>
@@ -13843,11 +13979,26 @@ function WooCommerceOnboardingFlow() {
                 <button
                   type="button"
                   onClick={submit}
-                  disabled={busy}
+                  disabled={busy || orderVerify.alreadyFulfilled}
                   className="btn btn-primary"
-                  style={{ marginTop: 20, width: '100%', height: 48, fontSize: 16, fontWeight: 800, borderRadius: 10 }}
+                  style={{
+                    marginTop: 20,
+                    width: '100%',
+                    height: 48,
+                    fontSize: 16,
+                    fontWeight: 800,
+                    borderRadius: 10,
+                    background: orderVerify.alreadyFulfilled ? '#94a3b8' : orderVerify.verified ? '#16a34a' : '#4f46e5',
+                    cursor: orderVerify.alreadyFulfilled ? 'not-allowed' : 'pointer',
+                  }}
                 >
-                  {busy ? 'Provisioning in Google…' : 'Submit & create Workspace'}
+                  {busy
+                    ? 'Processing…'
+                    : orderVerify.alreadyFulfilled
+                    ? 'Order Already Redeemed'
+                    : orderVerify.verified
+                    ? '✓ Submit & Activate Workspace'
+                    : '💳 Proceed to Secure Payment'}
                 </button>
               </div>
             </div>
