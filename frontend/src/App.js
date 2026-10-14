@@ -10,24 +10,7 @@ import './App.css';
 
 // API Config
 const API_URL = process.env.REACT_APP_API_URL || (window.location.origin + '/api');
-const MAPS_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '';
 const GOOGLE_SIGNIN_CLIENT_ID = process.env.REACT_APP_GOOGLE_SIGNIN_CLIENT_ID || '';
-
-// Effective Google Maps browser key. Prefer the build-time REACT_APP var; if it
-// was not baked in (e.g. VPS build with only a backend GOOGLE_MAPS_API_KEY),
-// fetch it from the backend at runtime. Memoized so all address forms share one
-// request and one loaded Maps script.
-let _mapsKeyPromise = null;
-function getMapsKey() {
-  if (MAPS_KEY) return Promise.resolve(MAPS_KEY);
-  if (!_mapsKeyPromise) {
-    _mapsKeyPromise = axios
-      .get(`${API_URL}/config/maps-key`)
-      .then((r) => r.data?.key || '')
-      .catch(() => '');
-  }
-  return _mapsKeyPromise;
-}
 
 // Crisp inline vector icons for payment methods (immune to missing system emoji fonts)
 export const CryptoIcon = ({ size = 15, color = 'currentColor', style = {} }) => (
@@ -319,101 +302,97 @@ const getCountryCode = (name) => {
   return found ? found[1] : undefined;
 };
 
-// Reusable Google Maps Places address autocomplete.
-// Renders an input; on selection, calls onPick({ street, city, state, zip }).
+// Standard US States (Abbreviation & Full Name)
+const US_STATES = [
+  ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'],
+  ['CO', 'Colorado'], ['CT', 'Connecticut'], ['DE', 'Delaware'], ['FL', 'Florida'], ['GA', 'Georgia'],
+  ['HI', 'Hawaii'], ['ID', 'Idaho'], ['IL', 'Illinois'], ['IN', 'Indiana'], ['IA', 'Iowa'],
+  ['KS', 'Kansas'], ['KY', 'Kentucky'], ['LA', 'Louisiana'], ['ME', 'Maine'], ['MD', 'Maryland'],
+  ['MA', 'Massachusetts'], ['MI', 'Michigan'], ['MN', 'Minnesota'], ['MS', 'Mississippi'], ['MO', 'Missouri'],
+  ['MT', 'Montana'], ['NE', 'Nebraska'], ['NV', 'Nevada'], ['NH', 'New Hampshire'], ['NJ', 'New Jersey'],
+  ['NM', 'New Mexico'], ['NY', 'New York'], ['NC', 'North Carolina'], ['ND', 'North Dakota'], ['OH', 'Ohio'],
+  ['OK', 'Oklahoma'], ['OR', 'Oregon'], ['PA', 'Pennsylvania'], ['RI', 'Rhode Island'], ['SC', 'South Carolina'],
+  ['SD', 'South Dakota'], ['TN', 'Tennessee'], ['TX', 'Texas'], ['UT', 'Utah'], ['VT', 'Vermont'],
+  ['VA', 'Virginia'], ['WA', 'Washington'], ['WV', 'West Virginia'], ['WI', 'Wisconsin'], ['WY', 'Wyoming'],
+  ['DC', 'District of Columbia'],
+];
+
+// Normalizes US state name or abbreviation to 2-letter uppercase code (e.g. 'California' -> 'CA')
+const normalizeUsState = (val) => {
+  if (!val) return '';
+  const clean = String(val).trim();
+  if (clean.length === 2) return clean.toUpperCase();
+  const lower = clean.toLowerCase();
+  const found = US_STATES.find(([abbr, name]) => name.toLowerCase() === lower || abbr.toLowerCase() === lower);
+  return found ? found[0] : clean;
+};
+
+// Resilient address autocomplete powered by backend geocoding (Open Geocoders Nominatim/Photon & Google Places proxy)
+// Works 100% out of the box without requiring client-side Google Maps script or API key.
+// Never pops up Google Maps errors, alert boxes, or blocks user form typing.
 const ALLOWED_COUNTRIES_DEFAULT = ['us'];
-const AddressAutocomplete = ({ onPick, onTextChange, countries = ALLOWED_COUNTRIES_DEFAULT, initialValue = '' }) => {
-  const [mapsKey, setMapsKey] = useState(MAPS_KEY);
+const AddressAutocomplete = ({
+  onPick,
+  onTextChange,
+  countries = ALLOWED_COUNTRIES_DEFAULT,
+  initialValue = '',
+  placeholder = 'Street address (e.g. 123 Main St)',
+  style = {},
+  inputStyle = {},
+  required = false,
+  disabled = false,
+}) => {
   const [query, setQuery] = useState(initialValue || '');
   const [suggestions, setSuggestions] = useState([]);
   const [open, setOpen] = useState(false);
-  const libRef = useRef(null);
-  const tokenRef = useRef(null);
+  const [loading, setLoading] = useState(false);
   const debounceRef = useRef(null);
   const boxRef = useRef(null);
 
-  // Keep query in sync when initialValue changes
+  // Keep query in sync when initialValue changes externally
   useEffect(() => {
     if (initialValue !== undefined && initialValue !== query) {
       setQuery(initialValue || '');
     }
   }, [initialValue]);
 
-  // Resolve the browser Maps key (build-time var, else fetched from the backend).
+  // Close dropdown on outside click
   useEffect(() => {
-    if (mapsKey) return;
-    let alive = true;
-    getMapsKey().then((k) => { if (alive && k) setMapsKey(k); });
-    return () => { alive = false; };
-  }, [mapsKey]);
-
-  // Load the Places (New) library when key is available
-  useEffect(() => {
-    if (!mapsKey || libRef.current) return;
-    let alive = true;
-    if (!document.getElementById('gmaps-places-script') && !window.google?.maps) {
-      const s = document.createElement('script');
-      s.id = 'gmaps-places-script';
-      s.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places&loading=async&v=weekly`;
-      s.async = true; s.defer = true;
-      document.body.appendChild(s);
-    }
-    let tries = 0;
-    const resolve = async () => {
-      if (!alive || libRef.current) return;
-      if (window.google?.maps?.places?.AutocompleteSuggestion) {
-        libRef.current = window.google.maps.places;
-        return;
+    const onDoc = (e) => {
+      if (boxRef.current && !boxRef.current.contains(e.target)) {
+        setOpen(false);
       }
-      if (window.google?.maps?.importLibrary) {
-        try {
-          const lib = await window.google.maps.importLibrary('places');
-          if (alive && lib?.AutocompleteSuggestion) {
-            libRef.current = lib;
-            return;
-          }
-        } catch (_) {}
-      }
-      if (tries++ < 50) setTimeout(resolve, 200);
     };
-    resolve();
-    return () => { alive = false; };
-  }, [mapsKey]);
-
-  // Close the dropdown on outside click.
-  useEffect(() => {
-    const onDoc = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
 
-  const ensureToken = () => {
-    const lib = libRef.current;
-    if (!tokenRef.current && lib?.AutocompleteSessionToken) tokenRef.current = new lib.AutocompleteSessionToken();
-    return tokenRef.current;
-  };
-
   const runSearch = async (text) => {
-    if (!text || text.length < 3) { setSuggestions([]); return; }
-    const lib = libRef.current;
-    if (!lib?.AutocompleteSuggestion?.fetchAutocompleteSuggestions) {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => runSearch(text), 400);
+    if (!text || text.length < 3) {
+      setSuggestions([]);
+      setOpen(false);
       return;
     }
-    const req = { input: text };
-    const countryList = Array.isArray(countries) ? countries.filter(Boolean) : (countries ? [countries] : []);
-    if (countryList.length > 0) {
-      req.includedRegionCodes = countryList.map(c => String(c).toLowerCase());
-    }
-    const tok = ensureToken();
-    if (tok) req.sessionToken = tok;
+    const countryList = Array.isArray(countries) ? countries.filter(Boolean) : (countries ? [countries] : ['us']);
+    const primaryCountry = countryList[0] || 'us';
+
+    setLoading(true);
     try {
-      const { suggestions: sugs } = await lib.AutocompleteSuggestion.fetchAutocompleteSuggestions(req);
-      setSuggestions((sugs || []).filter((s) => s.placePrediction));
-      setOpen(true);
+      const res = await axios.get(`${API_URL}/places/autocomplete`, {
+        params: { q: text, country: primaryCountry },
+        timeout: 4500,
+      });
+      const sugs = res.data?.suggestions || [];
+      if (Array.isArray(sugs) && sugs.length > 0) {
+        setSuggestions(sugs);
+        setOpen(true);
+      } else {
+        setSuggestions([]);
+      }
     } catch (_) {
       setSuggestions([]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -421,54 +400,101 @@ const AddressAutocomplete = ({ onPick, onTextChange, countries = ALLOWED_COUNTRI
     setQuery(v);
     if (onTextChange) onTextChange(v);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (mapsKey) {
-      debounceRef.current = setTimeout(() => runSearch(v.trim()), 350);
-    }
+    debounceRef.current = setTimeout(() => runSearch(v.trim()), 280);
   };
 
-  const choose = async (sug) => {
+  const choose = (sug) => {
     try {
-      const place = sug.placePrediction.toPlace();
-      await place.fetchFields({ fields: ['addressComponents', 'formattedAddress'] });
-      const comps = place.addressComponents || [];
-      const get = (type) => comps.find((c) => (c.types || []).includes(type));
-      const streetNumber = get('street_number')?.longText || '';
-      const route = get('route')?.longText || '';
-      const city = get('locality')?.longText || get('sublocality')?.longText || get('postal_town')?.longText || '';
-      const state = get('administrative_area_level_1')?.shortText || '';
-      const zip = get('postal_code')?.longText || '';
-      const street = `${streetNumber} ${route}`.trim() || place.formattedAddress || '';
+      const street = (sug.street || sug.description || '').trim();
+      const city = (sug.city || '').trim();
+      const rawState = (sug.state || '').trim();
+      const state = normalizeUsState(rawState);
+      const zip = (sug.zip || '').trim();
+
       if (onPick) onPick({ street, city, state, zip });
       if (onTextChange) onTextChange(street);
       setQuery(street);
     } catch (e) {
-      console.error('Place select error:', e);
+      console.error('[addr] Select error:', e);
     } finally {
-      setSuggestions([]); setOpen(false);
-      tokenRef.current = null;
+      setSuggestions([]);
+      setOpen(false);
     }
   };
 
-  // Resilient input container: always displays, works in both autocompleted and manual modes
   return (
-    <div ref={boxRef} style={{ position: 'relative', width: '100%' }}>
+    <div ref={boxRef} style={{ position: 'relative', width: '100%', ...style }}>
       <input
         value={query}
         onChange={(e) => onInput(e.target.value)}
-        onFocus={() => suggestions.length > 0 && setOpen(true)}
-        placeholder="Street address (e.g. 123 Main St)"
+        onFocus={() => { if (suggestions.length > 0) setOpen(true); }}
+        onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
+        placeholder={placeholder}
         autoComplete="address-line1"
-        style={{ width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8dbe6', padding: '0 12px', fontSize: 14, boxSizing: 'border-box', background: '#ffffff', color: '#111827' }}
+        required={required}
+        disabled={disabled}
+        style={{
+          width: '100%',
+          height: 42,
+          borderRadius: 8,
+          border: '1px solid #d8dbe6',
+          padding: '0 12px',
+          fontSize: 14,
+          boxSizing: 'border-box',
+          background: '#ffffff',
+          color: '#111827',
+          ...inputStyle,
+        }}
       />
+      {loading && (
+        <div style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#6366f1', pointerEvents: 'none' }}>
+          Searching…
+        </div>
+      )}
       {open && suggestions.length > 0 && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: '#fff', border: '1px solid #d8dbe6', borderRadius: 8, zIndex: 60, maxHeight: 260, overflowY: 'auto', boxShadow: '0 8px 22px rgba(0,0,0,0.14)' }}>
+        <div style={{
+          position: 'absolute',
+          top: 'calc(100% + 4px)',
+          left: 0,
+          right: 0,
+          background: '#ffffff',
+          border: '1px solid #d8dbe6',
+          borderRadius: 8,
+          zIndex: 1000,
+          maxHeight: 260,
+          overflowY: 'auto',
+          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1)'
+        }}>
           {suggestions.map((s, i) => {
-            const pp = s.placePrediction;
-            const label = pp?.text?.text || pp?.text || '';
+            const mainLabel = s.street || s.description?.split(',')[0] || s.description || '';
+            const subLabel = s.description || [s.city, s.state, s.zip, s.country].filter(Boolean).join(', ');
             return (
-              <div key={pp?.placeId || i} onMouseDown={(e) => { e.preventDefault(); choose(s); }}
-                style={{ padding: '10px 12px', cursor: 'pointer', fontSize: 13.5, borderBottom: i < suggestions.length - 1 ? '1px solid #f1f2f7' : 'none' }}>
-                📍 {label}
+              <div
+                key={s.id || s.placeId || i}
+                onMouseDown={(e) => { e.preventDefault(); choose(s); }}
+                style={{
+                  padding: '10px 12px',
+                  cursor: 'pointer',
+                  borderBottom: i < suggestions.length - 1 ? '1px solid #f1f2f7' : 'none',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 10,
+                  transition: 'background 0.15s ease'
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f8fafc'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#ffffff'; }}
+              >
+                <span style={{ fontSize: 16, marginTop: 1, flexShrink: 0 }}>📍</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ color: '#0f172a', fontWeight: 600, fontSize: 13.5, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {mainLabel}
+                  </div>
+                  {subLabel && subLabel !== mainLabel && (
+                    <div style={{ color: '#64748b', fontSize: 12, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
+                      {subLabel}
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -13207,20 +13233,6 @@ const LANGUAGE_CODES = [
   ['pt-BR', 'Portuguese (Brazil)'], ['it-IT', 'Italian (Italy)'],
   ['nl-NL', 'Dutch (Netherlands)'], ['ar', 'Arabic'], ['hi', 'Hindi'],
   ['ur', 'Urdu'], ['zh-CN', 'Chinese (Simplified)'], ['ja', 'Japanese'],
-];
-
-const US_STATES = [
-  ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'],
-  ['CO', 'Colorado'], ['CT', 'Connecticut'], ['DE', 'Delaware'], ['FL', 'Florida'], ['GA', 'Georgia'],
-  ['HI', 'Hawaii'], ['ID', 'Idaho'], ['IL', 'Illinois'], ['IN', 'Indiana'], ['IA', 'Iowa'],
-  ['KS', 'Kansas'], ['KY', 'Kentucky'], ['LA', 'Louisiana'], ['ME', 'Maine'], ['MD', 'Maryland'],
-  ['MA', 'Massachusetts'], ['MI', 'Michigan'], ['MN', 'Minnesota'], ['MS', 'Mississippi'], ['MO', 'Missouri'],
-  ['MT', 'Montana'], ['NE', 'Nebraska'], ['NV', 'Nevada'], ['NH', 'New Hampshire'], ['NJ', 'New Jersey'],
-  ['NM', 'New Mexico'], ['NY', 'New York'], ['NC', 'North Carolina'], ['ND', 'North Dakota'], ['OH', 'Ohio'],
-  ['OK', 'Oklahoma'], ['OR', 'Oregon'], ['PA', 'Pennsylvania'], ['RI', 'Rhode Island'], ['SC', 'South Carolina'],
-  ['SD', 'South Dakota'], ['TN', 'Tennessee'], ['TX', 'Texas'], ['UT', 'Utah'], ['VT', 'Vermont'],
-  ['VA', 'Virginia'], ['WA', 'Washington'], ['WV', 'West Virginia'], ['WI', 'Wisconsin'], ['WY', 'Wyoming'],
-  ['DC', 'District of Columbia'],
 ];
 
 function WooCommerceOnboardingFlow() {

@@ -15399,14 +15399,192 @@ app.get('/api/admin/google/dashboard', authenticateCustomer, async (req, res) =>
   }
 });
 
-// HEALTH CHECK
+// State code lookup for standard US abbreviations
+const US_STATE_NAME_TO_ABBR = {
+  'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR', 'california': 'CA',
+  'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE', 'florida': 'FL', 'georgia': 'GA',
+  'hawaii': 'HI', 'idaho': 'ID', 'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA',
+  'kansas': 'KS', 'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
+  'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS', 'missouri': 'MO',
+  'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV', 'new hampshire': 'NH', 'new jersey': 'NJ',
+  'new mexico': 'NM', 'new york': 'NY', 'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH',
+  'oklahoma': 'OK', 'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+  'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT', 'vermont': 'VT',
+  'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV', 'wisconsin': 'WI', 'wyoming': 'WY',
+  'district of columbia': 'DC',
+};
+function toUsStateAbbr(name) {
+  if (!name) return '';
+  const t = String(name).trim();
+  if (t.length === 2) return t.toUpperCase();
+  return US_STATE_NAME_TO_ABBR[t.toLowerCase()] || t;
+}
+
+// High-reliability Address Autocomplete Endpoint
+// Seamlessly proxies to Google Places if valid key exists, and falls back to open geocoding
+// so address autocomplete NEVER fails or breaks customer forms.
+app.get('/api/places/autocomplete', async (req, res) => {
+  try {
+    const q = String(req.query.q || req.query.query || req.query.input || '').trim();
+    const country = String(req.query.country || 'us').trim().toLowerCase();
+
+    if (!q || q.length < 3) {
+      return res.json({ suggestions: [] });
+    }
+
+    const gKey = (
+      process.env.GOOGLE_MAPS_API_KEY ||
+      process.env.REACT_APP_GOOGLE_MAPS_API_KEY ||
+      process.env.GOOGLE_MAP_API_KEY ||
+      process.env.GOOGLE_MAPS_KEY ||
+      process.env.MAPS_API_KEY ||
+      process.env.MAP_API_KEY ||
+      process.env.GOOGLE_PLACES_API_KEY ||
+      ''
+    ).trim().replace(/^["']|["']$/g, '');
+
+    // 1. Try Google Places API if key exists
+    if (gKey) {
+      try {
+        const gUrl = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(q)}&types=address&components=country:${country}&key=${gKey}`;
+        const gRes = await axios.get(gUrl, { timeout: 3500 });
+        if (gRes.data && gRes.data.status === 'OK' && Array.isArray(gRes.data.predictions)) {
+          const suggestions = gRes.data.predictions.map(p => ({
+            id: p.place_id,
+            description: p.description,
+            placeId: p.place_id,
+            source: 'google',
+          }));
+          return res.json({ suggestions, source: 'google' });
+        }
+      } catch (gErr) {
+        console.warn('[Places Autocomplete] Google API note:', gErr.message);
+      }
+    }
+
+    // 2. High-speed resilient open geocoder fallback (Nominatim)
+    try {
+      const geoUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&countrycodes=${encodeURIComponent(country)}&format=json&addressdetails=1&limit=5`;
+      const geoRes = await axios.get(geoUrl, {
+        headers: { 'User-Agent': 'GoogleWorkspaceResellerPortal/1.0' },
+        timeout: 4000,
+      });
+
+      if (Array.isArray(geoRes.data) && geoRes.data.length > 0) {
+        const suggestions = geoRes.data.map((item, idx) => {
+          const addr = item.address || {};
+          const streetNum = addr.house_number || '';
+          const streetName = addr.road || addr.pedestrian || addr.street || addr.footway || '';
+          const street = [streetNum, streetName].filter(Boolean).join(' ') || item.name || '';
+          const city = addr.city || addr.town || addr.village || addr.suburb || addr.municipality || addr.county || '';
+          const rawState = addr.state || addr.province || addr.region || '';
+          const state = (country === 'us' || !addr.country_code || addr.country_code === 'us') ? toUsStateAbbr(rawState) : rawState;
+          const zip = addr.postcode || '';
+          const countryName = addr.country || '';
+          return {
+            id: item.place_id || String(idx),
+            description: item.display_name,
+            street,
+            city,
+            state,
+            zip,
+            country: countryName,
+            source: 'open',
+          };
+        });
+        return res.json({ suggestions, source: 'open' });
+      }
+    } catch (openErr) {
+      console.warn('[Places Autocomplete] Nominatim fallback note:', openErr.message);
+    }
+
+    // 3. Photon secondary open geocoder fallback
+    try {
+      const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=5`;
+      const pRes = await axios.get(photonUrl, { timeout: 3500 });
+      if (pRes.data && Array.isArray(pRes.data.features)) {
+        const suggestions = pRes.data.features.map((f, idx) => {
+          const p = f.properties || {};
+          const street = [p.housenumber, p.street].filter(Boolean).join(' ') || p.name || '';
+          const city = p.city || p.town || '';
+          const rawState = p.state || '';
+          const state = (country === 'us' || !p.countrycode || p.countrycode.toLowerCase() === 'us') ? toUsStateAbbr(rawState) : rawState;
+          const zip = p.postcode || '';
+          const full = [street, city, state, zip, p.country].filter(Boolean).join(', ');
+          return {
+            id: String(p.osm_id || idx),
+            description: full,
+            street,
+            city,
+            state,
+            zip,
+            country: p.country,
+            source: 'photon',
+          };
+        });
+        return res.json({ suggestions, source: 'photon' });
+      }
+    } catch (_) {}
+
+    return res.json({ suggestions: [] });
+  } catch (err) {
+    res.json({ suggestions: [] });
+  }
+});
+
+// Google Place Details proxy for client selection
+app.get('/api/places/details', async (req, res) => {
+  try {
+    const placeId = req.query.placeId || req.query.place_id;
+    const gKey = (
+      process.env.GOOGLE_MAPS_API_KEY ||
+      process.env.REACT_APP_GOOGLE_MAPS_API_KEY ||
+      process.env.GOOGLE_MAP_API_KEY ||
+      process.env.GOOGLE_PLACES_API_KEY ||
+      ''
+    ).trim().replace(/^["']|["']$/g, '');
+
+    if (!placeId || !gKey) {
+      return res.status(400).json({ error: 'Missing placeId or Google key' });
+    }
+
+    const gUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=address_component,formatted_address&key=${gKey}`;
+    const gRes = await axios.get(gUrl, { timeout: 4000 });
+    const result = gRes.data?.result;
+    if (!result) return res.status(404).json({ error: 'Place not found' });
+
+    const comps = result.address_components || [];
+    const get = (type) => comps.find((c) => (c.types || []).includes(type));
+    const streetNumber = get('street_number')?.long_name || '';
+    const route = get('route')?.long_name || '';
+    const city = get('locality')?.long_name || get('sublocality')?.long_name || get('postal_town')?.long_name || '';
+    const rawState = get('administrative_area_level_1')?.short_name || get('administrative_area_level_1')?.long_name || '';
+    const state = toUsStateAbbr(rawState);
+    const zip = get('postal_code')?.long_name || '';
+    const street = `${streetNumber} ${route}`.trim() || result.formatted_address || '';
+
+    res.json({ street, city, state, zip, formattedAddress: result.formatted_address });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// HEALTH CHECK & MAPS KEY
 // Serve the Google Maps browser key at runtime so the frontend address
 // autocomplete works without a build-time REACT_APP_GOOGLE_MAPS_API_KEY.
-// Maps JS keys are meant to be public (restrict by HTTP referrer / API in
-// Google Cloud Console); this just avoids baking it into the React build.
 app.get('/api/config/maps-key', (req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=3600');
-  res.json({ key: process.env.GOOGLE_MAPS_API_KEY || process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '' });
+  const key = (
+    process.env.GOOGLE_MAPS_API_KEY ||
+    process.env.REACT_APP_GOOGLE_MAPS_API_KEY ||
+    process.env.GOOGLE_MAP_API_KEY ||
+    process.env.GOOGLE_MAPS_KEY ||
+    process.env.MAPS_API_KEY ||
+    process.env.MAP_API_KEY ||
+    process.env.GOOGLE_PLACES_API_KEY ||
+    ''
+  ).trim().replace(/^["']|["']$/g, '');
+  res.json({ key });
 });
 
 app.get('/api/health', (req, res) => {
